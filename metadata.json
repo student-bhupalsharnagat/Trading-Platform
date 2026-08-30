@@ -1,0 +1,6 @@
+{
+  "name": "VERTEX Trading",
+  "description": "Production-ready authentication module and trading interface for VERTEX with OTP verification, secure session cookies, and demo trading.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
