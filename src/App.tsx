@@ -18,7 +18,7 @@ function AppContent() {
     if (['/login', '/verify-otp', '/forgot-password', '/reset-password', '/dashboard', '/register'].includes(path)) {
       return path;
     }
-    return '/register';
+    return '/login';
   });
 
   const [routeState, setRouteState] = useState<any>({});

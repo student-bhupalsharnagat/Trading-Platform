@@ -70,6 +70,8 @@ export const Login: React.FC<LoginProps> = ({ onNavigate }) => {
 
   return (
     <AuthCard
+      title="Welcome Back"
+      subtitle="Sign in to access your live trading dashboard"
       footer={
         <div className="flex flex-col items-center space-y-2 text-xs">
           <p className="text-slate-400">
@@ -82,19 +84,38 @@ export const Login: React.FC<LoginProps> = ({ onNavigate }) => {
               Reset here
             </button>
           </p>
-          <p className="text-slate-400">
-            Don't have an account?{' '}
-            <button
-              type="button"
-              onClick={() => onNavigate('/register')}
-              className="text-[#FF7A00] font-semibold hover:text-orange-300 transition-colors ml-1 cursor-pointer"
-            >
-              Create account
-            </button>
-          </p>
+          <div className="pt-2 border-t border-[#1E293B] w-full text-center">
+            <p className="text-slate-400">
+              New to VERTEX?{' '}
+              <button
+                type="button"
+                onClick={() => onNavigate('/register')}
+                className="text-[#FF7A00] font-bold hover:text-orange-300 transition-colors ml-1 cursor-pointer inline-flex items-center gap-1"
+              >
+                Create Account →
+              </button>
+            </p>
+          </div>
         </div>
       }
     >
+      {/* Auth Mode Switcher (Login first, Create Account below/toggle) */}
+      <div className="grid grid-cols-2 p-1 bg-[#080E18] rounded-xl border border-[#1A2638] mb-5">
+        <button
+          type="button"
+          className="py-2 text-xs font-bold rounded-lg bg-orange-500 text-slate-950 shadow-sm transition-all cursor-pointer"
+        >
+          Sign In
+        </button>
+        <button
+          type="button"
+          onClick={() => onNavigate('/register')}
+          className="py-2 text-xs font-bold rounded-lg text-slate-400 hover:text-slate-200 transition-all cursor-pointer"
+        >
+          Create Account
+        </button>
+      </div>
+
       <form onSubmit={handleSubmit} noValidate>
         {/* User ID / Mobile No. */}
         <AuthInput

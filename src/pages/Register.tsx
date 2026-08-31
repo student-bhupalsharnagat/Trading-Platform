@@ -132,19 +132,39 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
   return (
     <AuthCard
       title="Create your account"
+      subtitle="Join VERTEX and trade Multi-Asset Markets in real-time"
       footer={
-        <p className="text-slate-400">
-          Already have an account?{' '}
-          <button
-            type="button"
-            onClick={() => onNavigate('/login')}
-            className="text-orange-400 font-semibold hover:text-orange-300 transition-colors ml-1 cursor-pointer"
-          >
-            Login here
-          </button>
-        </p>
+        <div className="flex flex-col items-center space-y-2 text-xs">
+          <p className="text-slate-400">
+            Already have an account?{' '}
+            <button
+              type="button"
+              onClick={() => onNavigate('/login')}
+              className="text-[#FF7A00] font-bold hover:text-orange-300 transition-colors ml-1 cursor-pointer"
+            >
+              Sign In here →
+            </button>
+          </p>
+        </div>
       }
     >
+      {/* Auth Mode Switcher */}
+      <div className="grid grid-cols-2 p-1 bg-[#080E18] rounded-xl border border-[#1A2638] mb-5">
+        <button
+          type="button"
+          onClick={() => onNavigate('/login')}
+          className="py-2 text-xs font-bold rounded-lg text-slate-400 hover:text-slate-200 transition-all cursor-pointer"
+        >
+          Sign In
+        </button>
+        <button
+          type="button"
+          className="py-2 text-xs font-bold rounded-lg bg-orange-500 text-slate-950 shadow-sm transition-all cursor-pointer"
+        >
+          Create Account
+        </button>
+      </div>
+
       <form onSubmit={handleSubmit} noValidate>
         {/* 1. Full Name */}
         <AuthInput

@@ -1,4 +1,4 @@
-import React, { ReactNode } from 'react';
+import React, { ReactNode, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth.ts';
 
 interface ProtectedRouteProps {
@@ -11,6 +11,12 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   onRedirectToLogin,
 }) => {
   const { user, loading } = useAuth();
+
+  useEffect(() => {
+    if (!loading && !user) {
+      onRedirectToLogin();
+    }
+  }, [loading, user, onRedirectToLogin]);
 
   if (loading) {
     return (
@@ -26,9 +32,9 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   }
 
   if (!user) {
-    onRedirectToLogin();
     return null;
   }
 
   return <>{children}</>;
 };
+
