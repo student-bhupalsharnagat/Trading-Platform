@@ -26,20 +26,20 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({
   return (
     <div
       id="vertex-toast-container"
-      className="fixed top-4 right-4 z-50 flex flex-col space-y-2.5 max-w-sm w-full pointer-events-none"
+      className="fixed top-3 left-1/2 -translate-x-1/2 z-[100] flex flex-col space-y-2 max-w-md w-[92vw] sm:w-full pointer-events-none items-center"
     >
       {toasts.map((toast) => (
         <div
           key={toast.id}
           id={`toast-${toast.id}`}
-          className={`pointer-events-auto rounded-xl p-3.5 border shadow-2xl backdrop-blur-md transition-all duration-300 transform translate-y-0 ${
+          className={`pointer-events-auto w-full rounded-2xl p-4 border shadow-2xl backdrop-blur-xl transition-all duration-300 transform translate-y-0 animate-slideDown ${
             toast.type === 'otp'
-              ? 'bg-[#0B1320]/95 border-orange-500/50 text-slate-100 shadow-orange-950/30'
+              ? 'bg-[#0B1320]/95 border-orange-500/60 text-slate-100 shadow-orange-950/40 ring-1 ring-orange-500/30'
               : toast.type === 'error'
-              ? 'bg-[#180B0F]/95 border-rose-500/40 text-rose-100 shadow-rose-950/30'
+              ? 'bg-[#180B0F]/95 border-rose-500/60 text-rose-100 shadow-rose-950/40 ring-1 ring-rose-500/30'
               : toast.type === 'success'
-              ? 'bg-[#081812]/95 border-emerald-500/40 text-emerald-100 shadow-emerald-950/30'
-              : 'bg-[#0E1626]/95 border-slate-700/60 text-slate-100 shadow-black/40'
+              ? 'bg-[#061810]/95 border-emerald-500/60 text-emerald-100 shadow-emerald-950/50 ring-1 ring-emerald-500/40'
+              : 'bg-[#0E1626]/95 border-slate-700/60 text-slate-100 shadow-black/50 ring-1 ring-slate-700/30'
           }`}
         >
           <div className="flex items-start justify-between gap-3">

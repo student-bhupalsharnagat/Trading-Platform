@@ -135,8 +135,9 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
 
       showToast({
         type: 'success',
-        title: `${actionType} Order Executed`,
-        description: `${actionType} ${effectiveLots} lot(s) of ${instrument.symbol} at ₹${currentPrice.toLocaleString('en-IN')}`,
+        title: `✅ ${actionType === 'BUY' ? 'BUY ASK' : 'SELL BID'} Order Executed!`,
+        description: `Successfully executed ${actionType} for ${effectiveLots} lot(s) (${effectiveLots * (instrument.lotSize || 1)} Qty) of ${instrument.symbol} at ₹${currentPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}.`,
+        duration: 4500,
       });
 
       if (onOrderPlaced) onOrderPlaced();
