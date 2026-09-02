@@ -8,6 +8,9 @@ import { LiveChart } from '../components/LiveChart.tsx';
 import { ProfileDashboard } from '../components/ProfileDashboard.tsx';
 import { MarketClosedModal } from '../components/MarketClosedModal.tsx';
 import { WalletModal } from '../components/WalletModal.tsx';
+import { LanguageSelector } from '../components/LanguageSelector.tsx';
+import { QuickTour } from '../components/QuickTour.tsx';
+import { useLanguage } from '../context/LanguageContext.tsx';
 import { getMarketHoursInfo, MarketHoursInfo } from '../utils/marketHours.ts';
 import {
   Wallet,
@@ -39,9 +42,10 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const { user, logout, showToast } = useAuth();
+  const { t } = useLanguage();
 
   // Navigation & Sub-views
-  const [activeNav, setActiveNav] = useState<'watchlist' | 'orders' | 'positions' | 'profile'>('watchlist');
+  const [activeNav, setActiveNav] = useState<'watchlist' | 'orders' | 'positions' | 'history' | 'profile'>('watchlist');
   const [activeTab, setActiveTab] = useState<'ALL' | 'CRYPTO' | 'EQUITY' | 'FOREX' | 'COMMODITY' | 'INDEX'>('ALL');
   const [positionFilter, setPositionFilter] = useState<'ALL' | 'INTRADAY' | 'HOLDING'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
@@ -67,6 +71,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const [isWalletDrawerOpen, setIsWalletDrawerOpen] = useState(false);
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
+
+  // Quick Tour states
+  const [isTourOpen, setIsTourOpen] = useState(false);
+  const [tourStep, setTourStep] = useState(0);
+
+  // Trigger quick tour upon sign in / demo login or first-time visit
+  useEffect(() => {
+    const shouldShowFromLogin = sessionStorage.getItem('goldfut_show_tour') === 'true';
+    const hasCompletedBefore = localStorage.getItem('goldfut_tour_completed') === 'true';
+    if (shouldShowFromLogin || !hasCompletedBefore) {
+      setIsTourOpen(true);
+      sessionStorage.removeItem('goldfut_show_tour');
+    }
+  }, []);
+
+  const handleOpenInstrumentForTour = () => {
+    const inst = filteredInstruments[0] || instruments[0];
+    if (inst) {
+      setOrderWindowInstrument(inst);
+      setOrderWindowInitialType('BUY');
+    }
+  };
+
+  const handleCloseInstrumentForTour = () => {
+    setOrderWindowInstrument(null);
+  };
 
   // Fetch live market data and user portfolio
   const fetchData = async () => {
@@ -206,75 +236,74 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   return (
     <div className="min-h-screen bg-[#060B13] text-slate-100 flex flex-col font-sans selection:bg-orange-500/30">
-      {/* Top Header Bar matching Screenshot 2 & 3 */}
+      {/* Top Header Bar matching Screenshot 1 & 2 */}
       <header className="sticky top-0 z-30 bg-[#0B111C]/95 border-b border-[#1A2638] px-3 sm:px-4 py-2.5 backdrop-blur-md">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
-          {/* User Profile Badge */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center font-bold font-mono text-sm text-slate-950 shadow-md shadow-orange-950/40">
-              VX
+          {/* Brand Logo & Name matching Screenshot 1 & 2: "GF" + "GoldFut" */}
+          <div
+            onClick={() => setActiveNav('watchlist')}
+            className="flex items-center gap-2.5 cursor-pointer select-none group"
+            title="GoldFut Trading"
+          >
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-amber-500 flex items-center justify-center font-black text-slate-950 text-sm shadow-md shadow-amber-500/20 group-hover:scale-105 transition-transform">
+              GF
             </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-slate-400">Hello</span>
-                <span className="text-sm font-bold text-white tracking-tight">
-                  {user?.fullName || 'Demo User'}
-                </span>
-                <span className="text-xs text-amber-400 font-mono">
-                  ({user?.userId ? user.userId.toUpperCase() : 'VTX123'})
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span>Account:</span>
-                <span className="text-emerald-400 font-medium flex items-center gap-0.5">
-                  <CheckCircle className="w-3 h-3 inline" /> Verified
-                </span>
-                {isDemo && (
-                  <span className="ml-1 px-1.5 py-0.2 bg-amber-500/20 border border-amber-500/40 rounded text-[10px] font-bold text-amber-400 tracking-wider">
-                    DEMO
-                  </span>
-                )}
-              </div>
+            <div className="flex flex-col">
+              <span className="text-base sm:text-lg font-black text-amber-400 tracking-tight leading-none group-hover:text-amber-300 transition-colors">
+                GoldFut
+              </span>
+              <span className="text-[10px] text-slate-400 font-medium">
+                Trading Platform
+              </span>
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex items-center gap-2">
+          {/* Action Buttons: Language Selector + Notifications + User Avatar */}
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* Language Selector Dropdown in top right side corner matching Screenshot 1 & 2 */}
+            <LanguageSelector />
+
             {/* Wallet Funds Button */}
             <button
               type="button"
               id="header-wallet-btn"
               onClick={() => setIsWalletModalOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 text-amber-400 hover:text-amber-300 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm active:scale-95"
+              className="hidden sm:flex px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 text-amber-400 hover:text-amber-300 font-semibold text-xs items-center gap-1.5 transition-colors cursor-pointer shadow-sm active:scale-95"
               title="Open Wallet & Funds"
             >
               <Wallet className="w-3.5 h-3.5" />
-              <span>Wallet</span>
+              <span>{t('wallet')}</span>
             </button>
 
             {/* Notification Bell */}
             <button
               type="button"
-              onClick={() => {
-                setActiveNav('profile');
-              }}
-              className="w-8 h-8 rounded-lg bg-[#0E1626] hover:bg-slate-800 border border-slate-700/60 flex items-center justify-center text-slate-300 hover:text-white transition-colors cursor-pointer relative"
+              id="header-notification-btn"
+              onClick={() => setActiveNav('profile')}
+              className="w-8 h-8 rounded-xl bg-[#0E1626] hover:bg-slate-800 border border-slate-700/60 flex items-center justify-center text-slate-300 hover:text-white transition-colors cursor-pointer relative active:scale-95"
               aria-label="Notifications"
+              title="Notifications"
             >
               <Bell className="w-4 h-4" />
-              <span className="absolute top-1 right-1 w-2 h-2 bg-amber-500 rounded-full" />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-amber-500 rounded-full" />
             </button>
 
-            {/* Logout Button */}
+            {/* User Avatar Circle (e.g. RK) matching Screenshot 1 & 2 */}
             <button
               type="button"
-              onClick={handleLogout}
-              className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 hover:text-rose-300 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
-              title="Sign Out"
+              id="header-profile-avatar-btn"
+              onClick={() => setActiveNav('profile')}
+              className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-xs font-black text-slate-950 shadow-md cursor-pointer hover:ring-2 hover:ring-amber-400/50 transition-all font-mono active:scale-95"
+              title={`Profile: ${user?.fullName || 'User'}`}
             >
-              <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Logout</span>
+              {user?.fullName
+                ? user.fullName
+                    .split(' ')
+                    .map((n: string) => n[0])
+                    .join('')
+                    .slice(0, 2)
+                    .toUpperCase()
+                : 'RK'}
             </button>
           </div>
         </div>
@@ -378,55 +407,95 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           </div>
         </div>
 
-        {/* 1. WATCHLIST TAB matching Screenshot 2 */}
+        {/* 1. WATCHLIST TAB matching Screenshot 1 */}
         {activeNav === 'watchlist' && (
           <div className="space-y-3.5">
-            {/* Title with Live Indicator */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg sm:text-xl font-extrabold text-white tracking-tight flex items-center gap-1.5">
-                  Watchlist <ChevronDown className="w-4 h-4 text-slate-400" />
-                </h2>
+            {/* 3-Metric Summary Bar matching Screenshot 1 */}
+            <div className="grid grid-cols-3 gap-2 py-3 px-3.5 sm:px-4 rounded-2xl bg-[#0B111C] border border-[#1A2638] text-center shadow-md">
+              {/* Available Margin */}
+              <button
+                type="button"
+                onClick={() => setIsWalletModalOpen(true)}
+                className="text-left cursor-pointer hover:opacity-90 transition-opacity"
+                title="Click to view Wallet & Funds"
+              >
+                <div className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider truncate">
+                  {t('availableMargin')}
+                </div>
+                <div className="text-sm sm:text-base lg:text-lg font-mono font-black text-white tracking-tight mt-0.5 truncate">
+                  ₹{(portfolio?.wallet?.availableBalance ?? 242680).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                </div>
+              </button>
+
+              {/* Today's P&L */}
+              <div className="text-center">
+                <div className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider truncate">
+                  {t('todayPnl')}
+                </div>
+                <div className="text-sm sm:text-base lg:text-lg font-mono font-black text-emerald-400 tracking-tight mt-0.5 truncate">
+                  +₹{(portfolio?.wallet?.todayPnL ?? 4820).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                </div>
               </div>
-              <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-medium font-mono">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                <span>• Live Feed</span>
+
+              {/* Overall P&L */}
+              <div className="text-right">
+                <div className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider truncate">
+                  {t('overallPnl')}
+                </div>
+                <div className="text-sm sm:text-base lg:text-lg font-mono font-black text-emerald-400 tracking-tight mt-0.5 truncate">
+                  +₹{(portfolio?.wallet?.totalPnL ?? 21268).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                </div>
               </div>
             </div>
 
-            {/* Category Tabs matching screenshot: ALL, CRYPTO, EQUITY, FOREX, COMMODITY, INDEX */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar border-b border-[#1E293B]">
-              {(['ALL', 'CRYPTO', 'EQUITY', 'FOREX', 'COMMODITY', 'INDEX'] as const).map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setActiveTab(tab)}
-                  className={`px-3 py-1.5 text-xs font-bold tracking-wider rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-                    activeTab === tab
-                      ? 'text-amber-400 border-b-2 border-amber-500 bg-amber-500/10'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
-
-            {/* Instrument Search Bar */}
-            <div className="relative">
+            {/* Instrument Search Bar matching Screenshot 1 */}
+            <div id="tour-target-search" className="relative">
               <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search instruments... e.g. GOLD, SILVER, NIFTY, BTC"
+                placeholder={t('searchPlaceholder')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-[#080E18] border border-[#1B273A] focus:border-amber-500 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-200 placeholder-slate-500 outline-none transition-all font-sans"
               />
             </div>
 
-            {/* Instrument Cards List matching Screenshot 3 */}
-            <div className="space-y-4">
-              {filteredInstruments.map((inst) => {
+            {/* Category Filter Pills matching Screenshot 1: ALL, CRYPTO, EQUITY, FOREX, COMMODITY */}
+            <div id="tour-target-categories" className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+              {(['ALL', 'CRYPTO', 'EQUITY', 'FOREX', 'COMMODITY'] as const).map((tab) => {
+                const isSelected = activeTab === tab;
+                const tabKey = tab.toLowerCase();
+                const label = t(tabKey) || tab;
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setActiveTab(tab)}
+                    className={`px-3.5 sm:px-4 py-1.5 text-xs font-bold tracking-wider rounded-lg transition-all cursor-pointer whitespace-nowrap active:scale-95 ${
+                      isSelected
+                        ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                        : 'bg-[#0B111C] border border-[#1E2E44] text-slate-400 hover:text-white hover:border-slate-600'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Watchlist Subheader matching Screenshot 1 */}
+            <div className="flex items-center justify-between pt-1">
+              <h2 className="text-xs sm:text-sm font-black text-slate-400 tracking-wider uppercase">
+                {t('watchlist')}
+              </h2>
+              <span className="text-xs text-slate-500 font-mono">
+                {filteredInstruments.length} {t('instruments')}
+              </span>
+            </div>
+
+            {/* Instrument Cards List matching Screenshot 1 */}
+            <div id="tour-target-watchlist" className="space-y-4">
+              {filteredInstruments.map((inst, index) => {
                 const isPositive = inst.change >= 0;
                 const isFav = favorites[inst.id] || false;
 
@@ -439,6 +508,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
                     {/* Instrument Card */}
                     <div
+                      id={index === 0 ? 'tour-target-first-instrument' : undefined}
                       onClick={() => handleOpenOrder(inst, 'BUY')}
                       className="p-4 sm:p-5 bg-[#0A101C] hover:bg-[#0E1626] border border-[#162234] hover:border-[#223550] rounded-2xl transition-all duration-150 shadow-lg cursor-pointer select-none group"
                     >
@@ -939,7 +1009,71 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           );
         })()}
 
-        {/* 4. USER DASHBOARD / PROFILE TAB matching Screenshot 3 */}
+        {/* 4. HISTORY TAB */}
+        {activeNav === 'history' && (
+          <div className="space-y-4 animate-fadeIn">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-white">{t('history')} & Trades</h2>
+              <button
+                type="button"
+                onClick={() => setIsWalletModalOpen(true)}
+                className="px-3 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <Wallet className="w-3.5 h-3.5" />
+                <span>Wallet Ledger</span>
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              {portfolio?.orders?.map((ord) => (
+                <div
+                  key={ord.id}
+                  className="p-4 bg-[#0B111C] border border-[#1A2638] rounded-xl flex items-center justify-between flex-wrap gap-2"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                          ord.type === 'BUY'
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                            : 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
+                        }`}
+                      >
+                        {ord.type}
+                      </span>
+                      <h3 className="font-extrabold text-sm text-white">{ord.symbol}</h3>
+                      <span className="text-xs text-slate-400 font-mono">#{ord.id}</span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1 font-mono">
+                      Lots: <span className="text-white font-bold">{ord.lots || 1}</span> ({ord.qty} Qty) • Rate: ₹
+                      {ord.price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <span className="px-2 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded text-xs font-bold font-mono">
+                      {ord.status}
+                    </span>
+                    <div className="text-[10px] text-slate-500 font-mono mt-1">
+                      {ord.time} · {ord.date}
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {(!portfolio?.orders || portfolio.orders.length === 0) && (
+                <div className="text-center py-12 px-4 bg-[#0B111C] border border-[#1A2638] rounded-2xl">
+                  <Clock className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+                  <p className="text-sm font-bold text-white">No Trade History Yet</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Your executed orders and transaction logs will be listed here.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 5. USER DASHBOARD / PROFILE TAB matching Screenshot 3 */}
         {activeNav === 'profile' && user && (
           <ProfileDashboard
             user={user}
@@ -961,6 +1095,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         <OrderWindow
           instrument={orderWindowInstrument}
           initialType={orderWindowInitialType}
+          marketClosedOverride={marketClosedOverride}
           onClose={() => setOrderWindowInstrument(null)}
           onOpenLiveChart={(inst) => {
             setOrderWindowInstrument(null);
@@ -968,18 +1103,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           }}
           onOrderPlaced={() => {
             setOrderWindowInstrument(null);
+            setSelectedChartInstrument(null);
             setActiveNav('positions');
             fetchData();
           }}
         />
       )}
 
-      {/* Bottom Sticky Navigation Bar matching Screenshot 3 */}
+      {/* Bottom Sticky Navigation Bar matching Screenshot 1 */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 bg-[#080E18]/95 border-t border-[#1A2638] backdrop-blur-md">
-        <div className="max-w-md mx-auto grid grid-cols-4 py-2 px-3">
+        <div className="max-w-lg mx-auto grid grid-cols-5 py-2 px-2">
           {/* Watchlist */}
           <button
             type="button"
+            id="nav-watchlist-btn"
             onClick={() => setActiveNav('watchlist')}
             className={`flex flex-col items-center gap-1 py-1 transition-colors cursor-pointer relative ${
               activeNav === 'watchlist' ? 'text-amber-400' : 'text-slate-400 hover:text-slate-200'
@@ -988,23 +1125,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             {activeNav === 'watchlist' && (
               <span className="absolute -top-2 w-8 h-1 bg-amber-400 rounded-full" />
             )}
-            <div
-              className={`w-4 h-4 border-2 ${
-                activeNav === 'watchlist' ? 'border-amber-400' : 'border-slate-400'
-              } rounded-xs flex items-center justify-center`}
-            >
-              <div
-                className={`w-1.5 h-1.5 ${
-                  activeNav === 'watchlist' ? 'bg-amber-400' : 'bg-transparent'
-                } rounded-xs`}
-              />
-            </div>
-            <span className="text-[10px] font-semibold tracking-wider">Watchlist</span>
+            <Star className={`w-4 h-4 ${activeNav === 'watchlist' ? 'fill-amber-400' : ''}`} />
+            <span className="text-[9px] sm:text-[10px] font-bold tracking-wider uppercase truncate max-w-[64px]">
+              {t('watchlist')}
+            </span>
           </button>
 
           {/* Orders */}
           <button
             type="button"
+            id="nav-orders-btn"
             onClick={() => setActiveNav('orders')}
             className={`flex flex-col items-center gap-1 py-1 transition-colors cursor-pointer relative ${
               activeNav === 'orders' ? 'text-amber-400' : 'text-slate-400 hover:text-slate-200'
@@ -1013,13 +1143,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             {activeNav === 'orders' && (
               <span className="absolute -top-2 w-8 h-1 bg-amber-400 rounded-full" />
             )}
-            <Menu className="w-4 h-4" />
-            <span className="text-[10px] font-semibold tracking-wider">Orders</span>
+            <BookOpen className="w-4 h-4" />
+            <span className="text-[9px] sm:text-[10px] font-bold tracking-wider uppercase truncate max-w-[64px]">
+              {t('orders')}
+            </span>
           </button>
 
-          {/* Positions */}
+          {/* Portfolio (Positions) */}
           <button
             type="button"
+            id="nav-portfolio-btn"
             onClick={() => setActiveNav('positions')}
             className={`flex flex-col items-center gap-1 py-1 transition-colors cursor-pointer relative ${
               activeNav === 'positions' ? 'text-amber-400' : 'text-slate-400 hover:text-slate-200'
@@ -1028,13 +1161,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             {activeNav === 'positions' && (
               <span className="absolute -top-2 w-8 h-1 bg-amber-400 rounded-full" />
             )}
-            <BookOpen className="w-4 h-4" />
-            <span className="text-[10px] font-semibold tracking-wider">Positions</span>
+            <TrendingUp className="w-4 h-4" />
+            <span className="text-[9px] sm:text-[10px] font-bold tracking-wider uppercase truncate max-w-[64px]">
+              {t('portfolio')}
+            </span>
           </button>
 
-          {/* User Profile (VTX123) with Active Yellow Bar matching Screenshot 3 */}
+          {/* History */}
           <button
             type="button"
+            id="nav-history-btn"
+            onClick={() => setActiveNav('history')}
+            className={`flex flex-col items-center gap-1 py-1 transition-colors cursor-pointer relative ${
+              activeNav === 'history' ? 'text-amber-400' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            {activeNav === 'history' && (
+              <span className="absolute -top-2 w-8 h-1 bg-amber-400 rounded-full" />
+            )}
+            <Clock className="w-4 h-4" />
+            <span className="text-[9px] sm:text-[10px] font-bold tracking-wider uppercase truncate max-w-[64px]">
+              {t('history')}
+            </span>
+          </button>
+
+          {/* Profile */}
+          <button
+            type="button"
+            id="nav-profile-btn"
             onClick={() => setActiveNav('profile')}
             className={`flex flex-col items-center gap-1 py-1 transition-colors cursor-pointer relative ${
               activeNav === 'profile' ? 'text-amber-400' : 'text-slate-400 hover:text-slate-200'
@@ -1043,15 +1197,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             {activeNav === 'profile' && (
               <span className="absolute -top-2 w-8 h-1 bg-amber-400 rounded-full" />
             )}
-            <div
-              className={`w-4 h-4 rounded-full border-2 ${
-                activeNav === 'profile' ? 'border-amber-400 bg-amber-400/20' : 'border-slate-400'
-              } flex items-center justify-center text-[8px] font-bold font-mono`}
-            >
-              U
-            </div>
-            <span className="text-[10px] font-semibold tracking-wider font-mono">
-              {user?.userId ? user.userId.toUpperCase() : 'VTX123'}
+            <UserIcon className="w-4 h-4" />
+            <span className="text-[9px] sm:text-[10px] font-bold tracking-wider uppercase truncate max-w-[64px]">
+              {t('profile')}
             </span>
           </button>
         </div>
@@ -1063,6 +1211,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           instrument={orderWindowInstrument}
           initialType={orderWindowInitialType}
           marketClosedOverride={marketClosedOverride}
+          tourStep={tourStep}
           onClose={() => setOrderWindowInstrument(null)}
           onOpenLiveChart={(inst) => {
             setOrderWindowInstrument(null);
@@ -1100,6 +1249,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         onClose={() => setIsWalletModalOpen(false)}
         onRefresh={fetchData}
       />
+
+      {/* Quick Tour Guided Feature matching Screenshots */}
+      <QuickTour
+        isOpen={isTourOpen}
+        onClose={() => setIsTourOpen(false)}
+        onStepChange={(step) => setTourStep(step)}
+        onOpenInstrumentForTour={handleOpenInstrumentForTour}
+        onCloseInstrumentForTour={handleCloseInstrumentForTour}
+      />
+
+      {/* Floating Help / Tour Button matching Screenshots 1, 7, 8, 9 */}
+      {!isTourOpen && (
+        <button
+          type="button"
+          id="quick-tour-floating-help-btn"
+          onClick={() => {
+            setIsTourOpen(true);
+            setTourStep(0);
+          }}
+          className="fixed bottom-20 sm:bottom-6 right-4 sm:right-6 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-white hover:bg-slate-100 text-slate-950 font-bold text-base shadow-2xl flex items-center justify-center border border-slate-200 z-30 cursor-pointer transition-transform hover:scale-110 active:scale-95 select-none"
+          title="How to use GoldFut Platform - Guided Tour"
+          aria-label="Platform Tour & Help"
+        >
+          ?
+        </button>
+      )}
     </div>
   );
 };

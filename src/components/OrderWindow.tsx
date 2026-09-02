@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Instrument } from '../types.ts';
 import { useAuth } from '../hooks/useAuth.ts';
 import { authApi } from '../services/authApi.ts';
@@ -24,6 +24,7 @@ interface OrderWindowProps {
   instrument: Instrument;
   initialType?: 'BUY' | 'SELL';
   marketClosedOverride?: boolean | null;
+  tourStep?: number;
   onClose: () => void;
   onOpenLiveChart?: (instrument: Instrument) => void;
   onOrderPlaced?: () => void;
@@ -33,6 +34,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
   instrument,
   initialType = 'BUY',
   marketClosedOverride = null,
+  tourStep,
   onClose,
   onOpenLiveChart,
   onOrderPlaced,
@@ -42,6 +44,15 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
   // Active View Tab inside Order Window: 'ORDER' or 'CHART'
   const [activeView, setActiveView] = useState<'ORDER' | 'CHART'>('ORDER');
   const [chartTimeframe, setChartTimeframe] = useState<'1m' | '5m' | '15m' | '30m' | '1h' | '1D'>('15m');
+
+  // Synchronize view during guided tour
+  useEffect(() => {
+    if (tourStep === 6) {
+      setActiveView('CHART');
+    } else if (tourStep === 7 || tourStep === 8) {
+      setActiveView('ORDER');
+    }
+  }, [tourStep]);
 
   // Mode: Intraday (MIS) vs Holding (CNC/NRML)
   const [productType, setProductType] = useState<'INTRADAY' | 'HOLDING'>('INTRADAY');
@@ -160,7 +171,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
           activeView === 'CHART' ? 'max-w-4xl' : 'max-w-xl'
         }`}>
           {/* Top Header Matching Screenshot & Order Window */}
-          <div className="p-4 sm:p-5 border-b border-[#141E2E] bg-[#080E18]">
+          <div id="tour-target-instrument-header" className="p-4 sm:p-5 border-b border-[#141E2E] bg-[#080E18]">
             <div className="flex items-start justify-between">
               {/* Title & Price Info */}
               <div>
@@ -272,7 +283,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
 
           {/* Body: Either Live TradingView Chart or Order Configuration Form */}
           {activeView === 'CHART' ? (
-            <div className="flex flex-col bg-[#060B13]">
+            <div id="tour-target-price-chart" className="flex flex-col bg-[#060B13]">
               {/* Timeframe toolbar */}
               <div className="bg-[#080E18] border-b border-[#121B2B] px-3 py-1.5 flex items-center justify-between overflow-x-auto no-scrollbar">
                 <div className="flex items-center gap-1">
@@ -303,7 +314,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
               </div>
             </div>
           ) : (
-            <div className="p-4 sm:p-5 space-y-4 max-h-[65vh] overflow-y-auto custom-scrollbar">
+            <div id="tour-target-order-builder" className="p-4 sm:p-5 space-y-4 max-h-[65vh] overflow-y-auto custom-scrollbar">
               {/* Intraday vs Holding Big Cards */}
               <div className="grid grid-cols-2 gap-3">
                 <button
@@ -551,7 +562,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
           )}
 
           {/* Bottom Dual Action Buttons (Flush Split) */}
-          <div className="grid grid-cols-2 border-t border-[#141E2E]">
+          <div id="tour-target-action-buttons" className="grid grid-cols-2 border-t border-[#141E2E]">
             {/* SELL BID Button (Coral Red) */}
             <button
               type="button"

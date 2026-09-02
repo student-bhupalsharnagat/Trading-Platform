@@ -34,6 +34,7 @@ export const Login: React.FC<LoginProps> = ({ onNavigate }) => {
 
     try {
       await login(identifier, password);
+      sessionStorage.setItem('goldfut_show_tour', 'true');
       onNavigate('/dashboard');
     } catch (err: any) {
       console.error('Login error:', err);
@@ -56,6 +57,7 @@ export const Login: React.FC<LoginProps> = ({ onNavigate }) => {
     setDemoLoading(true);
     try {
       await loginDemo();
+      sessionStorage.setItem('goldfut_show_tour', 'true');
       onNavigate('/dashboard');
     } catch (err: any) {
       showToast({

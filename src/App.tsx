@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext.tsx';
+import { LanguageProvider } from './context/LanguageContext.tsx';
 import { ToastContainer } from './components/Toast.tsx';
 import { Register } from './pages/Register.tsx';
 import { VerifyOTP } from './pages/VerifyOTP.tsx';
@@ -122,7 +123,9 @@ function AppContent() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <LanguageProvider>
+        <AppContent />
+      </LanguageProvider>
     </AuthProvider>
   );
 }
