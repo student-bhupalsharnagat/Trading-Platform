@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext.tsx';
 import { LanguageProvider } from './context/LanguageContext.tsx';
+import { ThemeProvider } from './context/ThemeContext.tsx';
 import { ToastContainer } from './components/Toast.tsx';
 import { Register } from './pages/Register.tsx';
 import { VerifyOTP } from './pages/VerifyOTP.tsx';
@@ -109,7 +110,7 @@ function AppContent() {
   };
 
   return (
-    <div className="min-h-screen bg-[#060B13] text-slate-100 font-sans">
+    <div className="min-h-screen bg-slate-100 dark:bg-[#060B13] text-slate-900 dark:text-slate-100 font-sans transition-colors duration-150">
       <ToastContainer
         toasts={toasts}
         onDismiss={dismissToast}
@@ -122,10 +123,12 @@ function AppContent() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <LanguageProvider>
-        <AppContent />
-      </LanguageProvider>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <LanguageProvider>
+          <AppContent />
+        </LanguageProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

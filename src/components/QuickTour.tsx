@@ -256,7 +256,7 @@ export const QuickTour: React.FC<QuickTourProps> = ({
       {/* 1. WELCOME MODAL DIALOG (Screenshot 1) */}
       {tourMode === 'welcome' && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-[#0B111C] border border-[#1A2638] rounded-2xl w-full max-w-md p-6 sm:p-7 shadow-2xl relative overflow-visible">
+          <div className="bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1A2638] rounded-2xl w-full max-w-md p-6 sm:p-7 shadow-2xl relative overflow-visible">
             {/* Top Accent Bar (Orange Pill) */}
             <div className="w-9 h-1 bg-amber-500 rounded-full mb-5" />
 
@@ -266,16 +266,16 @@ export const QuickTour: React.FC<QuickTourProps> = ({
                 type="button"
                 id="tour-welcome-lang-btn"
                 onClick={() => setIsLangDropdownOpen(!isLangDropdownOpen)}
-                className="px-2.5 py-1.5 rounded-xl bg-[#0E1626] hover:bg-[#142034] border border-slate-700/80 text-xs font-semibold text-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm active:scale-95"
+                className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-[#0E1626] dark:hover:bg-[#142034] border border-slate-300 dark:border-slate-700/80 text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm active:scale-95"
               >
-                <Globe className="w-3.5 h-3.5 text-amber-400" />
+                <Globe className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
                 <span>{currentLanguage.englishName}</span>
                 <ChevronDown className="w-3 h-3 text-slate-400" />
               </button>
 
               {isLangDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-52 bg-[#0E1626] border border-[#1E2B40] rounded-xl shadow-2xl py-1.5 z-50 backdrop-blur-md max-h-72 overflow-y-auto animate-fadeIn">
-                  <div className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                <div className="absolute right-0 mt-2 w-52 bg-white dark:bg-[#0E1626] border border-slate-200 dark:border-[#1E2B40] rounded-xl shadow-2xl py-1.5 z-50 backdrop-blur-md max-h-72 overflow-y-auto animate-fadeIn">
+                  <div className="px-3 py-1 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
                     Select Language
                   </div>
                   {SUPPORTED_LANGUAGES.map((lang) => (
@@ -288,15 +288,15 @@ export const QuickTour: React.FC<QuickTourProps> = ({
                       }}
                       className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between transition-colors cursor-pointer ${
                         language === lang.code
-                          ? 'bg-amber-500/20 text-amber-300 font-bold'
-                          : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                          ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold'
+                          : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-white'
                       }`}
                     >
                       <div className="flex flex-col">
                         <span className="font-semibold">{lang.nativeName}</span>
-                        <span className="text-[10px] text-slate-400">{lang.englishName}</span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400">{lang.englishName}</span>
                       </div>
-                      {language === lang.code && <Check className="w-4 h-4 text-amber-400" />}
+                      {language === lang.code && <Check className="w-4 h-4 text-amber-500 dark:text-amber-400" />}
                     </button>
                   ))}
                 </div>
@@ -308,25 +308,25 @@ export const QuickTour: React.FC<QuickTourProps> = ({
               <div className="w-9 h-9 rounded-xl bg-amber-500 flex items-center justify-center font-black text-slate-950 text-sm shadow-md shadow-amber-500/20">
                 GF
               </div>
-              <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+              <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white tracking-tight">
                 {t('welcomeToGoldfut')}
               </h2>
             </div>
 
             {/* Subtitle & Description matching Screenshot 1 */}
-            <div className="space-y-1 text-xs sm:text-sm text-slate-300 leading-relaxed mb-5">
-              <p className="font-semibold text-slate-200">{t('tourSubtitle')}</p>
-              <p className="text-slate-400 text-xs">{t('tourDescription')}</p>
+            <div className="space-y-1 text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-5">
+              <p className="font-semibold text-slate-800 dark:text-slate-200">{t('tourSubtitle')}</p>
+              <p className="text-slate-500 dark:text-slate-400 text-xs">{t('tourDescription')}</p>
             </div>
 
             {/* Badges: 2 min + 8 steps matching Screenshot 1 */}
             <div className="flex items-center gap-2 mb-6">
-              <div className="px-3 py-1.5 rounded-lg bg-[#0E1626] border border-[#1C2C42] text-amber-400 text-xs font-semibold flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-amber-400" />
+              <div className="px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-[#0E1626] border border-amber-200 dark:border-[#1C2C42] text-amber-700 dark:text-amber-400 text-xs font-semibold flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                 <span>{t('tourEstimatedTime')}</span>
               </div>
-              <div className="px-3 py-1.5 rounded-lg bg-[#0E1626] border border-[#1C2C42] text-slate-300 text-xs font-semibold flex items-center gap-1.5">
-                <Star className="w-3.5 h-3.5 text-slate-400" />
+              <div className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-[#0E1626] border border-slate-200 dark:border-[#1C2C42] text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1.5">
+                <Star className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
                 <span>{t('tourStepCount')}</span>
               </div>
             </div>
@@ -346,7 +346,7 @@ export const QuickTour: React.FC<QuickTourProps> = ({
               type="button"
               id="tour-maybe-later-btn"
               onClick={handleSkip}
-              className="w-full text-center text-xs font-semibold text-slate-400 hover:text-slate-200 mt-3 py-1.5 transition-colors cursor-pointer"
+              className="w-full text-center text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 mt-3 py-1.5 transition-colors cursor-pointer"
             >
               {t('maybeLater')}
             </button>
@@ -374,7 +374,7 @@ export const QuickTour: React.FC<QuickTourProps> = ({
 
           {/* Guided Tour Banner Card matching Screenshots 2 to 9 */}
           <div className="fixed inset-x-0 z-50 px-3 sm:px-4 pointer-events-none flex justify-center top-4 sm:top-6">
-            <div className="pointer-events-auto bg-[#0B111C]/98 border border-amber-500/50 rounded-2xl p-4 sm:p-5 shadow-2xl backdrop-blur-md w-full max-w-2xl animate-fadeIn text-left">
+            <div className="pointer-events-auto bg-white/95 dark:bg-[#0B111C]/98 border border-amber-500/50 rounded-2xl p-4 sm:p-5 shadow-2xl backdrop-blur-md w-full max-w-2xl animate-fadeIn text-left">
               {/* Top Header: 8 indicator dots + Step counter */}
               <div className="flex items-center justify-between">
                 {/* Dots row matching screenshots: active is elongated amber bar, others small dots */}
@@ -385,36 +385,36 @@ export const QuickTour: React.FC<QuickTourProps> = ({
                       className={`transition-all duration-200 rounded-full ${
                         stepNum === currentStep
                           ? 'w-7 h-1.5 bg-amber-500 shadow-xs shadow-amber-500/40'
-                          : 'w-1.5 h-1.5 bg-slate-600'
+                          : 'w-1.5 h-1.5 bg-slate-300 dark:bg-slate-600'
                       }`}
                     />
                   ))}
                 </div>
 
                 {/* Step Counter: e.g. "1 of 8" */}
-                <span className="text-xs font-mono font-bold text-slate-400">
+                <span className="text-xs font-mono font-bold text-slate-500 dark:text-slate-400">
                   {currentStep} of 8
                 </span>
               </div>
 
               {/* Title matching screenshot */}
-              <h3 className="text-base sm:text-lg font-black text-white tracking-tight mt-3">
+              <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight mt-3">
                 {stepTitle}
               </h3>
 
               {/* Description body text */}
-              <p className="text-xs sm:text-sm text-slate-300 mt-1 leading-relaxed">
+              <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
                 {stepDesc}
               </p>
 
               {/* Footer actions matching screenshot */}
-              <div className="flex items-center justify-between pt-4 mt-2 border-t border-[#162234]">
+              <div className="flex items-center justify-between pt-4 mt-2 border-t border-slate-200 dark:border-[#162234]">
                 {/* Skip Tour link */}
                 <button
                   type="button"
                   id="tour-skip-step-btn"
                   onClick={handleSkip}
-                  className="text-xs font-bold text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+                  className="text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors cursor-pointer"
                 >
                   {t('skipTour')}
                 </button>
@@ -426,7 +426,7 @@ export const QuickTour: React.FC<QuickTourProps> = ({
                       type="button"
                       id="tour-back-step-btn"
                       onClick={handleBack}
-                      className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-[#142032] hover:bg-[#1E2E44] text-white border border-[#223652] transition-colors cursor-pointer active:scale-95"
+                      className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-[#142032] dark:hover:bg-[#1E2E44] text-slate-800 dark:text-white border border-slate-300 dark:border-[#223652] transition-colors cursor-pointer active:scale-95"
                     >
                       {t('back')}
                     </button>

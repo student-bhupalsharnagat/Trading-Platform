@@ -234,7 +234,14 @@ export const authApi = {
     return fetchJson('/api/trading/notifications', { method: 'GET' });
   },
 
-  async markNotificationsRead(): Promise<{ success: boolean; message: string }> {
-    return fetchJson('/api/trading/notifications/mark-read', { method: 'POST' });
+  async markNotificationsRead(id?: string): Promise<{ success: boolean; message: string; notifications?: AppNotification[] }> {
+    return fetchJson('/api/trading/notifications/mark-read', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    });
+  },
+
+  async clearNotifications(): Promise<{ success: boolean; message: string }> {
+    return fetchJson('/api/trading/notifications/clear', { method: 'POST' });
   },
 };

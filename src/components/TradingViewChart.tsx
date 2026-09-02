@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Instrument } from '../types.ts';
+import { useTheme } from '../context/ThemeContext.tsx';
 
 interface TradingViewChartProps {
   instrument: Instrument;
@@ -68,6 +69,7 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [loadError, setLoadError] = useState(false);
+  const { theme } = useTheme();
 
   const tvSymbol = getTradingViewSymbol(instrument.symbol);
 
@@ -125,15 +127,16 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
 
       try {
         if (typeof (window as any).TradingView !== 'undefined') {
+          const isDark = theme === 'dark';
           new (window as any).TradingView.widget({
             autosize: true,
             symbol: tvSymbol,
             interval: interval,
             timezone: 'Asia/Kolkata',
-            theme: 'dark',
+            theme: isDark ? 'dark' : 'light',
             style: '1',
             locale: 'en',
-            toolbar_bg: '#080E18',
+            toolbar_bg: isDark ? '#080E18' : '#f8fafc',
             enable_publishing: false,
             allow_symbol_change: false,
             container_id: widgetHolderId,
@@ -141,23 +144,41 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
             hide_legend: false,
             save_image: false,
             studies: [],
-            overrides: {
-              'paneProperties.background': '#060B13',
-              'paneProperties.vertGridProperties.color': '#0C1320',
-              'paneProperties.horzGridProperties.color': '#0C1320',
-              'symbolWatermarkProperties.transparency': 100,
-              'scalesProperties.textColor': '#94A3B8',
-              'scalesProperties.lineColor': '#1E293B',
-              'mainSeriesProperties.candleStyle.upColor': '#10B981',
-              'mainSeriesProperties.candleStyle.downColor': '#EF4444',
-              'mainSeriesProperties.candleStyle.drawWick': true,
-              'mainSeriesProperties.candleStyle.drawBorder': true,
-              'mainSeriesProperties.candleStyle.borderColor': '#334155',
-              'mainSeriesProperties.candleStyle.borderUpColor': '#10B981',
-              'mainSeriesProperties.candleStyle.borderDownColor': '#EF4444',
-              'mainSeriesProperties.candleStyle.wickUpColor': '#10B981',
-              'mainSeriesProperties.candleStyle.wickDownColor': '#EF4444',
-            },
+            overrides: isDark
+              ? {
+                  'paneProperties.background': '#060B13',
+                  'paneProperties.vertGridProperties.color': '#0C1320',
+                  'paneProperties.horzGridProperties.color': '#0C1320',
+                  'symbolWatermarkProperties.transparency': 100,
+                  'scalesProperties.textColor': '#94A3B8',
+                  'scalesProperties.lineColor': '#1E293B',
+                  'mainSeriesProperties.candleStyle.upColor': '#10B981',
+                  'mainSeriesProperties.candleStyle.downColor': '#EF4444',
+                  'mainSeriesProperties.candleStyle.drawWick': true,
+                  'mainSeriesProperties.candleStyle.drawBorder': true,
+                  'mainSeriesProperties.candleStyle.borderColor': '#334155',
+                  'mainSeriesProperties.candleStyle.borderUpColor': '#10B981',
+                  'mainSeriesProperties.candleStyle.borderDownColor': '#EF4444',
+                  'mainSeriesProperties.candleStyle.wickUpColor': '#10B981',
+                  'mainSeriesProperties.candleStyle.wickDownColor': '#EF4444',
+                }
+              : {
+                  'paneProperties.background': '#ffffff',
+                  'paneProperties.vertGridProperties.color': '#f1f5f9',
+                  'paneProperties.horzGridProperties.color': '#f1f5f9',
+                  'symbolWatermarkProperties.transparency': 100,
+                  'scalesProperties.textColor': '#475569',
+                  'scalesProperties.lineColor': '#e2e8f0',
+                  'mainSeriesProperties.candleStyle.upColor': '#10B981',
+                  'mainSeriesProperties.candleStyle.downColor': '#EF4444',
+                  'mainSeriesProperties.candleStyle.drawWick': true,
+                  'mainSeriesProperties.candleStyle.drawBorder': true,
+                  'mainSeriesProperties.candleStyle.borderColor': '#cbd5e1',
+                  'mainSeriesProperties.candleStyle.borderUpColor': '#10B981',
+                  'mainSeriesProperties.candleStyle.borderDownColor': '#EF4444',
+                  'mainSeriesProperties.candleStyle.wickUpColor': '#10B981',
+                  'mainSeriesProperties.candleStyle.wickDownColor': '#EF4444',
+                },
           });
         }
       } catch (e) {
@@ -195,7 +216,7 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
         container.innerHTML = '';
       }
     };
-  }, [tvSymbol, interval]);
+  }, [tvSymbol, interval, theme]);
 
   if (loadError) {
     return (

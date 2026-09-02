@@ -974,8 +974,18 @@ router.get('/notifications', requireAuth, (req: AuthenticatedRequest, res: Respo
 });
 
 router.post('/notifications/mark-read', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-  userNotifications = userNotifications.map((n) => ({ ...n, read: true }));
-  res.json({ success: true, message: 'All notifications marked as read.' });
+  const { id } = req.body || {};
+  if (id) {
+    userNotifications = userNotifications.map((n) => (n.id === id ? { ...n, read: true } : n));
+  } else {
+    userNotifications = userNotifications.map((n) => ({ ...n, read: true }));
+  }
+  res.json({ success: true, message: 'Notifications marked as read.', notifications: userNotifications });
+});
+
+router.post('/notifications/clear', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  userNotifications = [];
+  res.json({ success: true, message: 'All notifications cleared.' });
 });
 
 export default router;
