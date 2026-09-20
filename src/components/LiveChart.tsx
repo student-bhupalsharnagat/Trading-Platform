@@ -62,6 +62,9 @@ export const LiveChart: React.FC<LiveChartProps> = ({
     price: number | null;
   }>({ candle: null, mouseX: -1, mouseY: -1, price: null });
 
+  // Responsive logical canvas dimensions
+  const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+
   // Generate clean realistic fallback candles
   const generateInitialCandles = (basePrice: number, count = 70): Candle[] => {
     const list: Candle[] = [];
@@ -178,8 +181,12 @@ export const LiveChart: React.FC<LiveChartProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const width = canvas.width;
-    const height = canvas.height;
+    const dpr = window.devicePixelRatio || 1;
+    const width = canvasDimensions.width || (canvas.width > 0 ? Math.floor(canvas.width / dpr) : 800);
+    const height = canvasDimensions.height || (canvas.height > 0 ? Math.floor(canvas.height / dpr) : 400);
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
 
     // Solid clean dark background
     ctx.fillStyle = '#060B13';
@@ -399,6 +406,8 @@ export const LiveChart: React.FC<LiveChartProps> = ({
         );
       }
     }
+
+    ctx.restore();
   }, [
     candles,
     chartType,
@@ -407,9 +416,10 @@ export const LiveChart: React.FC<LiveChartProps> = ({
     hoverData,
     activePrice,
     engineMode,
+    canvasDimensions,
   ]);
 
-  // Responsive canvas resizing
+  // Responsive canvas resizing with ResizeObserver
   useEffect(() => {
     if (engineMode !== 'CANVAS') return;
     const updateCanvasSize = () => {
@@ -419,15 +429,15 @@ export const LiveChart: React.FC<LiveChartProps> = ({
 
       const rect = container.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
+      const w = Math.floor(rect.width);
+      const h = Math.floor(rect.height);
 
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      canvas.style.width = `${rect.width}px`;
-      canvas.style.height = `${rect.height}px`;
-
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.scale(dpr, dpr);
+      if (w > 0 && h > 0) {
+        canvas.width = Math.floor(w * dpr);
+        canvas.height = Math.floor(h * dpr);
+        canvas.style.width = `${w}px`;
+        canvas.style.height = `${h}px`;
+        setCanvasDimensions({ width: w, height: h });
       }
     };
 
@@ -511,6 +521,87 @@ export const LiveChart: React.FC<LiveChartProps> = ({
   const handleMouseLeave = () => {
     setIsDragging(false);
     setHoverData({ candle: null, mouseX: -1, mouseY: -1, price: null });
+  };
+
+  // Mobile Touch Support for pan & inspection
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (e.touches.length > 0) {
+      setIsDragging(true);
+      setDragStartX(e.touches[0].clientX);
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (e.touches.length > 0) {
+      const touch = e.touches[0];
+      const canvas = canvasRef.current;
+      if (!canvas || candles.length === 0) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
+
+      const rightMargin = 78;
+      const topMargin = 20;
+      const bottomMargin = 28;
+      const leftMargin = 12;
+      const chartWidth = rect.width - leftMargin - rightMargin;
+      const chartHeight = rect.height - bottomMargin - topMargin;
+
+      if (x < leftMargin || x > rect.width - rightMargin || y < topMargin || y > rect.height - bottomMargin) {
+        setHoverData({ candle: null, mouseX: -1, mouseY: -1, price: null });
+        return;
+      }
+
+      const baseVisibleCount = Math.max(25, Math.floor(60 / zoomLevel));
+      const maxOffset = Math.max(0, candles.length - baseVisibleCount);
+      const effectiveOffset = Math.min(Math.max(0, panOffset), maxOffset);
+      const startIndex = Math.max(0, candles.length - baseVisibleCount - effectiveOffset);
+      const endIndex = Math.min(candles.length, startIndex + baseVisibleCount);
+      const visibleCandles = candles.slice(startIndex, endIndex);
+
+      const candleWidth = chartWidth / visibleCandles.length;
+      const candleIndex = Math.min(
+        visibleCandles.length - 1,
+        Math.max(0, Math.floor((x - leftMargin) / candleWidth))
+      );
+      const targetCandle = visibleCandles[candleIndex] || null;
+
+      let minPrice = Infinity;
+      let maxPrice = -Infinity;
+      visibleCandles.forEach((c) => {
+        if (c.low < minPrice) minPrice = c.low;
+        if (c.high > maxPrice) maxPrice = c.high;
+      });
+
+      const priceRange = maxPrice - minPrice || 1;
+      const paddedMin = minPrice - priceRange * 0.08;
+      const paddedMax = maxPrice + priceRange * 0.08;
+      const effectiveRange = paddedMax - paddedMin;
+
+      const normY = (y - topMargin) / (chartHeight - 10);
+      const estimatedPrice = paddedMin + (1 - normY) * effectiveRange;
+
+      setHoverData({
+        candle: targetCandle,
+        mouseX: x,
+        mouseY: y,
+        price: estimatedPrice,
+      });
+
+      if (isDragging) {
+        const deltaX = touch.clientX - dragStartX;
+        const candleDelta = Math.round(deltaX / candleWidth);
+        if (Math.abs(candleDelta) >= 1) {
+          setPanOffset((prev) => Math.max(0, prev + candleDelta));
+          setDragStartX(touch.clientX);
+        }
+      }
+    }
+  };
+
+  const handleTouchEnd = () => {
+    setIsDragging(false);
   };
 
   const handleZoomIn = () => setZoomLevel((prev) => Math.min(3, prev + 0.25));
@@ -730,7 +821,10 @@ export const LiveChart: React.FC<LiveChartProps> = ({
               onMouseLeave={handleMouseLeave}
               onMouseDown={handleMouseDown}
               onMouseUp={handleMouseUp}
-              className="w-full h-full block"
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              className="w-full h-full block touch-none select-none"
             />
           </div>
         )}

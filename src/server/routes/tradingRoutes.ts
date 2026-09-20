@@ -1,6 +1,36 @@
 import { Router, Response } from 'express';
 import { requireAuth, optionalAuth, AuthenticatedRequest } from '../middleware/authMiddleware.ts';
+import {
+  TenantRequest,
+  requireTradingEnabled,
+  requireActiveTrader,
+} from '../middleware/tenantMiddleware.ts';
 import { Instrument, Candle, Position, Order, WalletFunds, SupportTicket, AppNotification } from '../../types.ts';
+import {
+  findInstrument,
+  getTenantWallet,
+  setTenantWallet,
+  getTenantPositions,
+  setTenantPositions,
+  getTenantOrders,
+  setTenantOrders,
+  getTenantTickets,
+  getTenantNotifications,
+  setTenantNotifications,
+} from '../trading/tradingStore.ts';
+import { tenantConfigCache } from '../cache/TenantConfigCache.ts';
+import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
+import { tradingExecutionService } from '../services/TradingExecutionService.ts';
+import { postgresOrderRepository } from '../repositories/trading/PostgresOrderRepository.ts';
+import { postgresPositionRepository } from '../repositories/trading/PostgresPositionRepository.ts';
+import { postgresWalletRepository } from '../repositories/trading/PostgresWalletRepository.ts';
+import { postgresTradeRepository } from '../repositories/trading/PostgresTradeRepository.ts';
+import { providerConfigService } from '../gateways/broker/ProviderConfigService.ts';
+import { executionAuditLogger } from '../gateways/audit/ExecutionAuditLogger.ts';
+import { marketDataGateway } from '../gateways/MarketDataGateway.ts';
+import { executionGateway } from '../gateways/ExecutionGateway.ts';
+import { brokerWebhookHandler } from '../gateways/broker/BrokerWebhookHandler.ts';
+import { brokerReconciliationService } from '../services/BrokerReconciliationService.ts';
 
 const router = Router();
 
@@ -176,6 +206,52 @@ let INSTRUMENTS: Instrument[] = [
     trend: 'down',
   },
   {
+    id: 'nifty_24500_ce',
+    symbol: 'NIFTY 24500 CE',
+    sectionName: 'NIFTY OPT',
+    name: 'Nifty 24500 Call Option',
+    category: 'OPTIONS',
+    expiry: '28 Aug',
+    lastPrice: 145.5,
+    openPrice: 130.0,
+    highPrice: 160.0,
+    lowPrice: 125.0,
+    prevClose: 130.0,
+    change: 15.5,
+    changePercent: 11.92,
+    intraday: 3500.0,
+    holding: 7500.0,
+    lotSize: 25,
+    maxLots: 50,
+    ask: 146.0,
+    bid: 145.0,
+    sparkline: [130, 135, 140, 138, 142, 145.5],
+    trend: 'up',
+  },
+  {
+    id: 'natural_gas_fut',
+    symbol: 'NATURAL GAS FUT',
+    sectionName: 'NATURAL GAS',
+    name: 'Natural Gas Futures',
+    category: 'COMMODITY',
+    expiry: '26 Aug',
+    lastPrice: 185.4,
+    openPrice: 182.1,
+    highPrice: 188.5,
+    lowPrice: 180.2,
+    prevClose: 182.1,
+    change: 3.3,
+    changePercent: 1.81,
+    intraday: 2500.0,
+    holding: 12500.0,
+    lotSize: 1250,
+    maxLots: 40,
+    ask: 185.6,
+    bid: 185.2,
+    sparkline: [182.1, 183.0, 184.2, 184.9, 185.4],
+    trend: 'up',
+  },
+  {
     id: 'reliance_fut',
     symbol: 'RELIANCE FUT',
     sectionName: 'RELIANCE',
@@ -315,8 +391,8 @@ let INSTRUMENTS: Instrument[] = [
   },
 ];
 
-// In-memory state for active user sessions
-let userWallet: WalletFunds = {
+// Seed state for active user sessions
+const initialWallet: WalletFunds = {
   availableBalance: 142840.0,
   usedMargin: 38210.0,
   totalPnL: 34386.86,
@@ -325,7 +401,7 @@ let userWallet: WalletFunds = {
   withdrawn: 50000.0,
 };
 
-let userPositions: Position[] = [
+const initialPositions: Position[] = [
   {
     id: 'POS-1',
     symbol: 'GOLD FUT',
@@ -507,55 +583,9 @@ let userNotifications: AppNotification[] = [
   },
 ];
 
-// Dynamic tick simulator for live streaming market feeling
-setInterval(() => {
-  INSTRUMENTS = INSTRUMENTS.map((inst) => {
-    const volatilityPct = 0.0006;
-    const delta = (Math.random() - 0.49) * (inst.lastPrice * volatilityPct);
-    const updatedPrice = Number(Math.max(1, inst.lastPrice + delta).toFixed(2));
-    const change = Number((updatedPrice - inst.prevClose).toFixed(2));
-    const changePercent = Number(((change / inst.prevClose) * 100).toFixed(2));
-
-    const highPrice = Number(Math.max(inst.highPrice, updatedPrice).toFixed(2));
-    const lowPrice = Number(Math.min(inst.lowPrice, updatedPrice).toFixed(2));
-
-    const spread = updatedPrice * 0.0002;
-    const ask = Number((updatedPrice + spread).toFixed(2));
-    const bid = Number((updatedPrice - spread).toFixed(2));
-
-    return {
-      ...inst,
-      lastPrice: updatedPrice,
-      highPrice,
-      lowPrice,
-      change,
-      changePercent,
-      ask,
-      bid,
-      trend: change >= 0 ? 'up' : 'down',
-    };
-  });
-
-  // Recalculate open PnL dynamically
-  let livePnL = 0;
-  userPositions = userPositions.map((pos) => {
-    const liveInst = INSTRUMENTS.find((i) => i.symbol === pos.symbol);
-    const ltp = liveInst ? liveInst.lastPrice : pos.ltp;
-    const pnl = pos.type === 'BUY' ? (ltp - pos.avgPrice) * pos.qty : (pos.avgPrice - ltp) * pos.qty;
-    const pnlPercent = Number(((pnl / (pos.avgPrice * pos.qty)) * 100).toFixed(2));
-    livePnL += pnl;
-
-    return {
-      ...pos,
-      ltp,
-      pnl: Number(pnl.toFixed(2)),
-      pnlPercent,
-    };
-  });
-
-  userWallet.todayPnL = Number((500 + livePnL).toFixed(2));
-  userWallet.totalPnL = Number((34000 + livePnL).toFixed(2));
-}, 1500);
+function getReqTenantId(req: any): string {
+  return req.user?.tenantId || req.tenant?.tenant?.id || (req.headers && (req.headers['x-tenant-id'] as string)) || 'vertex-default';
+}
 
 // Get live instruments list
 router.get('/instruments', optionalAuth, (req: AuthenticatedRequest, res: Response) => {
@@ -600,176 +630,317 @@ router.get('/candles/:symbol', optionalAuth, (req: AuthenticatedRequest, res: Re
   });
 });
 
-// Get portfolio data
-router.get('/portfolio', optionalAuth, (req: AuthenticatedRequest, res: Response) => {
-  res.json({
-    success: true,
-    wallet: userWallet,
-    positions: userPositions,
-    orders: userOrders,
-  });
-});
+// Get portfolio data (scoped to resolved tenant)
+router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response) => {
+  const tenantId = getReqTenantId(req);
+  const userObj = (req as any).user;
+  const userId = userObj?.userId || userObj?.user_id || userObj?.id;
 
-// Place new Order (BUY / SELL)
-router.post('/order', optionalAuth, (req: AuthenticatedRequest, res: Response) => {
+  let wallet = getTenantWallet(tenantId);
+  let positions = getTenantPositions(tenantId);
+  let orders = getTenantOrders(tenantId);
+
   try {
-    const {
-      symbol,
-      type, // BUY or SELL
-      orderType, // MARKET or LIMIT
-      product, // INTRADAY or HOLDING
-      lots,
-      limitPrice,
-      stopLoss,
-      target,
-    } = req.body;
-
-    if (!symbol || !type || !lots || lots <= 0) {
-      res.status(400).json({ success: false, message: 'Invalid order parameters.' });
-      return;
-    }
-
-    const inst = INSTRUMENTS.find((i) => i.symbol === symbol || i.id === symbol);
-    if (!inst) {
-      res.status(404).json({ success: false, message: 'Instrument not found.' });
-      return;
-    }
-
-    const execPrice = orderType === 'LIMIT' && limitPrice ? Number(limitPrice) : inst.lastPrice;
-    const requiredMargin = product === 'INTRADAY' ? inst.intraday * lots : inst.holding * lots;
-
-    if (userWallet.availableBalance < requiredMargin) {
-      res.status(400).json({
-        success: false,
-        message: `Insufficient margin. Required ₹${requiredMargin.toLocaleString('en-IN')}, available ₹${userWallet.availableBalance.toLocaleString('en-IN')}.`,
-      });
-      return;
-    }
-
-    // Deduct margin
-    userWallet.availableBalance = Math.max(0, userWallet.availableBalance - requiredMargin);
-    userWallet.usedMargin += requiredMargin;
-
-    const orderId = `ORD-${Math.floor(10000 + Math.random() * 90000)}`;
-    const now = new Date();
-    const timeStr = now.toTimeString().split(' ')[0];
-    const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-
-    const newOrder: Order = {
-      id: orderId,
-      symbol: inst.symbol,
-      type,
-      orderType: orderType || 'MARKET',
-      product: product || 'INTRADAY',
-      lots,
-      qty: lots * inst.lotSize,
-      lotSize: inst.lotSize,
-      price: execPrice,
-      stopLoss: stopLoss ? Number(stopLoss) : undefined,
-      target: target ? Number(target) : undefined,
-      status: 'EXECUTED',
-      time: timeStr,
-      date: dateStr,
-    };
-
-    userOrders.unshift(newOrder);
-
-    // Create or update position
-    const existingPos = userPositions.find((p) => p.symbol === inst.symbol && p.product === (product || 'INTRADAY'));
-    if (existingPos) {
-      if (existingPos.type === type) {
-        // Average up
-        const totalQty = existingPos.qty + newOrder.qty;
-        const totalCost = existingPos.avgPrice * existingPos.qty + execPrice * newOrder.qty;
-        existingPos.avgPrice = Number((totalCost / totalQty).toFixed(2));
-        existingPos.qty = totalQty;
-        existingPos.lots += lots;
-      } else {
-        // Close or reduce position
-        if (existingPos.lots <= lots) {
-          userPositions = userPositions.filter((p) => p.id !== existingPos.id);
-        } else {
-          existingPos.lots -= lots;
-          existingPos.qty -= newOrder.qty;
-        }
+    if (userId) {
+      const pgWallet = await postgresWalletRepository.getWallet(tenantId, userId);
+      if (pgWallet) {
+        wallet = {
+          availableBalance: pgWallet.available_balance,
+          usedMargin: pgWallet.used_margin,
+          totalPnL: pgWallet.realized_pnl,
+          todayPnL: 0,
+          deposited: 200000,
+          withdrawn: 50000,
+        };
       }
-    } else {
-      userPositions.unshift({
-        id: `POS-${Math.floor(1000 + Math.random() * 9000)}`,
-        symbol: inst.symbol,
-        category: inst.category,
-        type,
-        product: product || 'INTRADAY',
-        lots,
-        qty: lots * inst.lotSize,
-        lotSize: inst.lotSize,
-        avgPrice: execPrice,
-        ltp: inst.lastPrice,
-        pnl: 0,
-        pnlPercent: 0,
-        timestamp: new Date().toISOString(),
-      });
+      const pgPositions = await postgresPositionRepository.getPositions(tenantId, userId);
+      if (pgPositions && pgPositions.length > 0) {
+        positions = pgPositions.map((p) => ({
+          id: p.id,
+          symbol: p.instrument_id,
+          category: 'COMMODITY',
+          type: p.quantity > 0 ? 'BUY' : 'SELL',
+          product: 'INTRADAY',
+          lots: Math.max(1, Math.round(Math.abs(p.quantity) / 100)),
+          qty: Math.abs(p.quantity),
+          lotSize: 100,
+          avgPrice: p.average_price,
+          ltp: p.average_price,
+          pnl: p.realized_pnl,
+          pnlPercent: 0,
+          timestamp: p.updated_at,
+          tenantId: p.tenant_id,
+        }));
+      }
+      const pgOrders = await postgresOrderRepository.getOrders(tenantId, userId);
+      if (pgOrders && pgOrders.length > 0) {
+        orders = pgOrders.map((o) => ({
+          id: o.id,
+          symbol: o.instrument_id,
+          type: o.side as 'BUY' | 'SELL',
+          orderType: o.order_type as any,
+          product: 'INTRADAY',
+          lots: Math.max(1, Math.round(o.quantity / 100)),
+          qty: o.quantity,
+          lotSize: 100,
+          price: o.price,
+          status: o.status as any,
+          time: new Date(o.created_at).toTimeString().split(' ')[0],
+          date: new Date(o.created_at).toLocaleDateString('en-GB'),
+          tenantId: o.tenant_id,
+        }));
+      }
     }
-
-    // Add notification
-    userNotifications.unshift({
-      id: `NOTIF-${Date.now()}`,
-      title: 'Order Executed',
-      message: `${type} ${lots} Lot(s) of ${inst.symbol} executed at ₹${execPrice.toLocaleString('en-IN')}`,
-      type: 'ORDER',
-      time: 'Just now',
-      read: false,
-    });
-
-    res.json({
-      success: true,
-      message: `${type} order for ${lots} lot(s) of ${inst.symbol} executed successfully!`,
-      order: newOrder,
-      wallet: userWallet,
-      positions: userPositions,
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message || 'Failed to execute order.' });
+  } catch {
+    // fallback to memory
   }
-});
-
-// Close / Square-off position
-router.post('/position/close', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-  const { positionId } = req.body;
-  const posIndex = userPositions.findIndex((p) => p.id === positionId);
-  if (posIndex === -1) {
-    res.status(404).json({ success: false, message: 'Position not found.' });
-    return;
-  }
-
-  const pos = userPositions[posIndex];
-  const inst = INSTRUMENTS.find((i) => i.symbol === pos.symbol);
-  const releasedMargin = (inst?.intraday || 30000) * pos.lots;
-
-  userWallet.availableBalance += releasedMargin + pos.pnl;
-  userWallet.usedMargin = Math.max(0, userWallet.usedMargin - releasedMargin);
-
-  userPositions.splice(posIndex, 1);
-
-  userNotifications.unshift({
-    id: `NOTIF-${Date.now()}`,
-    title: 'Position Squared Off',
-    message: `Closed ${pos.symbol} position with PnL of ₹${pos.pnl.toLocaleString('en-IN')}`,
-    type: 'ORDER',
-    time: 'Just now',
-    read: false,
-  });
 
   res.json({
     success: true,
-    message: `Position for ${pos.symbol} closed successfully.`,
-    wallet: userWallet,
-    positions: userPositions,
+    tenantId,
+    wallet,
+    positions,
+    orders,
   });
+});
+
+// Place new Order (BUY / SELL) - Enforces Tenant trading freeze, active trader, and ACID persistence
+router.post(
+  ['/order', '/orders'],
+  optionalAuth,
+  requireTradingEnabled,
+  requireActiveTrader,
+  async (req: TenantRequest, res: Response) => {
+    try {
+      const tenantId = getReqTenantId(req);
+      const userObj = (req as any).user;
+      const tenantHeader = (req.headers['x-tenant-id'] as string) || (req.headers['x-dev-tenant-id'] as string);
+      const userTenant = userObj?.tenantId || userObj?.tenant_id;
+
+      if (tenantHeader && userTenant && tenantHeader !== userTenant && userObj?.role !== 'SUPER_ADMIN') {
+        res.status(403).json({
+          success: false,
+          code: 'TENANT_MISMATCH',
+          message: 'Access denied: Requested tenant does not match user account tenant.',
+        });
+        return;
+      }
+
+      const orderUserId = userObj?.userId || userObj?.user_id || userObj?.id || 'demo-trader';
+
+      const {
+        symbol,
+        type, // BUY or SELL
+        side, // alternative for type
+        orderType, // MARKET or LIMIT
+        product, // INTRADAY or HOLDING
+        lots,
+        limitPrice,
+        price,
+        stopLoss,
+        target,
+        clientOrderId,
+        client_order_id,
+      } = req.body;
+
+      const orderSide = ((type || side || '') as string).toUpperCase() as 'BUY' | 'SELL';
+      const orderLots = Number(lots);
+
+      if (!symbol || (orderSide !== 'BUY' && orderSide !== 'SELL') || !orderLots || orderLots <= 0) {
+        res.status(400).json({ success: false, message: 'Invalid order parameters: symbol, type (BUY/SELL), and positive lots are required.' });
+        return;
+      }
+
+      const inst =
+        findInstrument(symbol) ||
+        INSTRUMENTS.find(
+          (i) =>
+            i.symbol === symbol ||
+            i.id === symbol ||
+            i.symbol.toLowerCase().replace(/[\s\-_]/g, '') === (symbol || '').toLowerCase().replace(/[\s\-_]/g, '')
+        );
+      if (!inst) {
+        res.status(404).json({ success: false, message: 'Instrument not found.' });
+        return;
+      }
+
+      // Enforce tenant feature flags (e.g. options trading disabled)
+      const isOptionInst = inst.symbol.includes('CE') || inst.symbol.includes('PE') || (inst as any).category === 'OPTIONS';
+      const cachedConfig = tenantConfigCache.get(tenantId);
+      if (
+        isOptionInst &&
+        (cachedConfig?.optionsTradingEnabled === false || req.tenant?.config.options_trading_enabled === false)
+      ) {
+        res.status(403).json({
+          success: false,
+          code: 'OPTIONS_DISABLED',
+          message: 'Options trading is disabled by administrator for this platform.',
+        });
+        return;
+      }
+
+      const execPrice = price ? Number(price) : (orderType === 'LIMIT' && limitPrice ? Number(limitPrice) : inst.lastPrice);
+
+      // Execute through ACID TradingExecutionService
+      const result = await tradingExecutionService.placeOrder({
+        tenantId,
+        userId: orderUserId,
+        clientOrderId: clientOrderId || client_order_id,
+        symbol: inst.symbol,
+        side: orderSide,
+        orderType: orderType || 'MARKET',
+        product: product || 'INTRADAY',
+        lots: orderLots,
+        price: execPrice,
+        stopLoss: stopLoss ? Number(stopLoss) : undefined,
+        target: target ? Number(target) : undefined,
+      });
+
+      if (result.isDuplicate) {
+        res.status(200).json({
+          success: true,
+          isDuplicate: true,
+          message: result.message,
+          order: result.order,
+          wallet: {
+            availableBalance: result.wallet.available_balance,
+            usedMargin: result.wallet.used_margin,
+            totalPnL: result.wallet.realized_pnl,
+            todayPnL: 0,
+          },
+        });
+        return;
+      }
+
+      const notifications = getTenantNotifications(tenantId);
+      notifications.unshift({
+        id: `NOTIF-${Date.now()}`,
+        title: 'Order Executed',
+        message: `${orderSide} ${orderLots} Lot(s) of ${inst.symbol} executed at ₹${execPrice.toLocaleString('en-IN')}`,
+        type: 'ORDER',
+        time: 'Just now',
+        read: false,
+      });
+
+      res.json({
+        success: true,
+        message: result.message,
+        order: result.order,
+        trade: result.trade,
+        position: result.position,
+        wallet: {
+          availableBalance: result.wallet.available_balance,
+          usedMargin: result.wallet.used_margin,
+          totalPnL: result.wallet.realized_pnl,
+          todayPnL: 0,
+        },
+        positions: getTenantPositions(tenantId),
+      });
+    } catch (err: any) {
+      const status = err.statusCode || (err.code === 'INSUFFICIENT_MARGIN' ? 400 : 500);
+      res.status(status).json({ success: false, code: err.code, message: err.message || 'Failed to execute order.' });
+    }
+  }
+);
+
+// Close / Square-off position - Protected by tradingEnabled and activeTrader
+router.post(
+  '/position/close',
+  requireAuth,
+  requireTradingEnabled,
+  requireActiveTrader,
+  async (req: TenantRequest, res: Response) => {
+    try {
+      const tenantId = getReqTenantId(req);
+      const userObj = (req as any).user;
+      const userId = userObj?.userId || userObj?.user_id || userObj?.id || 'demo-trader';
+      const { positionId } = req.body;
+
+      if (!positionId) {
+        res.status(400).json({ success: false, message: 'Position ID is required.' });
+        return;
+      }
+
+      const result = await tradingExecutionService.closePosition(tenantId, userId, positionId);
+
+      // Also clean in-memory positions
+      const positions = getTenantPositions(tenantId);
+      const posIndex = positions.findIndex((p) => p.id === positionId || p.symbol === positionId);
+      if (posIndex !== -1) {
+        positions.splice(posIndex, 1);
+      }
+
+      const notifications = getTenantNotifications(tenantId);
+      notifications.unshift({
+        id: `NOTIF-${Date.now()}`,
+        title: 'Position Squared Off',
+        message: `Closed position ${positionId}`,
+        type: 'ORDER',
+        time: 'Just now',
+        read: false,
+      });
+
+      res.json({
+        success: true,
+        message: result.message,
+        position: result.position,
+        wallet: {
+          availableBalance: result.wallet.available_balance,
+          usedMargin: result.wallet.used_margin,
+          totalPnL: result.wallet.realized_pnl,
+          todayPnL: 0,
+        },
+        positions: getTenantPositions(tenantId),
+      });
+    } catch (err: any) {
+      res.status(err.statusCode || 500).json({ success: false, message: err.message || 'Failed to close position.' });
+    }
+  }
+);
+
+// Cancel Order
+router.post(
+  ['/order/cancel', '/orders/cancel'],
+  requireAuth,
+  async (req: TenantRequest, res: Response) => {
+    try {
+      const tenantId = getReqTenantId(req);
+      const userObj = (req as any).user;
+      const userId = userObj?.userId || userObj?.user_id || userObj?.id || 'demo-trader';
+      const { orderId } = req.body;
+
+      if (!orderId) {
+        res.status(400).json({ success: false, message: 'Order ID is required.' });
+        return;
+      }
+
+      const result = await tradingExecutionService.cancelOrder(tenantId, userId, orderId);
+      res.json(result);
+    } catch (err: any) {
+      res.status(err.statusCode || 500).json({ success: false, message: err.message || 'Failed to cancel order.' });
+    }
+  }
+);
+
+// Get execution trades
+router.get('/trades', requireAuth, async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const userObj = (req as any).user;
+    const userId = userObj?.userId || userObj?.user_id || userObj?.id;
+    const trades = await postgresTradeRepository.getTrades(tenantId, userId);
+    res.json({ success: true, tenantId, trades });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 // Add Funds (Deposit)
-router.post('/funds/deposit', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+router.post('/funds/deposit', requireAuth, (req: TenantRequest, res: Response) => {
+  const tenantId = getReqTenantId(req);
+  const wallet = getTenantWallet(tenantId);
+  const notifications = getTenantNotifications(tenantId);
+
   const { amount, method } = req.body;
   const numAmount = Number(amount);
   if (!numAmount || numAmount < 100) {
@@ -777,10 +948,10 @@ router.post('/funds/deposit', requireAuth, (req: AuthenticatedRequest, res: Resp
     return;
   }
 
-  userWallet.availableBalance += numAmount;
-  userWallet.deposited += numAmount;
+  wallet.availableBalance += numAmount;
+  wallet.deposited += numAmount;
 
-  userNotifications.unshift({
+  notifications.unshift({
     id: `NOTIF-${Date.now()}`,
     title: 'Deposit Successful',
     message: `₹${numAmount.toLocaleString('en-IN')} added via ${method || 'UPI Instant'}.`,
@@ -791,32 +962,36 @@ router.post('/funds/deposit', requireAuth, (req: AuthenticatedRequest, res: Resp
 
   res.json({
     success: true,
-    message: `₹${numAmount.toLocaleString('en-IN')} successfully added to trading wallet.`,
-    wallet: userWallet,
+    message: `Deposit of ₹${numAmount.toLocaleString('en-IN')} successful.`,
+    wallet,
   });
 });
 
 // Withdraw Funds
-router.post('/funds/withdraw', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-  const { amount, bankName, accountNumber } = req.body;
+router.post('/funds/withdraw', requireAuth, (req: TenantRequest, res: Response) => {
+  const tenantId = getReqTenantId(req);
+  const wallet = getTenantWallet(tenantId);
+  const notifications = getTenantNotifications(tenantId);
+
+  const { amount, bankName } = req.body;
   const numAmount = Number(amount);
   if (!numAmount || numAmount <= 0) {
     res.status(400).json({ success: false, message: 'Invalid withdrawal amount.' });
     return;
   }
 
-  if (numAmount > userWallet.availableBalance) {
+  if (numAmount > wallet.availableBalance) {
     res.status(400).json({
       success: false,
-      message: `Insufficient balance. Available to withdraw: ₹${userWallet.availableBalance.toLocaleString('en-IN')}`,
+      message: `Insufficient balance. Available to withdraw: ₹${wallet.availableBalance.toLocaleString('en-IN')}`,
     });
     return;
   }
 
-  userWallet.availableBalance -= numAmount;
-  userWallet.withdrawn += numAmount;
+  wallet.availableBalance -= numAmount;
+  wallet.withdrawn += numAmount;
 
-  userNotifications.unshift({
+  notifications.unshift({
     id: `NOTIF-${Date.now()}`,
     title: 'Withdrawal Initiated',
     message: `Payout request for ₹${numAmount.toLocaleString('en-IN')} sent to ${bankName || 'Verified Bank'}.`,
@@ -828,17 +1003,20 @@ router.post('/funds/withdraw', requireAuth, (req: AuthenticatedRequest, res: Res
   res.json({
     success: true,
     message: `Withdrawal request of ₹${numAmount.toLocaleString('en-IN')} processed successfully.`,
-    wallet: userWallet,
+    wallet,
   });
 });
 
-// Get & Create Support Tickets
-router.get('/tickets', optionalAuth, (req: AuthenticatedRequest, res: Response) => {
-  res.json({ success: true, tickets: userTickets });
+// Get & Create Support Tickets (scoped to resolved tenant)
+router.get('/tickets', optionalAuth, (req: TenantRequest, res: Response) => {
+  const tenantId = getReqTenantId(req);
+  res.json({ success: true, tickets: getTenantTickets(tenantId) });
 });
 
-router.get('/tickets/:id', optionalAuth, (req: AuthenticatedRequest, res: Response) => {
-  const ticket = userTickets.find((t) => t.id.toLowerCase() === req.params.id.toLowerCase());
+router.get('/tickets/:id', optionalAuth, (req: TenantRequest, res: Response) => {
+  const tenantId = getReqTenantId(req);
+  const tickets = getTenantTickets(tenantId);
+  const ticket = tickets.find((t) => t.id.toLowerCase() === req.params.id.toLowerCase());
   if (!ticket) {
     res.status(404).json({ success: false, message: 'Ticket not found.' });
     return;
@@ -846,7 +1024,11 @@ router.get('/tickets/:id', optionalAuth, (req: AuthenticatedRequest, res: Respon
   res.json({ success: true, ticket });
 });
 
-router.post('/tickets', optionalAuth, (req: AuthenticatedRequest, res: Response) => {
+router.post('/tickets', optionalAuth, (req: TenantRequest, res: Response) => {
+  const tenantId = getReqTenantId(req);
+  const tickets = getTenantTickets(tenantId);
+  const notifications = getTenantNotifications(tenantId);
+
   const { subject, category, priority, message, attachmentUrl, attachmentName } = req.body;
   if (!subject || !message) {
     res.status(400).json({ success: false, message: 'Subject and description are required.' });
@@ -882,10 +1064,10 @@ router.post('/tickets', optionalAuth, (req: AuthenticatedRequest, res: Response)
     ],
   };
 
-  userTickets.unshift(newTicket);
+  tickets.unshift(newTicket);
 
   // Add system notification for ticket raised
-  userNotifications.unshift({
+  notifications.unshift({
     id: `NOTIF-${Date.now()}`,
     title: 'Ticket Raised',
     message: `Ticket #${newTicket.id} (${newTicket.subject}) submitted. Support will reply within SLA.`,
@@ -897,9 +1079,11 @@ router.post('/tickets', optionalAuth, (req: AuthenticatedRequest, res: Response)
   res.json({ success: true, message: 'Support ticket raised successfully.', ticket: newTicket });
 });
 
-router.post('/tickets/:id/reply', optionalAuth, (req: AuthenticatedRequest, res: Response) => {
+router.post('/tickets/:id/reply', optionalAuth, (req: TenantRequest, res: Response) => {
+  const tenantId = getReqTenantId(req);
+  const tickets = getTenantTickets(tenantId);
   const { message, attachmentUrl, attachmentName } = req.body;
-  const ticket = userTickets.find((t) => t.id.toLowerCase() === req.params.id.toLowerCase());
+  const ticket = tickets.find((t) => t.id.toLowerCase() === req.params.id.toLowerCase());
   if (!ticket) {
     res.status(404).json({ success: false, message: 'Ticket not found.' });
     return;
@@ -935,9 +1119,11 @@ router.post('/tickets/:id/reply', optionalAuth, (req: AuthenticatedRequest, res:
   res.json({ success: true, message: 'Reply sent.', ticket });
 });
 
-router.post('/tickets/:id/status', optionalAuth, (req: AuthenticatedRequest, res: Response) => {
+router.post('/tickets/:id/status', optionalAuth, (req: TenantRequest, res: Response) => {
+  const tenantId = getReqTenantId(req);
+  const tickets = getTenantTickets(tenantId);
   const { status } = req.body;
-  const ticket = userTickets.find((t) => t.id.toLowerCase() === req.params.id.toLowerCase());
+  const ticket = tickets.find((t) => t.id.toLowerCase() === req.params.id.toLowerCase());
   if (!ticket) {
     res.status(404).json({ success: false, message: 'Ticket not found.' });
     return;
@@ -954,9 +1140,11 @@ router.post('/tickets/:id/status', optionalAuth, (req: AuthenticatedRequest, res
   res.json({ success: true, message: `Ticket status updated to ${ticket.status}.`, ticket });
 });
 
-router.post('/tickets/:id/rate', optionalAuth, (req: AuthenticatedRequest, res: Response) => {
+router.post('/tickets/:id/rate', optionalAuth, (req: TenantRequest, res: Response) => {
+  const tenantId = getReqTenantId(req);
+  const tickets = getTenantTickets(tenantId);
   const { rating, feedback } = req.body;
-  const ticket = userTickets.find((t) => t.id.toLowerCase() === req.params.id.toLowerCase());
+  const ticket = tickets.find((t) => t.id.toLowerCase() === req.params.id.toLowerCase());
   if (!ticket) {
     res.status(404).json({ success: false, message: 'Ticket not found.' });
     return;
@@ -968,24 +1156,292 @@ router.post('/tickets/:id/rate', optionalAuth, (req: AuthenticatedRequest, res: 
   res.json({ success: true, message: 'Thank you for your rating!', ticket });
 });
 
-// Notifications
-router.get('/notifications', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-  res.json({ success: true, notifications: userNotifications });
+// Notifications (scoped to resolved tenant)
+router.get('/notifications', requireAuth, (req: TenantRequest, res: Response) => {
+  const tenantId = getReqTenantId(req);
+  res.json({ success: true, notifications: getTenantNotifications(tenantId) });
 });
 
-router.post('/notifications/mark-read', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+router.post('/notifications/mark-read', requireAuth, (req: TenantRequest, res: Response) => {
+  const tenantId = getReqTenantId(req);
+  let notifications = getTenantNotifications(tenantId);
   const { id } = req.body || {};
   if (id) {
-    userNotifications = userNotifications.map((n) => (n.id === id ? { ...n, read: true } : n));
+    notifications = notifications.map((n) => (n.id === id ? { ...n, read: true } : n));
   } else {
-    userNotifications = userNotifications.map((n) => ({ ...n, read: true }));
+    notifications = notifications.map((n) => ({ ...n, read: true }));
   }
-  res.json({ success: true, message: 'Notifications marked as read.', notifications: userNotifications });
+  setTenantNotifications(tenantId, notifications);
+  res.json({ success: true, message: 'Notifications marked as read.', notifications });
 });
 
-router.post('/notifications/clear', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-  userNotifications = [];
+router.post('/notifications/clear', requireAuth, (req: TenantRequest, res: Response) => {
+  const tenantId = getReqTenantId(req);
+  setTenantNotifications(tenantId, []);
   res.json({ success: true, message: 'All notifications cleared.' });
+});
+
+// ==========================================================
+// PHASE 5G — GATEWAYS, BROKER ADAPTER & MARKET DATA ROUTES
+// ==========================================================
+
+// Modify order via Execution Gateway
+router.put('/orders/:id', requireAuth, requireActiveTrader, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const userId = req.user!.userId;
+    const { id } = req.params;
+    const { price, quantity } = req.body || {};
+
+    const result = await tradingExecutionService.modifyOrder(tenantId, userId, id, {
+      price: price ? Number(price) : undefined,
+      quantity: quantity ? Number(quantity) : undefined,
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message, code: err.code });
+  }
+});
+
+// Get order status directly from Broker through Execution Gateway
+router.get('/orders/:id/broker-status', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const userId = req.user!.userId;
+    const { id } = req.params;
+
+    const result = await tradingExecutionService.getOrderStatus(tenantId, userId, id);
+    res.json(result);
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message, code: err.code });
+  }
+});
+
+// Tenant-scoped Provider Configuration
+router.get('/gateways/config', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const providerId = (req.query.providerId as string) || 'mock-broker';
+    const context = await providerConfigService.getProviderConfig(tenantId, providerId);
+    
+    // Return sanitized context, credentials secret is NEVER returned
+    res.json({
+      success: true,
+      providerConfig: {
+        tenantId: context.tenantId,
+        providerId: context.providerId,
+        environment: context.environment,
+        settings: context.settings,
+        hasCredentials: !!context.credentials?.keyIdentifier,
+        keyIdentifier: context.credentials?.keyIdentifier || null,
+        authScheme: context.credentials?.authScheme || null,
+      },
+    });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/gateways/config', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const { providerId, providerType, environment, settings, isActive, isDefault } = req.body || {};
+
+    if (!providerId) {
+      res.status(400).json({ success: false, message: 'providerId is required.' });
+      return;
+    }
+
+    const saved = await providerConfigService.setProviderConfig(tenantId, providerId, {
+      providerType,
+      environment,
+      settings,
+      isActive,
+      isDefault,
+    });
+
+    res.json({ success: true, message: 'Provider config updated successfully.', providerConfig: saved });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
+  }
+});
+
+// Credentials Metadata (Secrets are exclusively in server-side env vars)
+router.get('/gateways/credentials-metadata', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const providerId = (req.query.providerId as string) || 'mock-broker';
+    const meta = await providerConfigService.getCredentialsMetadata(tenantId, providerId);
+    const sanitized = providerConfigService.sanitizeMetadataForClient(meta);
+
+    res.json({ success: true, credentialsMetadata: sanitized });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/gateways/credentials-metadata', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const { providerId, keyIdentifier, authScheme, secretEnvVar, status } = req.body || {};
+
+    if (!providerId || !keyIdentifier) {
+      res.status(400).json({ success: false, message: 'providerId and keyIdentifier are required.' });
+      return;
+    }
+
+    const saved = await providerConfigService.setCredentialsMetadata(tenantId, providerId, {
+      keyIdentifier,
+      authScheme,
+      secretEnvVar,
+      status,
+    });
+
+    const sanitized = providerConfigService.sanitizeMetadataForClient(saved);
+    res.json({ success: true, message: 'Credentials metadata configured.', credentialsMetadata: sanitized });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
+  }
+});
+
+// Execution Audits (strictly sanitized, zero secrets)
+router.get('/gateways/audits', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const limit = Number(req.query.limit || 50);
+    const audits = await executionAuditLogger.getAuditsByTenant(tenantId, limit);
+    res.json({ success: true, audits });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
+  }
+});
+
+// Phase 5H: Gateway Broker Authentication
+router.post('/gateways/authenticate', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const authResult = await executionGateway.authenticate(tenantId);
+    res.json({
+      success: true,
+      authenticated: authResult.authenticated,
+      accountId: authResult.accountId,
+      mode: authResult.mode,
+      details: authResult.details,
+    });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
+  }
+});
+
+// Phase 5H: Open Orders via Execution Gateway
+router.get('/gateways/orders/open', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const orders = await executionGateway.getOpenOrders(tenantId);
+    res.json({ success: true, orders });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
+  }
+});
+
+// Phase 5H: Broker Positions via Execution Gateway
+router.get('/gateways/positions', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const positions = await executionGateway.getPositions(tenantId);
+    res.json({ success: true, positions });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
+  }
+});
+
+// Phase 5H: Inbound Broker Webhook Handler
+router.post('/gateways/webhook', async (req: any, res: Response) => {
+  try {
+    const tenantId = req.tenant?.tenant.id || (req.headers['x-tenant-id'] as string) || 'vertex-default';
+    const providerId = (req.query.provider as string) || 'real-sandbox';
+    const signature = (req.headers['x-broker-signature'] || req.headers['x-hub-signature-256']) as string;
+    const timestamp = req.headers['x-broker-timestamp'] as string;
+    const rawBody = req.rawBody || JSON.stringify(req.body);
+
+    const secret = process.env.BROKER_WEBHOOK_SECRET;
+    if (signature && secret) {
+      const isValid = brokerWebhookHandler.verifySignature(rawBody, signature, timestamp, secret);
+      if (!isValid) {
+        res.status(401).json({ success: false, message: 'Invalid webhook signature.' });
+        return;
+      }
+    }
+
+    const result = await brokerWebhookHandler.processWebhook(tenantId, providerId, req.body, rawBody);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Phase 5H: State Reconciliation Trigger
+router.post('/gateways/reconcile', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const autoFix = req.body?.autoFix === true;
+    const report = await brokerReconciliationService.reconcileTenant(tenantId, { autoFix });
+    res.json({ success: true, report });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Phase 5H: State Reconciliation Audits
+router.get('/gateways/reconciliation/audits', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const limit = Number(req.query.limit || 20);
+    const audits = await brokerReconciliationService.getReconciliationAudits(tenantId, limit);
+    res.json({ success: true, audits });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Market Data Gateway Routes
+router.get('/market/quotes', async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const symbolsParam = req.query.symbols as string;
+    const symbols = symbolsParam ? symbolsParam.split(',').map((s) => s.trim()) : ['NIFTY50', 'BANKNIFTY', 'RELIANCE', 'TCS', 'INFY'];
+    const quotes = await marketDataGateway.getQuotes(symbols, tenantId);
+    res.json({ success: true, quotes });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get('/market/quote/:symbol', async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const quote = await marketDataGateway.getQuote(req.params.symbol, tenantId);
+    if (!quote) {
+      res.status(404).json({ success: false, message: `Instrument '${req.params.symbol}' not found.` });
+      return;
+    }
+    res.json({ success: true, quote });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get('/market/candles/:symbol', async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const timeframe = (req.query.timeframe as string) || '15m';
+    const count = Number(req.query.count || 60);
+    const candles = await marketDataGateway.getCandles(req.params.symbol, timeframe, count, tenantId);
+    res.json({ success: true, candles });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 export default router;

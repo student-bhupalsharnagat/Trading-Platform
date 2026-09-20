@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { db, UserRecord } from '../db/database.ts';
@@ -13,8 +14,15 @@ export interface SafeUser {
   userId: string;
   countryCode: string;
   mobile: string;
+  email?: string;
+  role?: string;
+  parentId?: string | null;
+  hierarchyPath?: string;
+  company?: string;
   isVerified: boolean;
-  status: 'active' | 'suspended' | 'demo';
+  status: 'active' | 'suspended' | 'demo' | 'deactivated';
+  isFrozen?: boolean;
+  tenantId?: string;
   referralCode?: string;
   createdAt: string;
   lastLoginAt?: string;
@@ -28,8 +36,15 @@ export function sanitizeUser(user: UserRecord): SafeUser {
     userId: user.user_id,
     countryCode: user.country_code,
     mobile: user.mobile,
+    email: user.email,
+    role: user.role || 'CLIENT',
+    parentId: user.parent_id || null,
+    hierarchyPath: user.hierarchy_path || `root.${user.user_id}`,
+    company: user.company,
     isVerified: user.is_verified,
     status: user.status,
+    isFrozen: user.is_frozen ?? (user.status === 'suspended'),
+    tenantId: user.tenant_id || 'vertex-default',
     referralCode: user.referral_code,
     createdAt: user.created_at,
     lastLoginAt: user.last_login_at,
@@ -41,7 +56,7 @@ export class AuthService {
   /**
    * Register a new user and generate initial OTP
    */
-  public async register(input: RegisterInput): Promise<{
+  public async register(input: RegisterInput, tenantId?: string): Promise<{
     user: SafeUser;
     devOtp?: string;
     expiresAt: Date;
@@ -50,7 +65,7 @@ export class AuthService {
     const normalizedUserId = input.userId.trim().toLowerCase();
     const cleanMobile = input.mobile.replace(/\D/g, '');
 
-    // Check duplicate User ID
+    // Check duplicate User ID (scoped to tenant)
     if (db.findUserByUserId(normalizedUserId)) {
       const err = new Error('User ID is already taken.');
       (err as any).statusCode = 409;
@@ -94,6 +109,7 @@ export class AuthService {
       referredBy,
       isVerified: false,
       status: 'active',
+      tenantId: tenantId || 'vertex-default',
     });
 
     // Generate & send OTP
@@ -328,16 +344,69 @@ export class AuthService {
     };
   }
 
+  private revokedTokens = new Set<string>();
+
   /**
-   * Generates JWT token for user
+   * Revoke a specific token (or JTI)
    */
-  public generateToken(user: UserRecord): string {
+  public revokeToken(token: string): boolean {
+    if (!token) return false;
+    this.revokedTokens.add(token);
+    try {
+      const decoded = jwt.decode(token) as any;
+      if (decoded?.jti) {
+        this.revokedTokens.add(decoded.jti);
+      }
+    } catch {
+      // ignore decode error
+    }
+    return true;
+  }
+
+  /**
+   * Check if token has been revoked
+   */
+  public isTokenRevoked(token: string): boolean {
+    if (!token) return true;
+    if (this.revokedTokens.has(token)) return true;
+    try {
+      const decoded = jwt.decode(token) as any;
+      if (decoded?.jti && this.revokedTokens.has(decoded.jti)) {
+        return true;
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  }
+
+  /**
+   * Constant-time string comparison to mitigate timing attacks on secrets
+   */
+  public timingSafeCompare(a: string, b: string): boolean {
+    if (typeof a !== 'string' || typeof b !== 'string') return false;
+    const bufA = Buffer.from(a);
+    const bufB = Buffer.from(b);
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+  }
+
+  /**
+   * Generates JWT token for user with unique jti
+   */
+  public generateToken(user: any): string {
+    const jti = crypto.randomUUID();
     return jwt.sign(
       {
         id: user.id,
-        userId: user.user_id,
-        fullName: user.full_name,
-        status: user.status,
+        userId: user.user_id || user.userId,
+        fullName: user.full_name || user.fullName || 'User',
+        role: user.role || 'CLIENT',
+        hierarchyPath: user.hierarchy_path || user.hierarchyPath || `root.${user.user_id || user.userId}`,
+        status: user.status || 'active',
+        tenantId: user.tenant_id || user.tenantId || 'vertex-default',
+        isFrozen: user.is_frozen ?? user.isFrozen ?? (user.status === 'suspended'),
+        jti,
       },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
@@ -349,6 +418,7 @@ export class AuthService {
    */
   public verifyToken(token: string): any {
     try {
+      if (this.isTokenRevoked(token)) return null;
       return jwt.verify(token, JWT_SECRET);
     } catch {
       return null;

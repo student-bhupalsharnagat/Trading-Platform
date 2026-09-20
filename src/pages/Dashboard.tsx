@@ -14,6 +14,7 @@ import { ThemeToggle } from '../components/ThemeToggle.tsx';
 import { NotificationsModal } from '../components/NotificationsModal.tsx';
 import { DesktopMarketPanel } from '../components/DesktopMarketPanel.tsx';
 import { useLanguage } from '../context/LanguageContext.tsx';
+import { useTenant } from '../context/TenantContext.tsx';
 import { getMarketHoursInfo, MarketHoursInfo } from '../utils/marketHours.ts';
 import {
   Wallet,
@@ -38,6 +39,7 @@ import {
   User as UserIcon,
   Clock,
   HelpCircle,
+  Shield,
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -47,6 +49,7 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const { user, logout, showToast } = useAuth();
   const { t } = useLanguage();
+  const { branding, isTradingEnabled } = useTenant();
 
   // Navigation & Sub-views
   const [activeNav, setActiveNav] = useState<'watchlist' | 'orders' | 'positions' | 'history' | 'profile'>('watchlist');
@@ -291,21 +294,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       {/* Top Header Bar matching Screenshot 1 & 2 */}
       <header className="sticky top-0 z-30 bg-white/95 dark:bg-[#0B111C]/95 border-b border-slate-200 dark:border-[#1A2638] px-3 sm:px-4 lg:px-6 py-2.5 backdrop-blur-md">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
-          {/* Brand Logo & Name matching Screenshot 1 & 2: "GF" + "GoldFut" */}
+          {/* Brand Logo & Name */}
           <div
             onClick={() => setActiveNav('watchlist')}
             className="flex items-center gap-2.5 cursor-pointer select-none group shrink-0"
-            title="GoldFut Trading"
+            title={`${branding.brandName || 'VERTEX'} Trading Platform`}
           >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-amber-500 flex items-center justify-center font-black text-slate-950 text-sm shadow-md shadow-amber-500/20 group-hover:scale-105 transition-transform">
-              GF
-            </div>
+            {branding.logoUrl ? (
+              <img
+                src={branding.logoUrl}
+                alt={branding.brandName}
+                className="h-9 w-auto object-contain rounded-xl group-hover:scale-105 transition-transform"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div
+                className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-slate-950 text-sm shadow-md group-hover:scale-105 transition-transform"
+                style={{
+                  background: `linear-gradient(135deg, ${branding.primaryColor || '#F59E0B'}, ${branding.secondaryColor || '#D97706'})`,
+                  boxShadow: `0 4px 12px ${branding.primaryColor || '#F59E0B'}40`,
+                }}
+              >
+                {branding.shortName || 'VX'}
+              </div>
+            )}
             <div className="flex flex-col">
-              <span className="text-base sm:text-lg font-black text-amber-500 dark:text-amber-400 tracking-tight leading-none group-hover:text-amber-600 dark:group-hover:text-amber-300 transition-colors">
-                GoldFut
+              <span
+                className="text-base sm:text-lg font-black tracking-tight leading-none transition-colors"
+                style={{ color: branding.primaryColor || '#F59E0B' }}
+              >
+                {branding.brandName || 'VERTEX'}
               </span>
-              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
-                Trading Platform
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate max-w-[140px]">
+                {branding.tagline || 'Trading Platform'}
               </span>
             </div>
           </div>
@@ -423,6 +444,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               )}
             </button>
 
+            {/* Commercial Admin Desk Quick Launch (for Super Admin, Master, Broker, Sub-Broker) */}
+            {user?.role && ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(user.role) && (
+              <button
+                type="button"
+                id="header-admin-desk-btn"
+                onClick={() => onNavigate('/admin/dashboard')}
+                className="hidden md:flex px-2.5 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-600 dark:text-purple-300 font-semibold text-xs items-center gap-1.5 transition-colors cursor-pointer active:scale-95 shadow-xs"
+                title="Switch to Commercial Admin Desk"
+              >
+                <Shield className="w-3.5 h-3.5 text-purple-400" />
+                <span>Admin Desk</span>
+              </button>
+            )}
+
             {/* Quick Tour / How to trade guide button */}
             <button
               type="button"
@@ -491,7 +526,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       )}
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-4xl w-full mx-auto px-3 sm:px-4 py-4 pb-24">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-4 pb-24">
         {/* Verification & Live NSE/MCX Feed Banner */}
         <div className="mb-4 p-3 sm:p-4 rounded-xl bg-gradient-to-r from-[#0E1726] to-[#0A1220] border border-[#1E2E44] flex items-center justify-between shadow-lg">
           <div className="flex items-center gap-3">
@@ -1381,7 +1416,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       </main>
 
       {/* Bottom Sticky Navigation Bar matching Screenshot 1 (visible on mobile/tablet, hidden on desktop lg+) */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 lg:hidden bg-white/95 dark:bg-[#080E18]/95 border-t border-slate-200 dark:border-[#1A2638] backdrop-blur-md transition-colors">
+      <nav className="fixed bottom-0 left-0 right-0 z-30 lg:hidden bg-white/95 dark:bg-[#080E18]/95 border-t border-slate-200 dark:border-[#1A2638] backdrop-blur-md transition-colors pb-[env(safe-area-inset-bottom,0px)]">
         <div className="max-w-lg mx-auto grid grid-cols-5 py-2 px-2">
           {/* Watchlist */}
           <button

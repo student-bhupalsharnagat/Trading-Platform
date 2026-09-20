@@ -2,15 +2,26 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 
+export type UserRole = 'SUPER_ADMIN' | 'MASTER' | 'BROKER' | 'SUB_BROKER' | 'CLIENT';
+
 export interface UserRecord {
   id: string; // UUID
   full_name: string;
   user_id: string; // Normalized lowercase unique
   country_code: string;
   mobile: string; // Normalized unique
+  email?: string;
   password_hash: string;
+  role?: UserRole;
+  parent_id?: string | null;
+  hierarchy_path?: string;
+  company?: string;
+  address?: string;
+  commission_rate?: number;
   is_verified: boolean;
-  status: 'active' | 'suspended' | 'demo';
+  status: 'active' | 'suspended' | 'demo' | 'deactivated';
+  is_frozen?: boolean;
+  tenant_id?: string;
   referral_code?: string;
   referred_by?: string;
   created_at: string;
@@ -146,23 +157,42 @@ class DatabaseService {
     countryCode: string;
     mobile: string;
     passwordHash: string;
+    email?: string;
+    role?: UserRole;
+    parentId?: string | null;
+    hierarchyPath?: string;
+    company?: string;
+    address?: string;
+    commissionRate?: number;
+    demoBalance?: number;
     referralCode?: string;
     referredBy?: string;
     status?: 'active' | 'suspended' | 'demo';
     isVerified?: boolean;
+    tenantId?: string;
   }): UserRecord {
     const normalizedUserId = userData.userId.trim().toLowerCase();
     const cleanMobile = userData.mobile.replace(/\D/g, '');
 
-    // Check unique constraints
-    if (this.findUserByUserId(normalizedUserId)) {
+    // Check unique constraints (scoped per tenant if specified)
+    const existingByUserId = this.state.users.find(
+      (u) =>
+        u.user_id.toLowerCase() === normalizedUserId &&
+        (!userData.tenantId || (u.tenant_id || 'vertex-default') === userData.tenantId)
+    );
+    if (existingByUserId) {
       const err = new Error('User ID is already taken.');
       (err as any).statusCode = 409;
       (err as any).field = 'userId';
       throw err;
     }
 
-    if (this.findUserByMobile(cleanMobile)) {
+    const existingByMobile = this.state.users.find(
+      (u) =>
+        u.mobile.replace(/\D/g, '') === cleanMobile &&
+        (!userData.tenantId || (u.tenant_id || 'vertex-default') === userData.tenantId)
+    );
+    if (existingByMobile) {
       const err = new Error('Mobile number is already registered with another account.');
       (err as any).statusCode = 409;
       (err as any).field = 'mobile';
@@ -172,23 +202,84 @@ class DatabaseService {
     const now = new Date().toISOString();
     const newUser: UserRecord = {
       id: crypto.randomUUID(),
+      tenant_id: userData.tenantId || 'vertex-default',
       full_name: userData.fullName.trim(),
       user_id: normalizedUserId,
+      email: userData.email,
       country_code: userData.countryCode || '+91',
       mobile: cleanMobile,
       password_hash: userData.passwordHash,
+      role: userData.role || 'CLIENT',
+      parent_id: userData.parentId !== undefined ? userData.parentId : null,
+      hierarchy_path: userData.hierarchyPath || `root.${normalizedUserId}`,
+      company: userData.company,
+      address: userData.address,
+      commission_rate: userData.commissionRate,
       is_verified: userData.isVerified ?? false,
       status: userData.status || 'active',
+      is_frozen: false,
       referral_code: userData.referralCode,
       referred_by: userData.referredBy,
       created_at: now,
       updated_at: now,
-      demo_balance: 1000000.0, // ₹10,00,000 virtual demo trading balance
+      demo_balance: userData.demoBalance !== undefined ? userData.demoBalance : 1000000.0, // ₹10,00,000 virtual demo trading balance
     };
 
     this.state.users.push(newUser);
     this.save();
     return newUser;
+  }
+
+  public setUserFrozen(userId: string, isFrozen: boolean): UserRecord | null {
+    const user = this.findUserById(userId) || this.findUserByUserId(userId);
+    if (!user) return null;
+    user.is_frozen = isFrozen;
+    user.updated_at = new Date().toISOString();
+    this.save();
+    return user;
+  }
+
+  public isUserOrHierarchyFrozen(user: UserRecord): { frozen: boolean; reason?: string } {
+    // 1. Direct individual user freeze
+    if (user.status === 'suspended' || user.is_frozen === true) {
+      return {
+        frozen: true,
+        reason: 'Your trading account is currently frozen. Please contact customer support.',
+      };
+    }
+
+    // 2. Check Broker / Master hierarchy freeze
+    if (user.hierarchy_path) {
+      const pathParts = user.hierarchy_path.split('.');
+      for (const ancestorUserId of pathParts) {
+        if (ancestorUserId === 'root' || ancestorUserId.toLowerCase() === user.user_id.toLowerCase()) continue;
+        const ancestor = this.findUserByUserId(ancestorUserId);
+        if (ancestor) {
+          if (ancestor.status === 'suspended' || ancestor.is_frozen === true) {
+            const roleLabel = ancestor.role === 'MASTER' ? 'Master Broker' : 'Broker';
+            return {
+              frozen: true,
+              reason: `Trading is temporarily suspended for accounts under ${roleLabel} (${ancestor.full_name}).`,
+            };
+          }
+        }
+      }
+    }
+
+    return { frozen: false };
+  }
+
+  public getAllUsers(): UserRecord[] {
+    return this.state.users.map((u) => ({
+      ...u,
+      role: u.role || 'CLIENT',
+      hierarchy_path: u.hierarchy_path || `root.${u.user_id}`,
+    }));
+  }
+
+  public getUsersByTenant(tenantId: string): UserRecord[] {
+    const normTenant = tenantId || 'vertex-default';
+    return this.getAllUsers().filter((u) => (u.tenant_id || 'vertex-default') === normTenant);
   }
 
   public updateUser(id: string, updates: Partial<UserRecord>): UserRecord | undefined {

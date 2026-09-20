@@ -1,0 +1,23 @@
+import { Router } from 'express';
+import { requireAuth } from '../../middleware/authMiddleware';
+import { requireRole } from '../../middleware/requireRole';
+import { auditService } from '../../services/auditService';
+
+const router = Router();
+
+// GET /api/admin/audit-logs
+router.get(
+  '/',
+  requireAuth,
+  requireRole('SUPER_ADMIN', 'MASTER'),
+  (req, res) => {
+    try {
+      const logs = auditService.getLogs(100);
+      res.json({ success: true, data: logs });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
+);
+
+export default router;

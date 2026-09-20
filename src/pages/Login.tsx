@@ -4,6 +4,7 @@ import { AuthInput } from '../components/AuthInput.tsx';
 import { PasswordInput } from '../components/PasswordInput.tsx';
 import { LoadingButton } from '../components/LoadingButton.tsx';
 import { useAuth } from '../hooks/useAuth.ts';
+import { useTenant } from '../context/TenantContext.tsx';
 
 interface LoginProps {
   onNavigate: (route: string, state?: any) => void;
@@ -11,6 +12,7 @@ interface LoginProps {
 
 export const Login: React.FC<LoginProps> = ({ onNavigate }) => {
   const { login, loginDemo, showToast } = useAuth();
+  const { branding } = useTenant();
 
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -88,7 +90,7 @@ export const Login: React.FC<LoginProps> = ({ onNavigate }) => {
           </p>
           <div className="pt-2 border-t border-[#1E293B] w-full text-center">
             <p className="text-slate-400">
-              New to VERTEX?{' '}
+              New to {branding.brandName || 'VERTEX'}?{' '}
               <button
                 type="button"
                 onClick={() => onNavigate('/register')}

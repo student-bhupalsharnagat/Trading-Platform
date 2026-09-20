@@ -63,33 +63,33 @@ export const OptionChain: React.FC<OptionChainProps> = ({
 
   return (
     <div className="fixed inset-0 z-60 bg-black/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-fadeIn">
-      <div className="bg-[#080E18] border border-[#1A2638] rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[90vh]">
+      <div className="bg-[#080E18] border border-[#1A2638] rounded-2xl w-full max-w-5xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[92vh]">
         {/* Header */}
-        <div className="p-4 bg-[#0B111C] border-b border-[#141E2E] flex items-center justify-between">
+        <div className="p-3 sm:p-4 bg-[#0B111C] border-b border-[#141E2E] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400">
+            <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 shrink-0">
               <Layers className="w-5 h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-black text-white">{instrument.symbol} Option Chain</h2>
-                <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-sm sm:text-base md:text-lg font-black text-white truncate">{instrument.symbol} Option Chain</h2>
+                <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono shrink-0">
                   Spot: ₹{basePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </span>
               </div>
-              <p className="text-xs text-slate-400">Select any Strike to trade Calls (CE) or Puts (PE)</p>
+              <p className="text-[11px] text-slate-400 truncate">Select any Strike to trade Calls (CE) or Puts (PE)</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
             {/* Expiry Selector */}
-            <div className="flex items-center gap-1 bg-[#101928] p-1 rounded-lg border border-[#1E2E44]">
+            <div className="flex items-center gap-1 bg-[#101928] p-1 rounded-lg border border-[#1E2E44] overflow-x-auto no-scrollbar">
               {['31 Aug', '07 Sep', '14 Sep', '28 Sep'].map((exp) => (
                 <button
                   key={exp}
                   type="button"
                   onClick={() => setSelectedExpiry(exp)}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-md transition-colors cursor-pointer ${
+                  className={`px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-bold rounded-md transition-colors cursor-pointer whitespace-nowrap ${
                     selectedExpiry === exp
                       ? 'bg-amber-500 text-slate-950 shadow-xs'
                       : 'text-slate-400 hover:text-white'
@@ -103,7 +103,8 @@ export const OptionChain: React.FC<OptionChainProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="w-8 h-8 rounded-lg bg-[#142032] hover:bg-slate-800 border border-[#223652] text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+              className="w-8 h-8 rounded-lg bg-[#142032] hover:bg-slate-800 border border-[#223652] text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer shrink-0"
+              aria-label="Close"
             >
               <X className="w-4 h-4" />
             </button>
@@ -112,7 +113,7 @@ export const OptionChain: React.FC<OptionChainProps> = ({
 
         {/* Table Content */}
         <div className="overflow-x-auto overflow-y-auto flex-1 custom-scrollbar">
-          <table className="w-full text-xs text-left border-collapse font-mono">
+          <table className="w-full min-w-[680px] text-xs text-left border-collapse font-mono">
             {/* Table Head */}
             <thead className="sticky top-0 z-10 bg-[#0E1726] border-b border-[#1E2E44] text-slate-400 text-[11px] uppercase tracking-wider">
               <tr>

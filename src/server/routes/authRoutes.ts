@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authController } from '../controllers/authController.ts';
 import { requireAuth } from '../middleware/authMiddleware.ts';
+import { requireRegistrationEnabled } from '../middleware/tenantMiddleware.ts';
 import {
   registerLimiter,
   loginLimiter,
@@ -9,8 +10,8 @@ import {
 
 const router = Router();
 
-// Registration
-router.post('/register', registerLimiter, authController.register);
+// Registration (enforces tenant registration feature & freeze control server-side)
+router.post('/register', registerLimiter, requireRegistrationEnabled, authController.register);
 
 // OTP Verification & Resend
 router.post('/verify-otp', otpLimiter, authController.verifyOtp);

@@ -4,6 +4,8 @@ import { AuthInput } from '../components/AuthInput.tsx';
 import { PasswordInput } from '../components/PasswordInput.tsx';
 import { LoadingButton } from '../components/LoadingButton.tsx';
 import { useAuth } from '../hooks/useAuth.ts';
+import { useTenant } from '../context/TenantContext.tsx';
+import { ShieldAlert, AlertCircle } from 'lucide-react';
 
 interface RegisterProps {
   onNavigate: (route: string, state?: any) => void;
@@ -11,6 +13,7 @@ interface RegisterProps {
 
 export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
   const { register, loginDemo, showToast } = useAuth();
+  const { branding, isRegistrationEnabled, status } = useTenant();
 
   const [formData, setFormData] = useState({
     fullName: '',
@@ -132,7 +135,7 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
   return (
     <AuthCard
       title="Create your account"
-      subtitle="Join VERTEX and trade Multi-Asset Markets in real-time"
+      subtitle={`Join ${branding.brandName || 'VERTEX'} and trade Multi-Asset Markets in real-time`}
       footer={
         <div className="flex flex-col items-center space-y-2 text-xs">
           <p className="text-slate-400">
@@ -148,6 +151,19 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
         </div>
       }
     >
+      {/* Registration Disabled Banner if central policy restricts it */}
+      {!isRegistrationEnabled && (
+        <div className="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <div className="font-bold">Public Registration Suspended</div>
+            <div className="text-[11px] text-slate-300 mt-0.5">
+              New client sign-ups are temporarily disabled for {branding.brandName} by Central Risk Policy. Please use existing credentials to sign in, or launch Demo Access.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Auth Mode Switcher */}
       <div className="grid grid-cols-2 p-1 bg-[#080E18] rounded-xl border border-[#1A2638] mb-5">
         <button

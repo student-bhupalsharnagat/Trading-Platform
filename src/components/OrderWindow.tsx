@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Instrument } from '../types.ts';
 import { useAuth } from '../hooks/useAuth.ts';
+import { useTenant } from '../context/TenantContext.tsx';
 import { authApi } from '../services/authApi.ts';
 import { OptionChain } from './OptionChain.tsx';
 import { MarketClosedModal } from './MarketClosedModal.tsx';
@@ -18,6 +19,7 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Maximize2,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface OrderWindowProps {
@@ -40,6 +42,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
   onOrderPlaced,
 }) => {
   const { showToast } = useAuth();
+  const { isTradingEnabled, isOptionsEnabled, branding } = useTenant();
 
   // Active View Tab inside Order Window: 'ORDER' or 'CHART'
   const [activeView, setActiveView] = useState<'ORDER' | 'CHART'>('ORDER');
@@ -261,11 +264,31 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
             <div className="flex items-center justify-between mt-3 flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => setShowOptionChain(true)}
-                className="px-3 py-1 rounded-md border border-amber-500/70 bg-transparent text-amber-600 dark:text-amber-400 text-xs font-bold tracking-wide hover:bg-amber-500/10 transition-colors flex items-center gap-1.5 cursor-pointer"
+                onClick={() => {
+                  if (!isOptionsEnabled) {
+                    showToast({
+                      type: 'warning',
+                      title: 'Options Trading Disabled',
+                      description: `Derivatives/Options trading is disabled on ${branding.brandName} desk by central policy.`,
+                    });
+                    return;
+                  }
+                  setShowOptionChain(true);
+                }}
+                className={`px-3 py-1 rounded-md border text-xs font-bold tracking-wide transition-colors flex items-center gap-1.5 cursor-pointer ${
+                  isOptionsEnabled
+                    ? 'border-amber-500/70 bg-transparent text-amber-600 dark:text-amber-400 hover:bg-amber-500/10'
+                    : 'border-slate-700/60 bg-slate-800/40 text-slate-500 hover:text-slate-400'
+                }`}
+                title={!isOptionsEnabled ? 'Options trading is disabled for this tenant' : 'View Option Chain'}
               >
                 <Layers className="w-3.5 h-3.5" />
-                Option Chain
+                <span>Option Chain</span>
+                {!isOptionsEnabled && (
+                  <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                    OFF
+                  </span>
+                )}
               </button>
 
               <div className="flex items-center gap-2 font-mono text-xs font-bold">
@@ -561,15 +584,24 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
             </div>
           )}
 
+          {/* Trading Disabled Notification if Central Policy blocks it */}
+          {!isTradingEnabled && (
+            <div className="px-4 py-2.5 bg-rose-950/80 border-t border-rose-800 text-rose-200 text-xs flex items-center justify-center gap-2 font-medium">
+              <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>Trading is suspended on {branding.brandName} desk by Central Risk.</span>
+            </div>
+          )}
+
           {/* Bottom Dual Action Buttons (Flush Split) */}
           <div id="tour-target-action-buttons" className="grid grid-cols-2 border-t border-[#141E2E]">
             {/* SELL BID Button (Coral Red) */}
             <button
               type="button"
               id="order-window-sell-btn"
-              disabled={submitting}
+              disabled={submitting || !isTradingEnabled}
               onClick={() => handleExecuteOrder('SELL')}
-              className="py-3.5 px-4 bg-[#EF4444] hover:bg-[#DC2626] active:bg-[#B91C1C] text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center transition-all cursor-pointer shadow-lg disabled:opacity-50"
+              className="py-3.5 px-4 bg-[#EF4444] hover:bg-[#DC2626] active:bg-[#B91C1C] text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center transition-all cursor-pointer shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              title={!isTradingEnabled ? 'Trading suspended by central risk' : 'Place Sell Order'}
             >
               <div className="flex items-center gap-1.5">
                 <ArrowDownRight className="w-4 h-4 stroke-[3]" />
@@ -584,9 +616,10 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
             <button
               type="button"
               id="order-window-buy-btn"
-              disabled={submitting}
+              disabled={submitting || !isTradingEnabled}
               onClick={() => handleExecuteOrder('BUY')}
-              className="py-3.5 px-4 bg-[#10B981] hover:bg-[#059669] active:bg-[#047857] text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center transition-all cursor-pointer shadow-lg disabled:opacity-50"
+              className="py-3.5 px-4 bg-[#10B981] hover:bg-[#059669] active:bg-[#047857] text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center transition-all cursor-pointer shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              title={!isTradingEnabled ? 'Trading suspended by central risk' : 'Place Buy Order'}
             >
               <div className="flex items-center gap-1.5">
                 <ArrowUpRight className="w-4 h-4 stroke-[3]" />

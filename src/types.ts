@@ -1,3 +1,7 @@
+export * from './types/tenant.ts';
+
+export type UserRole = 'SUPER_ADMIN' | 'MASTER' | 'BROKER' | 'SUB_BROKER' | 'CLIENT';
+
 export interface User {
   id: string;
   fullName: string;
@@ -5,8 +9,12 @@ export interface User {
   countryCode: string;
   mobile: string;
   email?: string;
+  role?: UserRole;
+  parentId?: string | null;
+  hierarchyPath?: string;
+  company?: string;
   isVerified: boolean;
-  status: 'active' | 'suspended' | 'demo';
+  status: 'active' | 'suspended' | 'demo' | 'deactivated';
   referralCode?: string;
   createdAt: string;
   lastLoginAt?: string;
@@ -19,6 +27,8 @@ export interface User {
     accountNumber: string;
     ifsc: string;
   };
+  tenantId?: string;
+  isFrozen?: boolean;
 }
 
 export interface AuthResponse {
@@ -57,7 +67,7 @@ export interface Instrument {
   symbol: string;
   name?: string;
   sectionName?: string;
-  category: 'ALL' | 'CRYPTO' | 'EQUITY' | 'FOREX' | 'COMMODITY' | 'INDEX';
+  category: 'ALL' | 'CRYPTO' | 'EQUITY' | 'FOREX' | 'COMMODITY' | 'INDEX' | 'OPTIONS';
   expiry: string;
   lastPrice: number;
   openPrice: number;
@@ -91,6 +101,8 @@ export interface Position {
   pnl: number;
   pnlPercent: number;
   timestamp: string;
+  userId?: string;
+  tenantId?: string;
 }
 
 export interface Order {
@@ -109,6 +121,8 @@ export interface Order {
   status: 'EXECUTED' | 'PENDING' | 'CANCELLED' | 'REJECTED';
   time: string;
   date: string;
+  userId?: string;
+  tenantId?: string;
 }
 
 export interface WalletFunds {

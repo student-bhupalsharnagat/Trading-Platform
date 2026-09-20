@@ -1,4 +1,5 @@
 import React, { ReactNode } from 'react';
+import { useTenant } from '../context/TenantContext.tsx';
 
 interface AuthCardProps {
   title?: string;
@@ -13,6 +14,8 @@ export const AuthCard: React.FC<AuthCardProps> = ({
   children,
   footer,
 }) => {
+  const { branding } = useTenant();
+
   return (
     <div className="min-h-screen bg-[#060B13] flex flex-col items-center justify-center px-4 py-10 relative overflow-hidden">
       {/* Subtle background ambient glows */}
@@ -24,20 +27,44 @@ export const AuthCard: React.FC<AuthCardProps> = ({
         id="vertex-auth-card"
         className="w-full max-w-[440px] z-10 flex flex-col items-center"
       >
-        {/* Brand Header with Diamond Icon matching Screenshot */}
+        {/* Brand Header with Dynamic Icon or Logo */}
         <div className="flex flex-col items-center mb-6 text-center">
-          <div className="w-13 h-13 rounded-2xl bg-[#0F1726] border border-orange-500/30 flex items-center justify-center shadow-lg shadow-orange-950/20 mb-3.5 transition-transform hover:scale-105 duration-200">
-            {/* Diamond Geometry Icon */}
-            <div className="w-5 h-5 border-2 border-orange-400 rotate-45 rounded-sm flex items-center justify-center">
-              <div className="w-1.5 h-1.5 bg-orange-400 rounded-xs" />
+          {branding.logoUrl ? (
+            <img
+              src={branding.logoUrl}
+              alt={branding.brandName}
+              className="h-12 w-auto object-contain mb-3.5"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div
+              className="w-13 h-13 rounded-2xl bg-[#0F1726] border flex items-center justify-center shadow-lg mb-3.5 transition-transform hover:scale-105 duration-200"
+              style={{
+                borderColor: `${branding.primaryColor || '#F59E0B'}40`,
+                boxShadow: `0 10px 25px -5px ${branding.primaryColor || '#F59E0B'}20`,
+              }}
+            >
+              {/* Diamond Geometry Icon */}
+              <div
+                className="w-5 h-5 border-2 rotate-45 rounded-sm flex items-center justify-center"
+                style={{ borderColor: branding.primaryColor || '#F59E0B' }}
+              >
+                <div
+                  className="w-1.5 h-1.5 rounded-xs"
+                  style={{ backgroundColor: branding.primaryColor || '#F59E0B' }}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
-          <h1 className="text-2xl font-extrabold tracking-[0.2em] text-[#FF7A00] font-mono">
-            VERTEX
+          <h1
+            className="text-2xl font-extrabold tracking-[0.2em] font-mono"
+            style={{ color: branding.primaryColor || '#FF7A00' }}
+          >
+            {branding.brandName || 'VERTEX'}
           </h1>
           <p className="text-xs text-[#8A99AD] italic mt-1 font-medium">
-            Trade smarter. Move faster.
+            {branding.tagline || 'Trade smarter. Move faster.'}
           </p>
 
           {title && (

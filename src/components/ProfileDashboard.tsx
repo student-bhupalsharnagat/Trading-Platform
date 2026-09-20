@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User, WalletFunds, SupportTicket, AppNotification } from '../types.ts';
 import { useAuth } from '../hooks/useAuth.ts';
+import { useTenant } from '../context/TenantContext.tsx';
 import { authApi } from '../services/authApi.ts';
 import { SupportTicketsSection } from './SupportTicketsSection.tsx';
 import { WalletModal } from './WalletModal.tsx';
@@ -26,6 +27,9 @@ import {
   Send,
   RefreshCw,
   Plus,
+  Mail,
+  Phone,
+  ExternalLink,
 } from 'lucide-react';
 
 interface ProfileDashboardProps {
@@ -40,6 +44,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
   onRefreshPortfolio,
 }) => {
   const { logout, showToast } = useAuth();
+  const { branding } = useTenant();
 
   // Active modal state
   const [activeModal, setActiveModal] = useState<
@@ -123,13 +128,20 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
   };
 
   return (
-    <div className="max-w-xl mx-auto px-4 py-4 sm:py-6 space-y-4 animate-fadeIn">
+    <div className="max-w-3xl mx-auto px-2 sm:px-4 py-4 sm:py-6 space-y-4 animate-fadeIn">
       {/* Profile Header Card matching Screenshot 3 */}
       <div className="bg-[#0B111C] border border-[#1A2638] rounded-2xl p-4 sm:p-5 shadow-xl">
         <div className="flex items-center gap-3.5">
           {/* Avatar Icon */}
-          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-slate-950 font-black text-base shadow-md shadow-amber-500/20">
-            VX
+          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-slate-950 font-black text-base shadow-md shadow-amber-500/20 shrink-0">
+            {user.fullName
+              ? user.fullName
+                  .split(' ')
+                  .map((n: string) => n[0])
+                  .join('')
+                  .slice(0, 2)
+                  .toUpperCase()
+              : 'VX'}
           </div>
 
           {/* Name & ID */}
@@ -294,6 +306,39 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
           </div>
           <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-white transition-colors" />
         </button>
+      </div>
+
+      {/* White-Label Desk Identity & Support Box */}
+      <div className="p-4 rounded-2xl bg-[#090F1B] border border-[#172337] space-y-2.5">
+        <div className="flex items-center justify-between">
+          <div className="text-xs font-bold text-slate-300">Desk & Compliance</div>
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold">
+            {branding.shortName || 'WL'}
+          </span>
+        </div>
+        <div className="flex items-center justify-between text-xs text-slate-400">
+          <span className="flex items-center gap-1.5">
+            <Mail className="w-3.5 h-3.5 text-slate-500" />
+            Support:
+          </span>
+          <a
+            href={`mailto:${branding.supportEmail || 'support@vertex-markets.io'}`}
+            className="text-amber-400 hover:underline font-mono text-[11px]"
+          >
+            {branding.supportEmail || 'support@vertex-markets.io'}
+          </a>
+        </div>
+        {branding.supportPhone && (
+          <div className="flex items-center justify-between text-xs text-slate-400">
+            <span className="flex items-center gap-1.5">
+              <Phone className="w-3.5 h-3.5 text-slate-500" />
+              Desk Hotline:
+            </span>
+            <span className="font-mono text-[11px] text-slate-300">
+              {branding.supportPhone}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Sign Out Button matching Screenshot 3 */}
@@ -541,11 +586,37 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
                 <strong>Mandatory Risk Disclosure:</strong> 9 out of 10 individual traders in equity Futures and Options Segment incurred net losses. On average, loss makers registered net trading loss close to ₹50,000.
               </div>
               <p>
-                VERTEX provides simulated execution and financial market routing services. All orders placed are subject to margin availability and market volatility.
+                {branding.brandName || 'VERTEX'} provides financial market execution and routing services. All orders placed are subject to client margin availability and prevailing market volatility.
               </p>
               <p>
                 Ensure adequate stop loss protections are placed on high leverage intraday positions.
               </p>
+              <div className="pt-2 border-t border-[#1E2E44] flex flex-col gap-2">
+                <div className="text-[11px] text-slate-400">
+                  Operated under white-label authorization. Support:{' '}
+                  <span className="text-amber-400 font-mono">{branding.supportEmail || 'support@vertex-markets.io'}</span>
+                </div>
+                {branding.termsUrl && (
+                  <a
+                    href={branding.termsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-amber-400 hover:underline"
+                  >
+                    View Official Terms & Conditions <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+                {branding.privacyUrl && (
+                  <a
+                    href={branding.privacyUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-amber-400 hover:underline"
+                  >
+                    View Privacy Policy <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </div>
             </div>
           </div>
         </div>
