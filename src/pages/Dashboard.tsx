@@ -1514,10 +1514,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       <NotificationsModal
         isOpen={isNotificationsOpen}
         notifications={notifications}
-        unreadCount={unreadNotificationsCount}
         onClose={() => setIsNotificationsOpen(false)}
         onMarkAllRead={handleMarkAllNotificationsRead}
-        onMarkRead={handleMarkNotificationRead}
+        onMarkAsRead={handleMarkNotificationRead}
         onClearAll={handleClearNotifications}
       />
 

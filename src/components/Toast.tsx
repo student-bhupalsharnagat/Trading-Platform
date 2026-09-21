@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, AlertCircle, Info, KeyRound, X, Copy, Check } from 'lucide-react';
+import { CheckCircle2, AlertCircle, AlertTriangle, Info, KeyRound, X, Copy, Check } from 'lucide-react';
 import { ToastMessage } from '../types.ts';
 
 interface ToastContainerProps {
@@ -39,6 +39,8 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({
               ? 'bg-[#180B0F]/95 border-rose-500/60 text-rose-100 shadow-rose-950/40 ring-1 ring-rose-500/30'
               : toast.type === 'success'
               ? 'bg-[#061810]/95 border-emerald-500/60 text-emerald-100 shadow-emerald-950/50 ring-1 ring-emerald-500/40'
+              : toast.type === 'warning'
+              ? 'bg-[#1A1406]/95 border-amber-500/60 text-amber-100 shadow-amber-950/40 ring-1 ring-amber-500/30'
               : 'bg-[#0E1626]/95 border-slate-700/60 text-slate-100 shadow-black/50 ring-1 ring-slate-700/30'
           }`}
         >
@@ -48,6 +50,7 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({
                 {toast.type === 'otp' && <KeyRound className="w-5 h-5 text-orange-400 animate-pulse" />}
                 {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-400" />}
                 {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
+                {toast.type === 'warning' && <AlertTriangle className="w-5 h-5 text-amber-400" />}
                 {toast.type === 'info' && <Info className="w-5 h-5 text-sky-400" />}
               </div>
 

@@ -46,7 +46,7 @@ export interface AuthResponse {
 
 export interface ToastMessage {
   id: string;
-  type: 'success' | 'error' | 'info' | 'otp';
+  type: 'success' | 'error' | 'warning' | 'info' | 'otp';
   title: string;
   description?: string;
   otpCode?: string;

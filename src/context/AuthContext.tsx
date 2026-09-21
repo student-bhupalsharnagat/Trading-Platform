@@ -4,6 +4,7 @@ import { authApi } from '../services/authApi.ts';
 
 interface AuthContextType {
   user: User | null;
+  isAuthenticated: boolean;
   loading: boolean;
   toasts: ToastMessage[];
   showToast: (toast: Omit<ToastMessage, 'id'>) => void;
@@ -31,6 +32,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [pendingVerificationUserId, setPendingVerificationUserId] = useState<string | null>(null);
   const [latestDevOtp, setLatestDevOtp] = useState<string | null>(null);
+  const isAuthenticated = user !== null;
 
   const showToast = (toastData: Omit<ToastMessage, 'id'>) => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -201,6 +203,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     <AuthContext.Provider
       value={{
         user,
+        isAuthenticated,
         loading,
         toasts,
         showToast,

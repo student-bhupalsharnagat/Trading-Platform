@@ -28,8 +28,8 @@ export const DesktopMarketPanel: React.FC<DesktopMarketPanelProps> = ({
   onOpenWallet,
 }) => {
   const isPositive = spotlightInstrument.change >= 0;
-  const high = spotlightInstrument.high || spotlightInstrument.lastPrice * 1.015;
-  const low = spotlightInstrument.low || spotlightInstrument.lastPrice * 0.985;
+  const high = spotlightInstrument.highPrice || spotlightInstrument.lastPrice * 1.015;
+  const low = spotlightInstrument.lowPrice || spotlightInstrument.lastPrice * 0.985;
   const range = high - low;
   const currentPosPercent = range > 0 ? Math.min(100, Math.max(0, ((spotlightInstrument.lastPrice - low) / range) * 100)) : 50;
 
