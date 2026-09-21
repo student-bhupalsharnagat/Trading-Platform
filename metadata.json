@@ -1,0 +1,6 @@
+{
+  "name": "VERTEX Trading",
+  "description": "Commercial multi-tenant white-label trading platform with dynamic branding, domain-based tenant resolution, central platform controls, and isolated tenant risk management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
