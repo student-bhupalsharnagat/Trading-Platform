@@ -37,7 +37,7 @@
       "country_code": "+91",
       "mobile": "9999999999",
       "email": "admin@goldfut.com",
-      "password_hash": "$2b$10$7P5.3pGSBKG09opiTJzTx.o8mVbBuItNBLiAOd9DSU5jzaaAbjW.S",
+      "password_hash": "$2b$10$sxmdyaurt/LTr/c5PMQuuedxv8TDpmeS8JpH9V9KgOGsneGi60T/y",
       "role": "SUPER_ADMIN",
       "parent_id": null,
       "hierarchy_path": "root",
@@ -47,9 +47,9 @@
       "is_verified": true,
       "status": "active",
       "created_at": "2026-09-16T07:46:37.415Z",
-      "updated_at": "2026-09-20T18:19:22.424Z",
+      "updated_at": "2026-09-20T19:42:12.570Z",
       "demo_balance": 1000000,
-      "last_login_at": "2026-09-20T18:19:22.559Z"
+      "last_login_at": "2026-09-20T19:42:12.682Z"
     },
     {
       "id": "master-node-0001",
@@ -159,7 +159,7 @@
       "status": "active",
       "is_frozen": true,
       "created_at": "2026-09-16T08:21:05.501Z",
-      "updated_at": "2026-09-20T18:19:25.879Z",
+      "updated_at": "2026-09-20T19:43:51.807Z",
       "demo_balance": 1000000
     },
     {
@@ -195,7 +195,7 @@
       "status": "active",
       "is_frozen": false,
       "created_at": "2026-09-16T08:36:29.509Z",
-      "updated_at": "2026-09-20T18:19:27.794Z",
+      "updated_at": "2026-09-20T19:44:33.552Z",
       "demo_balance": 1000000
     },
     {
@@ -231,7 +231,7 @@
       "status": "active",
       "is_frozen": false,
       "created_at": "2026-09-16T09:02:47.152Z",
-      "updated_at": "2026-09-20T18:19:32.795Z",
+      "updated_at": "2026-09-20T19:44:46.965Z",
       "demo_balance": 1000000
     },
     {
@@ -249,7 +249,7 @@
       "status": "active",
       "is_frozen": false,
       "created_at": "2026-09-16T09:02:47.153Z",
-      "updated_at": "2026-09-20T18:19:31.702Z",
+      "updated_at": "2026-09-20T19:44:45.957Z",
       "demo_balance": 1000000
     },
     {
@@ -352,7 +352,7 @@
       "status": "active",
       "is_frozen": false,
       "created_at": "2026-09-19T07:23:50.397Z",
-      "updated_at": "2026-09-20T18:19:37.282Z",
+      "updated_at": "2026-09-20T19:44:58.521Z",
       "demo_balance": 1000000
     },
     {
@@ -370,7 +370,7 @@
       "status": "active",
       "is_frozen": false,
       "created_at": "2026-09-19T07:23:50.397Z",
-      "updated_at": "2026-09-20T18:19:36.176Z",
+      "updated_at": "2026-09-20T19:44:57.556Z",
       "demo_balance": 1000000
     },
     {
@@ -388,7 +388,7 @@
       "status": "active",
       "is_frozen": false,
       "created_at": "2026-09-19T07:23:50.398Z",
-      "updated_at": "2026-09-20T18:19:36.176Z",
+      "updated_at": "2026-09-20T19:44:57.557Z",
       "demo_balance": 1000000
     },
     {
@@ -649,6 +649,120 @@
       "is_frozen": true,
       "created_at": "2026-09-20T18:33:42.317Z",
       "updated_at": "2026-09-20T18:33:42.326Z",
+      "demo_balance": 1000000
+    },
+    {
+      "id": "fb4c818f-ac06-4516-a96c-1484b47f5025",
+      "tenant_id": "tenant_phase5j_test",
+      "full_name": "Master Trader 5J",
+      "user_id": "master_5j_581873",
+      "email": "master_5j_581873@vertex.trade",
+      "country_code": "+91",
+      "mobile": "98758187301",
+      "password_hash": "$2a$10$wT8BfZF/Y/wZ84aG9U0t6eYxUo9Jg7v1sYqQ4M4e4K0n0s9N7w5vC",
+      "role": "MASTER",
+      "parent_id": null,
+      "hierarchy_path": "root.master_5j_581873",
+      "is_verified": true,
+      "status": "active",
+      "is_frozen": true,
+      "created_at": "2026-09-20T19:29:41.876Z",
+      "updated_at": "2026-09-20T19:29:41.916Z",
+      "demo_balance": 1000000
+    },
+    {
+      "id": "596afa7f-7d24-422c-8e58-aeb20f19cc04",
+      "tenant_id": "tenant_phase5j_test",
+      "full_name": "Broker 5J",
+      "user_id": "broker_5j_581873",
+      "email": "broker_5j_581873@vertex.trade",
+      "country_code": "+91",
+      "mobile": "98758187302",
+      "password_hash": "$2a$10$wT8BfZF/Y/wZ84aG9U0t6eYxUo9Jg7v1sYqQ4M4e4K0n0s9N7w5vC",
+      "role": "BROKER",
+      "parent_id": "master_5j_581873",
+      "hierarchy_path": "root.master_5j_581873.broker_5j_581873",
+      "is_verified": true,
+      "status": "active",
+      "is_frozen": true,
+      "created_at": "2026-09-20T19:29:41.890Z",
+      "updated_at": "2026-09-20T19:29:41.909Z",
+      "demo_balance": 1000000
+    },
+    {
+      "id": "6d28c60a-1cfa-42d5-8966-5882e3886541",
+      "tenant_id": "tenant_phase5j_test",
+      "full_name": "Trader 5J",
+      "user_id": "trader_5j_581873",
+      "email": "trader_5j_581873@vertex.trade",
+      "country_code": "+91",
+      "mobile": "98758187303",
+      "password_hash": "$2a$10$wT8BfZF/Y/wZ84aG9U0t6eYxUo9Jg7v1sYqQ4M4e4K0n0s9N7w5vC",
+      "role": "CLIENT",
+      "parent_id": "broker_5j_581873",
+      "hierarchy_path": "root.master_5j_581873.broker_5j_581873.trader_5j_581873",
+      "is_verified": true,
+      "status": "active",
+      "is_frozen": true,
+      "created_at": "2026-09-20T19:29:41.896Z",
+      "updated_at": "2026-09-20T19:29:41.906Z",
+      "demo_balance": 1000000
+    },
+    {
+      "id": "531fab3e-2bad-4104-94f2-606c14135912",
+      "tenant_id": "tenant_phase5j_test",
+      "full_name": "Master Trader 5J",
+      "user_id": "master_5j_459578",
+      "email": "master_5j_459578@vertex.trade",
+      "country_code": "+91",
+      "mobile": "98745957801",
+      "password_hash": "$2a$10$wT8BfZF/Y/wZ84aG9U0t6eYxUo9Jg7v1sYqQ4M4e4K0n0s9N7w5vC",
+      "role": "MASTER",
+      "parent_id": null,
+      "hierarchy_path": "root.master_5j_459578",
+      "is_verified": true,
+      "status": "active",
+      "is_frozen": true,
+      "created_at": "2026-09-20T19:44:19.580Z",
+      "updated_at": "2026-09-20T19:44:19.610Z",
+      "demo_balance": 1000000
+    },
+    {
+      "id": "e8c9d45d-1262-4065-8c08-a83a65b3b316",
+      "tenant_id": "tenant_phase5j_test",
+      "full_name": "Broker 5J",
+      "user_id": "broker_5j_459578",
+      "email": "broker_5j_459578@vertex.trade",
+      "country_code": "+91",
+      "mobile": "98745957802",
+      "password_hash": "$2a$10$wT8BfZF/Y/wZ84aG9U0t6eYxUo9Jg7v1sYqQ4M4e4K0n0s9N7w5vC",
+      "role": "BROKER",
+      "parent_id": "master_5j_459578",
+      "hierarchy_path": "root.master_5j_459578.broker_5j_459578",
+      "is_verified": true,
+      "status": "active",
+      "is_frozen": true,
+      "created_at": "2026-09-20T19:44:19.592Z",
+      "updated_at": "2026-09-20T19:44:19.607Z",
+      "demo_balance": 1000000
+    },
+    {
+      "id": "d44d4d19-7a94-4b2d-822d-aab4cda951dd",
+      "tenant_id": "tenant_phase5j_test",
+      "full_name": "Trader 5J",
+      "user_id": "trader_5j_459578",
+      "email": "trader_5j_459578@vertex.trade",
+      "country_code": "+91",
+      "mobile": "98745957803",
+      "password_hash": "$2a$10$wT8BfZF/Y/wZ84aG9U0t6eYxUo9Jg7v1sYqQ4M4e4K0n0s9N7w5vC",
+      "role": "CLIENT",
+      "parent_id": "broker_5j_459578",
+      "hierarchy_path": "root.master_5j_459578.broker_5j_459578.trader_5j_459578",
+      "is_verified": true,
+      "status": "active",
+      "is_frozen": true,
+      "created_at": "2026-09-20T19:44:19.597Z",
+      "updated_at": "2026-09-20T19:44:19.605Z",
       "demo_balance": 1000000
     }
   ],

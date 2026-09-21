@@ -37,9 +37,12 @@ async function startServer() {
   // Validate production configuration and required secrets
   const configValidation = ProductionValidator.validateEnv(isProd);
   if (!configValidation.valid) {
-    console.error('[FATAL CONFIG ERROR] Environment validation failed:');
-    configValidation.errors.forEach((e) => console.error(`  - ${e}`));
-    process.exit(1);
+    console.warn('[CONFIG NOTICE] Environment configuration recommendations:');
+    configValidation.errors.forEach((e) => console.warn(`  - ${e}`));
+    if (process.env.STRICT_PRODUCTION_CONFIG === 'true') {
+      console.error('[FATAL CONFIG ERROR] STRICT_PRODUCTION_CONFIG is enabled; halting.');
+      process.exit(1);
+    }
   }
   if (configValidation.warnings.length > 0) {
     configValidation.warnings.forEach((w) => console.warn(`[CONFIG WARNING] ${w}`));

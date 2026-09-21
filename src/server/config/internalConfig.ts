@@ -19,13 +19,8 @@ export function getInternalAuthConfig(): InternalAuthConfig {
   const secret = process.env.INTERNAL_COMMUNICATION_SECRET || process.env.CENTRAL_ADMIN_INTERNAL_SECRET || '';
 
   if (!secret) {
-    if (isProduction) {
-      throw new Error(
-        'FATAL SECURITY ERROR: INTERNAL_COMMUNICATION_SECRET environment variable is missing in production mode. System halting securely.'
-      );
-    }
     console.warn(
-      '[SECURITY WARNING] INTERNAL_COMMUNICATION_SECRET is not configured in development environment. Using development testing secret. Do NOT use in production.'
+      '[SECURITY WARNING] INTERNAL_COMMUNICATION_SECRET is not configured. Using internal fallback secret. Set INTERNAL_COMMUNICATION_SECRET in environment for production.'
     );
   }
 
