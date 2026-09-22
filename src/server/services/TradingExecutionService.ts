@@ -27,6 +27,7 @@ export interface PlaceOrderInput {
   orderType?: string; // 'MARKET' | 'LIMIT'
   product?: string;   // 'INTRADAY' | 'HOLDING'
   lots: number;
+  quantity?: number;
   price?: number;
   stopLoss?: number;
   target?: number;
@@ -108,8 +109,12 @@ export class TradingExecutionService {
     }
 
     const execPrice = input.price && input.price > 0 ? input.price : inst.lastPrice;
-    const requiredMargin = (inst.intraday || 30000) * lots;
-    const qty = lots * inst.lotSize;
+    const lotSize = inst.lotSize || 1;
+    const marginPerLot = (input.product || '').toUpperCase() === 'HOLDING'
+      ? (inst.holding || (inst.lastPrice * lotSize))
+      : (inst.intraday || Math.round(inst.lastPrice * lotSize * 0.2));
+    const requiredMargin = marginPerLot * lots;
+    const qty = input.quantity && input.quantity > 0 ? input.quantity : lots * lotSize;
     const isLimit = (input.orderType || '').toUpperCase() === 'LIMIT';
     const orderId = `ORD-${Math.floor(10000 + Math.random() * 90000)}`;
 
@@ -546,15 +551,17 @@ export class TradingExecutionService {
             memPositions.splice(existingPosIdx, 1);
           }
         } else {
-          const posType: 'BUY' | 'SELL' = result.updatedPosition.quantity > 0 ? 'BUY' : 'SELL';
+          const posType: 'BUY' | 'SELL' = result.updatedPosition.quantity >= 0 ? 'BUY' : 'SELL';
           const posQty = Math.abs(result.updatedPosition.quantity);
-          const posLots = Math.max(1, Math.round(posQty / inst.lotSize));
+          const lotSize = inst.lotSize || 1;
+          const posLots = Math.max(1, Math.round(posQty / lotSize));
+          const avgPrice = Number(result.updatedPosition.average_price);
           const ltp = inst.lastPrice;
           const pnl = posType === 'BUY'
-            ? (ltp - result.updatedPosition.average_price) * posQty
-            : (result.updatedPosition.average_price - ltp) * posQty;
-          const pnlPercent = (result.updatedPosition.average_price * posQty) > 0
-            ? Number(((pnl / (result.updatedPosition.average_price * posQty)) * 100).toFixed(2))
+            ? (ltp - avgPrice) * posQty
+            : (avgPrice - ltp) * posQty;
+          const pnlPercent = (avgPrice * posQty) > 0
+            ? Number(((pnl / (avgPrice * posQty)) * 100).toFixed(2))
             : 0;
 
           const updatedPosItem = {
@@ -565,8 +572,8 @@ export class TradingExecutionService {
             product: (input.product as any) || 'INTRADAY',
             qty: posQty,
             lots: posLots,
-            lotSize: inst.lotSize,
-            avgPrice: result.updatedPosition.average_price,
+            lotSize,
+            avgPrice,
             ltp,
             pnl: Number(pnl.toFixed(2)),
             pnlPercent,

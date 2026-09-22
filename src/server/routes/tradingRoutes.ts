@@ -140,29 +140,30 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
       if (pgPositions && pgPositions.length > 0) {
         positions = pgPositions.map((p) => {
           const inst = findInstrument(p.instrument_id);
-          const ltp = inst ? inst.lastPrice : p.average_price;
-          const posType = p.quantity > 0 ? 'BUY' : 'SELL';
-          const qty = Math.abs(p.quantity);
-          const lotSize = inst?.lotSize || 100;
+          const avgPrice = Number(p.average_price);
+          const ltp = inst ? inst.lastPrice : avgPrice;
+          const posType: 'BUY' | 'SELL' = Number(p.quantity) >= 0 ? 'BUY' : 'SELL';
+          const qty = Math.abs(Number(p.quantity));
+          const lotSize = inst?.lotSize || 1;
           const lots = Math.max(1, Math.round(qty / lotSize));
           const pnl = posType === 'BUY'
-            ? (ltp - p.average_price) * qty
-            : (p.average_price - ltp) * qty;
-          const pnlPercent = (p.average_price * qty) > 0
-            ? Number(((pnl / (p.average_price * qty)) * 100).toFixed(2))
+            ? (ltp - avgPrice) * qty
+            : (avgPrice - ltp) * qty;
+          const pnlPercent = (avgPrice * qty) > 0
+            ? Number(((pnl / (avgPrice * qty)) * 100).toFixed(2))
             : 0;
 
           return {
             id: p.id,
             symbol: p.instrument_id,
-            category: inst?.category || 'COMMODITY',
+            category: inst?.category || 'EQUITY',
             type: posType,
             product: 'INTRADAY' as const,
             lots,
             qty,
             lotSize,
-            avgPrice: p.average_price,
-            ltp,
+            avgPrice: Number(avgPrice.toFixed(2)),
+            ltp: Number(ltp.toFixed(2)),
             pnl: Number(pnl.toFixed(2)),
             pnlPercent,
             timestamp: p.updated_at,
@@ -347,12 +348,45 @@ router.post(
         read: false,
       });
 
+      const clientPosition = result.position ? {
+        id: result.position.id,
+        symbol: result.position.instrument_id,
+        category: inst.category,
+        type: Number(result.position.quantity) >= 0 ? 'BUY' as const : 'SELL' as const,
+        product: (product || 'INTRADAY') as any,
+        qty: Math.abs(Number(result.position.quantity)),
+        lots: Math.max(1, Math.round(Math.abs(Number(result.position.quantity)) / (inst.lotSize || 1))),
+        lotSize: inst.lotSize || 1,
+        avgPrice: Number(Number(result.position.average_price).toFixed(2)),
+        ltp: Number(inst.lastPrice.toFixed(2)),
+        pnl: Number(
+          (Number(result.position.quantity) >= 0
+            ? (inst.lastPrice - Number(result.position.average_price)) * Math.abs(Number(result.position.quantity))
+            : (Number(result.position.average_price) - inst.lastPrice) * Math.abs(Number(result.position.quantity))
+          ).toFixed(2)
+        ),
+        pnlPercent: Number(result.position.average_price) > 0
+          ? Number(
+              (
+                (((Number(result.position.quantity) >= 0
+                  ? inst.lastPrice - Number(result.position.average_price)
+                  : Number(result.position.average_price) - inst.lastPrice) *
+                  Math.abs(Number(result.position.quantity))) /
+                  (Number(result.position.average_price) * Math.abs(Number(result.position.quantity)))) *
+                100
+              ).toFixed(2)
+            )
+          : 0,
+        timestamp: new Date().toISOString(),
+        tenantId,
+      } : undefined;
+
       res.json({
         success: true,
         message: result.message,
         order: result.order,
         trade: result.trade,
-        position: result.position,
+        position: clientPosition,
         wallet: {
           availableBalance: result.wallet.available_balance,
           usedMargin: result.wallet.used_margin,

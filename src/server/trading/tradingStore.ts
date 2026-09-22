@@ -228,19 +228,30 @@ export function setTenantNotifications(
 export function findInstrument(symbol: string): Instrument | undefined {
   if (!symbol) return undefined;
   const raw = symbol.toLowerCase().trim();
-  const normalized = raw.replace(/[\s\-_]/g, '');
-  return INSTRUMENTS.find(
-    (i) =>
-      i.symbol.toLowerCase() === raw ||
-      i.id.toLowerCase() === raw ||
-      i.symbol.toLowerCase().replace(/[\s\-_]/g, '') === normalized ||
-      i.id.toLowerCase().replace(/[\s\-_]/g, '') === normalized ||
-      (i.sectionName && i.sectionName.toLowerCase() === raw) ||
-      (i.sectionName && i.sectionName.toLowerCase().replace(/[\s\-_]/g, '') === normalized) ||
-      i.symbol.toLowerCase().startsWith(raw) ||
-      i.id.toLowerCase().startsWith(raw) ||
-      raw.startsWith(i.symbol.toLowerCase()) ||
-      raw.startsWith(i.id.toLowerCase())
+  const clean = raw.replace(/^(nse|bse|mcx|nfo|binance|tvc|fx|fx_idc|comex|nymex|lme):/i, '').trim();
+  const normalized = clean.replace(/[\s\-_]/g, '');
+
+  return (
+    INSTRUMENTS.find((i) => {
+      const iRaw = i.symbol.toLowerCase().trim();
+      const iClean = iRaw.replace(/^(nse|bse|mcx|nfo|binance|tvc|fx|fx_idc|comex|nymex|lme):/i, '').trim();
+      const iNorm = iClean.replace(/[\s\-_]/g, '');
+      const idClean = i.id.toLowerCase().trim().replace(/[\s\-_]/g, '');
+
+      return (
+        iClean === clean ||
+        iNorm === normalized ||
+        idClean === normalized ||
+        iRaw === raw ||
+        (i.sectionName && i.sectionName.toLowerCase().trim() === clean) ||
+        (i.name && i.name.toLowerCase().trim() === clean)
+      );
+    }) ||
+    INSTRUMENTS.find((i) => {
+      const iRaw = i.symbol.toLowerCase().trim();
+      const iClean = iRaw.replace(/^(nse|bse|mcx|nfo|binance|tvc|fx|fx_idc|comex|nymex|lme):/i, '').trim();
+      return iClean.startsWith(clean) || clean.startsWith(iClean);
+    })
   );
 }
 

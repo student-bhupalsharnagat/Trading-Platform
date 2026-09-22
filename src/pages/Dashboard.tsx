@@ -308,8 +308,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   const handleOrderPlaced = (orderRes?: any) => {
     setOrderWindowInstrument(null);
-    setSelectedChartInstrument(null);
-    setActiveNav('positions');
+    // Retain chart if user was viewing live chart
+    if (!selectedChartInstrument) {
+      setActiveNav('positions');
+    }
 
     if (orderRes) {
       setPortfolio((prev) => {
@@ -500,22 +502,52 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   // Live dynamic Mark-to-Market calculation using live ticking instruments
   const livePositions = useMemo(() => {
-    return (portfolio?.positions || []).map((pos) => {
-      const liveInst = instruments.find((i) => i.symbol === pos.symbol);
-      const ltp = liveInst ? liveInst.lastPrice : pos.ltp;
-      const pnl = pos.type === 'BUY'
-        ? (ltp - pos.avgPrice) * pos.qty
-        : (pos.avgPrice - ltp) * pos.qty;
-      const pnlPercent = (pos.avgPrice * pos.qty) > 0
-        ? Number(((pnl / (pos.avgPrice * pos.qty)) * 100).toFixed(2))
+    return (portfolio?.positions || []).map((pos: any) => {
+      const sym = pos.symbol || pos.instrument_id || '';
+      const cleanSym = sym.replace(/^(NSE|BSE|MCX|NFO|BINANCE|TVC):/i, '').trim().toUpperCase();
+
+      const liveInst = instruments.find((i) => {
+        const iSym = i.symbol.replace(/^(NSE|BSE|MCX|NFO|BINANCE|TVC):/i, '').trim().toUpperCase();
+        return iSym === cleanSym || i.id?.toUpperCase() === cleanSym;
+      });
+
+      const rawQty = pos.qty ?? pos.quantity ?? 0;
+      const qty = Math.abs(Number(rawQty) || 0);
+      const avgPrice = Number(pos.avgPrice ?? pos.average_price ?? pos.averagePrice ?? 0);
+      const ltp = liveInst?.lastPrice ? Number(liveInst.lastPrice) : Number(pos.ltp ?? pos.lastPrice ?? avgPrice);
+
+      const rawType = (pos.type || (Number(rawQty) >= 0 ? 'BUY' : 'SELL') || 'BUY').toUpperCase();
+      const posType: 'BUY' | 'SELL' = rawType === 'SELL' ? 'SELL' : 'BUY';
+      const product = ((pos.product || 'INTRADAY') as string).toUpperCase() as 'INTRADAY' | 'HOLDING';
+
+      const lotSize = Number(pos.lotSize || liveInst?.lotSize || (liveInst?.category === 'EQUITY' ? 1 : 100));
+      const lots = Number(pos.lots || Math.max(1, Math.round(qty / lotSize)));
+
+      // Real-time MTM (Mark-to-market) P&L
+      const pnl = posType === 'BUY'
+        ? (ltp - avgPrice) * qty
+        : (avgPrice - ltp) * qty;
+
+      const totalExposure = avgPrice * qty;
+      const pnlPercent = totalExposure > 0
+        ? Number(((pnl / totalExposure) * 100).toFixed(2))
         : 0;
+
       return {
         ...pos,
-        ltp,
+        id: pos.id || `POS-${sym}`,
+        symbol: sym,
+        category: liveInst?.category || pos.category || 'COMMODITY',
+        type: posType,
+        product,
+        qty,
+        lots,
+        lotSize,
+        avgPrice: Number(avgPrice.toFixed(2)),
+        ltp: Number(ltp.toFixed(2)),
         pnl: Number(pnl.toFixed(2)),
         pnlPercent,
-        category: liveInst?.category || pos.category || 'COMMODITY',
-        lotSize: liveInst?.lotSize || pos.lotSize || 100,
+        timestamp: pos.timestamp || pos.updated_at || new Date().toISOString(),
       };
     });
   }, [portfolio?.positions, instruments]);
@@ -1190,33 +1222,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                               />
                             </div>
 
-                            {/* Right: Live Price & Absolute / Percentage Change */}
-                            <div className="text-right flex flex-col items-end shrink-0">
-                              {/* Row 1: Last Price */}
-                              <div className="font-mono font-black text-base sm:text-lg text-slate-900 dark:text-white tracking-tight">
-                                ₹{inst.lastPrice < 10
-                                  ? inst.lastPrice.toFixed(4)
-                                  : inst.lastPrice.toLocaleString('en-IN', {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    })}
+                            {/* Right: Live Price & Absolute / Percentage Change + Quick Chart Button */}
+                            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                              <div className="text-right flex flex-col items-end">
+                                {/* Row 1: Last Price */}
+                                <div className="font-mono font-black text-base sm:text-lg text-slate-900 dark:text-white tracking-tight">
+                                  ₹{inst.lastPrice < 10
+                                    ? inst.lastPrice.toFixed(4)
+                                    : inst.lastPrice.toLocaleString('en-IN', {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2,
+                                      })}
+                                </div>
+                                {/* Row 2: Direction Arrow & Change */}
+                                <div
+                                  className={`font-mono text-xs sm:text-sm flex items-center gap-1 font-bold mt-0.5 ${
+                                    isPositive ? 'text-emerald-500' : 'text-rose-500'
+                                  }`}
+                                >
+                                  <span>{isPositive ? '↗' : '↘'}</span>
+                                  <span>
+                                    {isPositive ? '+' : '-'}
+                                    {Math.abs(inst.change).toFixed(
+                                      inst.lastPrice < 10 ? 4 : 4
+                                    )}{' '}
+                                    ({isPositive ? '+' : ''}
+                                    {inst.changePercent.toFixed(2)}%)
+                                  </span>
+                                </div>
                               </div>
-                              {/* Row 2: Direction Arrow & Change */}
-                              <div
-                                className={`font-mono text-xs sm:text-sm flex items-center gap-1 font-bold mt-0.5 ${
-                                  isPositive ? 'text-emerald-500' : 'text-rose-500'
-                                }`}
+
+                              {/* Quick Open Chart Button */}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenChart(inst);
+                                }}
+                                className="p-2 rounded-xl bg-slate-100 hover:bg-amber-500/10 dark:bg-[#121B2B] dark:hover:bg-amber-500/20 text-slate-400 hover:text-amber-500 dark:text-slate-400 dark:hover:text-amber-400 border border-slate-200 dark:border-slate-800 hover:border-amber-500/40 transition-all cursor-pointer group/chart"
+                                title="Open Live Chart"
+                                aria-label="Open Live Chart"
                               >
-                                <span>{isPositive ? '↗' : '↘'}</span>
-                                <span>
-                                  {isPositive ? '+' : '-'}
-                                  {Math.abs(inst.change).toFixed(
-                                    inst.lastPrice < 10 ? 4 : 4
-                                  )}{' '}
-                                  ({isPositive ? '+' : ''}
-                                  {inst.changePercent.toFixed(2)}%)
-                                </span>
-                              </div>
+                                <BarChart2 className="w-4 h-4 group-hover/chart:scale-110 transition-transform" />
+                              </button>
                             </div>
                           </div>
                         </div>

@@ -140,6 +140,8 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
         orderType,
         product: productType,
         lots: effectiveLots,
+        quantity: inputMode === 'QTY' ? quantity : effectiveLots * (instrument.lotSize || 1),
+        price: currentPrice,
         limitPrice: orderType === 'LIMIT' ? limitPrice : undefined,
         stopLoss: enableSLTarget && stopLossPrice ? Number(stopLossPrice) : undefined,
         target: enableSLTarget && targetPrice ? Number(targetPrice) : undefined,
@@ -600,15 +602,15 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
               id="order-window-sell-btn"
               disabled={submitting || !isTradingEnabled}
               onClick={() => handleExecuteOrder('SELL')}
-              className="py-3.5 px-4 bg-[#EF4444] hover:bg-[#DC2626] active:bg-[#B91C1C] text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center transition-all cursor-pointer shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              className="py-3 px-4 bg-[#EF4444] hover:bg-[#DC2626] active:bg-[#B91C1C] text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center transition-all cursor-pointer shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
               title={!isTradingEnabled ? 'Trading suspended by central risk' : 'Place Sell Order'}
             >
               <div className="flex items-center gap-1.5">
                 <ArrowDownRight className="w-4 h-4 stroke-[3]" />
-                <span>SELL BID</span>
+                <span>SELL BID (₹{bidPrice.toFixed(2)})</span>
               </div>
               <span className="text-[11px] font-mono font-medium opacity-90 mt-0.5">
-                ₹{selectedMargin.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                Margin: ₹{selectedMargin.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </span>
             </button>
 
@@ -618,15 +620,15 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
               id="order-window-buy-btn"
               disabled={submitting || !isTradingEnabled}
               onClick={() => handleExecuteOrder('BUY')}
-              className="py-3.5 px-4 bg-[#10B981] hover:bg-[#059669] active:bg-[#047857] text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center transition-all cursor-pointer shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              className="py-3 px-4 bg-[#10B981] hover:bg-[#059669] active:bg-[#047857] text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center transition-all cursor-pointer shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
               title={!isTradingEnabled ? 'Trading suspended by central risk' : 'Place Buy Order'}
             >
               <div className="flex items-center gap-1.5">
                 <ArrowUpRight className="w-4 h-4 stroke-[3]" />
-                <span>BUY ASK</span>
+                <span>BUY ASK (₹{askPrice.toFixed(2)})</span>
               </div>
               <span className="text-[11px] font-mono font-medium opacity-90 mt-0.5">
-                ₹{selectedMargin.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                Margin: ₹{selectedMargin.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </span>
             </button>
           </div>

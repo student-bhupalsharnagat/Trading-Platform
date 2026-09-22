@@ -28,7 +28,7 @@
       "created_at": "2026-08-30T21:52:55.953Z",
       "updated_at": "2026-08-30T21:52:55.953Z",
       "demo_balance": 1000000,
-      "last_login_at": "2026-09-20T15:04:31.343Z"
+      "last_login_at": "2026-09-22T15:29:06.836Z"
     },
     {
       "id": "super-admin-root-0001",
@@ -763,6 +763,71 @@
       "is_frozen": true,
       "created_at": "2026-09-20T19:44:19.597Z",
       "updated_at": "2026-09-20T19:44:19.605Z",
+      "demo_balance": 1000000
+    },
+    {
+      "id": "demo-user-uuid-0000-000000000001",
+      "full_name": "Demo Trader",
+      "user_id": "vtx123",
+      "country_code": "+91",
+      "mobile": "9876543210",
+      "password_hash": "$2a$10$DEMO_ACCOUNT_NOT_PASSWORD_ACCESSIBLE_DIRECTLY",
+      "is_verified": true,
+      "status": "demo",
+      "created_at": "2026-09-22T14:33:09.669Z",
+      "updated_at": "2026-09-22T14:33:09.669Z",
+      "demo_balance": 1000000
+    },
+    {
+      "id": "demo-user-uuid-0000-000000000001",
+      "full_name": "Demo Trader",
+      "user_id": "vtx123",
+      "country_code": "+91",
+      "mobile": "9876543210",
+      "password_hash": "$2a$10$DEMO_ACCOUNT_NOT_PASSWORD_ACCESSIBLE_DIRECTLY",
+      "is_verified": true,
+      "status": "demo",
+      "created_at": "2026-09-22T14:50:37.448Z",
+      "updated_at": "2026-09-22T14:50:37.448Z",
+      "demo_balance": 1000000
+    },
+    {
+      "id": "demo-user-uuid-0000-000000000001",
+      "full_name": "Demo Trader",
+      "user_id": "vtx123",
+      "country_code": "+91",
+      "mobile": "9876543210",
+      "password_hash": "$2a$10$DEMO_ACCOUNT_NOT_PASSWORD_ACCESSIBLE_DIRECTLY",
+      "is_verified": true,
+      "status": "demo",
+      "created_at": "2026-09-22T15:28:51.578Z",
+      "updated_at": "2026-09-22T15:28:51.578Z",
+      "demo_balance": 1000000
+    },
+    {
+      "id": "demo-user-uuid-0000-000000000001",
+      "full_name": "Demo Trader",
+      "user_id": "vtx123",
+      "country_code": "+91",
+      "mobile": "9876543210",
+      "password_hash": "$2a$10$DEMO_ACCOUNT_NOT_PASSWORD_ACCESSIBLE_DIRECTLY",
+      "is_verified": true,
+      "status": "demo",
+      "created_at": "2026-09-22T15:28:55.292Z",
+      "updated_at": "2026-09-22T15:28:55.292Z",
+      "demo_balance": 1000000
+    },
+    {
+      "id": "demo-user-uuid-0000-000000000001",
+      "full_name": "Demo Trader",
+      "user_id": "vtx123",
+      "country_code": "+91",
+      "mobile": "9876543210",
+      "password_hash": "$2a$10$DEMO_ACCOUNT_NOT_PASSWORD_ACCESSIBLE_DIRECTLY",
+      "is_verified": true,
+      "status": "demo",
+      "created_at": "2026-09-22T15:29:06.836Z",
+      "updated_at": "2026-09-22T15:29:06.836Z",
       "demo_balance": 1000000
     }
   ],
