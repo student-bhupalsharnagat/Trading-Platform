@@ -57,12 +57,26 @@ export const DesktopMarketPanel: React.FC<DesktopMarketPanelProps> = ({
         {/* Instrument Title & Price */}
         <div>
           <div className="flex items-baseline justify-between">
-            <h3 className="text-lg font-black text-slate-900 dark:text-white tracking-tight">
-              {spotlightInstrument.symbol}
-            </h3>
-            <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-              {spotlightInstrument.expiry}
-            </span>
+            <div className="min-w-0 pr-2">
+              <h3 className="text-lg font-black text-slate-900 dark:text-white tracking-tight truncate">
+                {spotlightInstrument.symbol}
+              </h3>
+              {spotlightInstrument.name && spotlightInstrument.name !== spotlightInstrument.symbol && (
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[200px]">
+                  {spotlightInstrument.name}
+                </p>
+              )}
+            </div>
+            <div className="text-right shrink-0">
+              <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+                {spotlightInstrument.expiry}
+              </span>
+              {spotlightInstrument.sectionName && (
+                <span className="block text-[10px] font-semibold text-amber-600/80 dark:text-amber-400/80">
+                  {spotlightInstrument.sectionName}
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="flex items-baseline gap-2 mt-1">

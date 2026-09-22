@@ -63,7 +63,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   // Navigation & Sub-views
   const [activeNav, setActiveNav] = useState<'watchlist' | 'orders' | 'positions' | 'history' | 'profile'>('watchlist');
-  const [activeTab, setActiveTab] = useState<'ALL' | 'CRYPTO' | 'EQUITY' | 'FOREX' | 'COMMODITY' | 'INDEX'>('ALL');
+  const [activeTab, setActiveTab] = useState<'ALL' | 'EQUITY' | 'COMMODITY' | 'INDEX' | 'CRYPTO' | 'FOREX'>('ALL');
+  const [equitySectorFilter, setEquitySectorFilter] = useState<'ALL' | 'NIFTY50' | 'BANKING' | 'IT' | 'AUTO' | 'ENERGY' | 'FMCG_RETAIL' | 'PHARMA' | 'PSU_DEFENCE' | 'FUTURES'>('ALL');
   const [positionFilter, setPositionFilter] = useState<'ALL' | 'INTRADAY' | 'HOLDING'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -421,14 +422,78 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     }
   };
 
-  // Filter instruments based on search and category tab
+  // Filter instruments based on search, category tab, and equity sector
   const filteredInstruments = instruments.filter((inst) => {
-    const matchesCategory = activeTab === 'ALL' || inst.category === activeTab;
+    const isEquity =
+      inst.category === 'EQUITY' ||
+      inst.sectionName?.includes('EQUITY') ||
+      inst.sectionName?.includes('NSE') ||
+      inst.sectionName?.includes('BSE');
+
+    const matchesCategory =
+      activeTab === 'ALL' ||
+      (activeTab === 'EQUITY' ? isEquity : inst.category === activeTab);
+
+    const q = searchQuery.toLowerCase().trim();
     const matchesSearch =
-      inst.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (inst.name && inst.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      inst.category.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCategory && matchesSearch;
+      !q ||
+      inst.symbol.toLowerCase().includes(q) ||
+      (inst.name && inst.name.toLowerCase().includes(q)) ||
+      inst.category.toLowerCase().includes(q) ||
+      (inst.sectionName && inst.sectionName.toLowerCase().includes(q));
+
+    if (!matchesCategory || !matchesSearch) return false;
+
+    // Optional equity sector filter when activeTab === 'EQUITY'
+    if (activeTab === 'EQUITY' && equitySectorFilter !== 'ALL') {
+      if (equitySectorFilter === 'FUTURES') {
+        return inst.symbol.includes('FUT') || inst.sectionName === 'NSE FUT';
+      }
+      if (equitySectorFilter === 'NIFTY50') {
+        const niftyTop = [
+          'RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'INFY', 'SBIN', 'BHARTIARTL',
+          'ITC', 'HINDUNILVR', 'LT', 'BAJFINANCE', 'MARUTI', 'TATAMOTORS', 'TATASTEEL',
+          'KOTAKBANK', 'AXISBANK', 'SUNPHARMA', 'TITAN', 'ADANIENT', 'ADANIPORTS',
+          'WIPRO', 'HCLTECH', 'NTPC', 'POWERGRID', 'ONGC', 'COALINDIA', 'ASIANPAINT',
+          'ULTRACEMCO', 'BAJAJFINSV', 'NESTLEIND'
+        ];
+        return niftyTop.some((sym) => inst.symbol.startsWith(sym));
+      }
+      if (equitySectorFilter === 'BANKING') {
+        const banks = [
+          'HDFCBANK', 'ICICIBANK', 'SBIN', 'KOTAKBANK', 'AXISBANK', 'INDUSINDBK',
+          'PNB', 'BANKBARODA', 'CANBK', 'YESBANK', 'BAJFINANCE', 'BAJAJFINSV',
+          'JIOFIN', 'CHOLAFIN', 'SHRIRAMFIN', 'MUTHOOTFIN', 'LICI', 'HDFCLIFE', 'SBILIFE'
+        ];
+        return banks.some((sym) => inst.symbol.startsWith(sym));
+      }
+      if (equitySectorFilter === 'IT') {
+        const it = ['TCS', 'INFY', 'WIPRO', 'HCLTECH', 'TECHM', 'TATAELXSI', 'KPITTECH', 'PERSISTENT', 'COFORGE'];
+        return it.some((sym) => inst.symbol.startsWith(sym));
+      }
+      if (equitySectorFilter === 'AUTO') {
+        const auto = ['MARUTI', 'TATAMOTORS', 'BAJAJ-AUTO', 'HEROMOTOCO', 'EICHERMOT', 'ASHOKLEY', 'BOSCHLTD', 'MRF'];
+        return auto.some((sym) => inst.symbol.startsWith(sym));
+      }
+      if (equitySectorFilter === 'ENERGY') {
+        const energy = ['RELIANCE', 'NTPC', 'POWERGRID', 'ONGC', 'COALINDIA', 'IOC', 'BPCL', 'TATAPOWER', 'NHPC', 'SUZLON', 'IREDA'];
+        return energy.some((sym) => inst.symbol.startsWith(sym));
+      }
+      if (equitySectorFilter === 'PHARMA') {
+        const pharma = ['SUNPHARMA', 'CIPLA', 'DRREDDY', 'DIVISLAB', 'APOLLOHOSP', 'LUPIN', 'AUROPHARMA', 'TORNTPHARM', 'ALKEM', 'ZYDUSLIFE'];
+        return pharma.some((sym) => inst.symbol.startsWith(sym));
+      }
+      if (equitySectorFilter === 'FMCG_RETAIL') {
+        const fmcg = ['ITC', 'HINDUNILVR', 'NESTLEIND', 'BRITANNIA', 'TATACONSUM', 'VBL', 'DABUR', 'MARICO', 'COLPAL', 'GODREJCP', 'TRENT', 'DMART', 'PAGEIND', 'JUBLFOOD', 'ZOMATO'];
+        return fmcg.some((sym) => inst.symbol.startsWith(sym));
+      }
+      if (equitySectorFilter === 'PSU_DEFENCE') {
+        const psu = ['BEL', 'HAL', 'MAZDOCK', 'COCHINSHIP', 'RVNL', 'BHEL', 'IRCTC', 'SBIN', 'PNB', 'BANKBARODA', 'CANBK', 'RECLTD', 'PFC', 'ONGC', 'IOC', 'BPCL', 'COALINDIA', 'NTPC', 'POWERGRID'];
+        return psu.some((sym) => inst.symbol.startsWith(sym));
+      }
+    }
+
+    return true;
   });
 
   const isDemo = user?.status === 'demo' || user?.userId === 'vtx123';
@@ -954,9 +1019,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                   />
                 </div>
 
-                {/* Category Filter Pills matching Screenshot 1: ALL, CRYPTO, EQUITY, FOREX, COMMODITY */}
+                {/* Category Filter Pills: ALL, EQUITY, COMMODITY, INDEX, CRYPTO, FOREX */}
                 <div id="tour-target-categories" className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
-                  {(['ALL', 'CRYPTO', 'EQUITY', 'FOREX', 'COMMODITY'] as const).map((tab) => {
+                  {(['ALL', 'EQUITY', 'COMMODITY', 'INDEX', 'CRYPTO', 'FOREX'] as const).map((tab) => {
                     const isSelected = activeTab === tab;
                     const tabKey = tab.toLowerCase();
                     const label = t(tabKey) || tab;
@@ -964,24 +1029,67 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                       <button
                         key={tab}
                         type="button"
-                        onClick={() => setActiveTab(tab)}
+                        onClick={() => {
+                          setActiveTab(tab);
+                          if (tab !== 'EQUITY') {
+                            setEquitySectorFilter('ALL');
+                          }
+                        }}
                         className={`px-3.5 sm:px-4 py-1.5 text-xs font-bold tracking-wider rounded-lg transition-all cursor-pointer whitespace-nowrap active:scale-95 ${
                           isSelected
                             ? 'bg-amber-500 text-slate-950 shadow-sm'
                             : 'bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1E2E44] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:border-slate-300 dark:hover:border-slate-600'
                         }`}
                       >
-                        {label}
+                        {label} {tab === 'EQUITY' && `(${instruments.filter(i => i.category === 'EQUITY').length})`}
                       </button>
                     );
                   })}
                 </div>
 
-                {/* Watchlist Subheader matching Screenshot 1 */}
+                {/* Sub-sector filtering when EQUITY tab is active */}
+                {activeTab === 'EQUITY' && (
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar pt-0.5">
+                    {[
+                      { key: 'ALL', label: `All Shares (${instruments.filter(i => i.category === 'EQUITY').length})` },
+                      { key: 'NIFTY50', label: 'Nifty 50' },
+                      { key: 'BANKING', label: 'Banking & Fin' },
+                      { key: 'IT', label: 'IT & Tech' },
+                      { key: 'AUTO', label: 'Auto & EV' },
+                      { key: 'ENERGY', label: 'Energy & Power' },
+                      { key: 'FMCG_RETAIL', label: 'FMCG & Retail' },
+                      { key: 'PHARMA', label: 'Pharma & Health' },
+                      { key: 'PSU_DEFENCE', label: 'PSU & Defence' },
+                      { key: 'FUTURES', label: 'Stock Futures' },
+                    ].map((sec) => (
+                      <button
+                        key={sec.key}
+                        type="button"
+                        onClick={() => setEquitySectorFilter(sec.key as any)}
+                        className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap ${
+                          equitySectorFilter === sec.key
+                            ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/50'
+                            : 'bg-slate-100 dark:bg-[#121B2B] text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 border border-transparent'
+                        }`}
+                      >
+                        {sec.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Watchlist Subheader */}
                 <div className="flex items-center justify-between pt-1">
-                  <h2 className="text-xs sm:text-sm font-black text-slate-500 dark:text-slate-400 tracking-wider uppercase">
-                    {t('watchlist')}
-                  </h2>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xs sm:text-sm font-black text-slate-500 dark:text-slate-400 tracking-wider uppercase">
+                      {activeTab === 'EQUITY' ? 'Indian Equities (NSE / BSE)' : t('watchlist')}
+                    </h2>
+                    {activeTab === 'EQUITY' && (
+                      <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                        Cash & Derivatives
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs text-slate-500 font-mono">
                     {filteredInstruments.length} {t('instruments')}
                   </span>
@@ -1032,13 +1140,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                                     }`}
                                   />
                                 </button>
-                                <h3 className="font-black text-sm sm:text-base text-slate-900 dark:text-white tracking-wide group-hover:text-amber-500 dark:group-hover:text-amber-400 transition-colors">
-                                  {inst.symbol}
-                                </h3>
-                                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 ml-1">
-                                  {inst.expiry}
-                                </span>
+                                <div className="flex items-baseline gap-1.5 flex-wrap">
+                                  <h3 className="font-black text-sm sm:text-base text-slate-900 dark:text-white tracking-wide group-hover:text-amber-500 dark:group-hover:text-amber-400 transition-colors">
+                                    {inst.symbol}
+                                  </h3>
+                                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                                    {inst.expiry}
+                                  </span>
+                                  {inst.sectionName && (
+                                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-[#121B2B] text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-800">
+                                      {inst.sectionName}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
+
+                              {/* Row 1.5: Company Name */}
+                              {inst.name && inst.name !== inst.symbol && (
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[220px] sm:max-w-[320px] mt-0.5">
+                                  {inst.name}
+                                </p>
+                              )}
 
                               {/* Row 2: Intraday and Holding values */}
                               <div className="flex items-center gap-3 text-xs mt-2 text-slate-500 dark:text-slate-400">
