@@ -188,6 +188,33 @@ export class TradingExecutionService {
         return { newOrder, updatedWallet };
       });
 
+      // Synchronize in-memory fallback store for limit orders
+      try {
+        const memWallet = getTenantWallet(tenantId);
+        memWallet.availableBalance = limitResult.updatedWallet.available_balance;
+        memWallet.blockedBalance = limitResult.updatedWallet.blocked_balance;
+
+        const memOrders = getTenantOrders(tenantId);
+        memOrders.unshift({
+          id: limitResult.newOrder.id,
+          symbol: limitResult.newOrder.instrument_id,
+          type: limitResult.newOrder.side as 'BUY' | 'SELL',
+          orderType: 'LIMIT',
+          product: (input.product as any) || 'INTRADAY',
+          lots,
+          qty,
+          lotSize: inst.lotSize,
+          price: limitResult.newOrder.price,
+          status: 'PENDING',
+          time: new Date().toTimeString().split(' ')[0],
+          date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+          userId,
+          tenantId,
+        });
+      } catch {
+        // Ignore fallback errors
+      }
+
       tradingWebSocketServer.broadcastToTenant(tenantId, 'order.created', limitResult.newOrder, (ws) => ws.userId === userId || ws.role === 'SUPER_ADMIN');
       tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', limitResult.updatedWallet, (ws) => ws.userId === userId || ws.role === 'SUPER_ADMIN');
 
@@ -488,6 +515,7 @@ export class TradingExecutionService {
       const memWallet = getTenantWallet(tenantId);
       memWallet.availableBalance = result.updatedWallet.available_balance;
       memWallet.usedMargin = result.updatedWallet.used_margin;
+      memWallet.totalPnL = result.updatedWallet.realized_pnl;
 
       const memOrders = getTenantOrders(tenantId);
       memOrders.unshift({
@@ -506,6 +534,54 @@ export class TradingExecutionService {
         userId,
         tenantId,
       });
+
+      // Synchronize in-memory positions list
+      const memPositions = getTenantPositions(tenantId);
+      const existingPosIdx = memPositions.findIndex((p) => p.symbol === inst.symbol);
+
+      if (result.updatedPosition) {
+        if (result.updatedPosition.quantity === 0) {
+          // Position squared off
+          if (existingPosIdx !== -1) {
+            memPositions.splice(existingPosIdx, 1);
+          }
+        } else {
+          const posType: 'BUY' | 'SELL' = result.updatedPosition.quantity > 0 ? 'BUY' : 'SELL';
+          const posQty = Math.abs(result.updatedPosition.quantity);
+          const posLots = Math.max(1, Math.round(posQty / inst.lotSize));
+          const ltp = inst.lastPrice;
+          const pnl = posType === 'BUY'
+            ? (ltp - result.updatedPosition.average_price) * posQty
+            : (result.updatedPosition.average_price - ltp) * posQty;
+          const pnlPercent = (result.updatedPosition.average_price * posQty) > 0
+            ? Number(((pnl / (result.updatedPosition.average_price * posQty)) * 100).toFixed(2))
+            : 0;
+
+          const updatedPosItem = {
+            id: result.updatedPosition.id || `POS-${Date.now()}`,
+            symbol: inst.symbol,
+            category: inst.category,
+            type: posType,
+            product: (input.product as any) || 'INTRADAY',
+            qty: posQty,
+            lots: posLots,
+            lotSize: inst.lotSize,
+            avgPrice: result.updatedPosition.average_price,
+            ltp,
+            pnl: Number(pnl.toFixed(2)),
+            pnlPercent,
+            timestamp: new Date().toISOString(),
+            userId,
+            tenantId,
+          };
+
+          if (existingPosIdx !== -1) {
+            memPositions[existingPosIdx] = updatedPosItem;
+          } else {
+            memPositions.unshift(updatedPosItem);
+          }
+        }
+      }
     } catch {
       // Ignore memory sync issues
     }

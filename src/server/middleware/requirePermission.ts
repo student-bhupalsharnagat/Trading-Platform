@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express';
-import { UserRole } from '../db/database';
-import { AuthenticatedRequest } from './authMiddleware';
+import type { UserRole } from '../db/database.ts';
+import type { AuthenticatedRequest } from './authMiddleware.ts';
 
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   SUPER_ADMIN: [

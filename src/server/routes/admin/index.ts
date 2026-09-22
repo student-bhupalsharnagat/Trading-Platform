@@ -1,10 +1,10 @@
 import { Router } from 'express';
-import adminDashboardRoutes from './adminDashboardRoutes';
-import masterRoutes from './masterRoutes';
-import brokerRoutes from './brokerRoutes';
-import subBrokerRoutes from './subBrokerRoutes';
-import clientRoutes from './clientRoutes';
-import auditRoutes from './auditRoutes';
+import adminDashboardRoutes from './adminDashboardRoutes.ts';
+import masterRoutes from './masterRoutes.ts';
+import brokerRoutes from './brokerRoutes.ts';
+import subBrokerRoutes from './subBrokerRoutes.ts';
+import clientRoutes from './clientRoutes.ts';
+import auditRoutes from './auditRoutes.ts';
 
 const router = Router();
 

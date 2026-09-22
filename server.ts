@@ -30,39 +30,22 @@ import { pgDb } from './src/server/db/postgres.ts';
 
 dotenv.config();
 
-/*
- * Production deployment:
- * Render provides the PORT environment variable.
- * The 3000 fallback keeps local development working exactly as before.
- */
-const PORT = Number(process.env.PORT) || 3000;
-
+const PORT = 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
 async function startServer() {
   // Validate production configuration and required secrets
   const configValidation = ProductionValidator.validateEnv(isProd);
-
   if (!configValidation.valid) {
     console.warn('[CONFIG NOTICE] Environment configuration recommendations:');
-
-    configValidation.errors.forEach((e) =>
-      console.warn(`  - ${e}`)
-    );
-
+    configValidation.errors.forEach((e) => console.warn(`  - ${e}`));
     if (process.env.STRICT_PRODUCTION_CONFIG === 'true') {
-      console.error(
-        '[FATAL CONFIG ERROR] STRICT_PRODUCTION_CONFIG is enabled; halting.'
-      );
-
+      console.error('[FATAL CONFIG ERROR] STRICT_PRODUCTION_CONFIG is enabled; halting.');
       process.exit(1);
     }
   }
-
   if (configValidation.warnings.length > 0) {
-    configValidation.warnings.forEach((w) =>
-      console.warn(`[CONFIG WARNING] ${w}`)
-    );
+    configValidation.warnings.forEach((w) => console.warn(`[CONFIG WARNING] ${w}`));
   }
 
   // Validate internal S2S authentication configuration at startup
@@ -77,10 +60,7 @@ async function startServer() {
   try {
     await redisService.init();
   } catch (redisErr: any) {
-    console.warn(
-      '[Redis] Initialization warning (degraded mode active):',
-      redisErr.message
-    );
+    console.warn('[Redis] Initialization warning (degraded mode active):', redisErr.message);
   }
 
   // Safe non-blocking initialization of tenant config and emergency state caches
@@ -90,10 +70,7 @@ async function startServer() {
   try {
     await runMigrations();
   } catch (migErr: any) {
-    console.error(
-      '[DB] Migration error during startup:',
-      migErr.message
-    );
+    console.error('[DB] Migration error during startup:', migErr.message);
   }
 
   // Start Transactional Outbox background worker
@@ -110,7 +87,6 @@ async function startServer() {
       },
     })
   );
-
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
   app.use(cookieParser());
 
@@ -118,19 +94,16 @@ async function startServer() {
   app.use(securityHeadersMiddleware);
   app.use(sanitizeQueryParams);
 
-  // Health, Liveness, and Readiness Endpoints
-  // accessible without tenant resolution or CSRF
+  // Health, Liveness, and Readiness Endpoints (accessible without tenant resolution or CSRF)
   app.use(healthRoutes);
 
   // CSRF Protection for state-changing browser API requests
   app.use(csrfProtectionMiddleware);
 
-  // Multi-Tenant Resolution Middleware
-  // Domain-based with dev fallback, never trusts client headers
+  // Multi-Tenant Resolution Middleware (Domain-based with dev fallback, never trusts client headers)
   app.use(resolveTenantMiddleware);
 
-  // Internal Server-to-Server Routes
-  // Central Admin -> Trading Platform
+  // Internal Server-to-Server Routes (Central Admin -> Trading Platform)
   // Protected by HMAC-SHA256, Nonce, Timestamp, and Tenant ID validation
   app.use('/api/internal/v1', internalRoutes);
 
@@ -143,22 +116,16 @@ async function startServer() {
   // Central Error Handler for API routes
   app.use('/api/*', errorHandler);
 
-  // Frontend Serving
-  // Vite middleware in development, static files in production
+  // Frontend Serving (Vite middleware in dev, static files in prod)
   if (!isProd) {
     const vite = await createViteServer({
-      server: {
-        middlewareMode: true,
-      },
+      server: { middlewareMode: true },
       appType: 'spa',
     });
-
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-
     app.use(express.static(distPath));
-
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
@@ -172,33 +139,17 @@ async function startServer() {
   // Initialize Real-time WebSocket Server on /ws
   tradingWebSocketServer.initialize(httpServer);
 
-  /*
-   * IMPORTANT FOR RENDER:
-   * 0.0.0.0 allows Render's public network
-   * to reach the Express server.
-   */
   httpServer.listen(PORT, '0.0.0.0', async () => {
     try {
       await hierarchyService.ensureSuperAdmin();
     } catch (e) {
-      console.warn(
-        '[ADMIN] Super admin hierarchy init notice:',
-        e
-      );
+      console.warn('[ADMIN] Super admin hierarchy init notice:', e);
     }
-
-    console.log(
-      `[VERTEX] Server running on port ${PORT} (env: ${
-        process.env.NODE_ENV || 'development'
-      })`
-    );
+    console.log(`[VERTEX] Server running on http://0.0.0.0:${PORT} (env: ${process.env.NODE_ENV || 'development'})`);
   });
 
   const gracefulShutdown = async (signal: string) => {
-    console.log(
-      `[VERTEX] Received ${signal}, initiating graceful shutdown...`
-    );
-
+    console.log(`[VERTEX] Received ${signal}, initiating graceful shutdown...`);
     setServerShuttingDown(true);
 
     try {
@@ -207,10 +158,7 @@ async function startServer() {
       await redisService.close();
       await pgDb.close();
     } catch (shutdownErr: any) {
-      console.warn(
-        '[VERTEX] Warning during shutdown cleanup:',
-        shutdownErr.message
-      );
+      console.warn('[VERTEX] Warning during shutdown cleanup:', shutdownErr.message);
     }
 
     httpServer.close(() => {
@@ -220,10 +168,7 @@ async function startServer() {
 
     // Hard fallback termination after 10s
     setTimeout(() => {
-      console.error(
-        '[VERTEX] Graceful shutdown timed out, force exiting'
-      );
-
+      console.error('[VERTEX] Graceful shutdown timed out, force exiting');
       process.exit(1);
     }, 10000).unref();
   };

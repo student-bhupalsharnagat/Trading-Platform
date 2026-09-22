@@ -1,4 +1,4 @@
-import { UserRecord, UserRole } from '../db/database';
+import type { UserRecord, UserRole } from '../db/database.ts';
 
 export interface IHierarchyRepository {
   getDescendants(pathPrefix: string): Promise<UserRecord[]>;

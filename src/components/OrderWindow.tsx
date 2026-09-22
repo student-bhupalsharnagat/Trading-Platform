@@ -29,7 +29,7 @@ interface OrderWindowProps {
   tourStep?: number;
   onClose: () => void;
   onOpenLiveChart?: (instrument: Instrument) => void;
-  onOrderPlaced?: () => void;
+  onOrderPlaced?: (result?: any) => void;
 }
 
 export const OrderWindow: React.FC<OrderWindowProps> = ({
@@ -145,7 +145,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
         target: enableSLTarget && targetPrice ? Number(targetPrice) : undefined,
       };
 
-      await authApi.placeOrder(payload);
+      const res = await authApi.placeOrder(payload);
 
       showToast({
         type: 'success',
@@ -154,7 +154,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
         duration: 4500,
       });
 
-      if (onOrderPlaced) onOrderPlaced();
+      if (onOrderPlaced) onOrderPlaced(res);
       onClose();
     } catch (err: any) {
       showToast({

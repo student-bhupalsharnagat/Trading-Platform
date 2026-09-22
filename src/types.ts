@@ -46,7 +46,7 @@ export interface AuthResponse {
 
 export interface ToastMessage {
   id: string;
-  type: 'success' | 'error' | 'warning' | 'info' | 'otp';
+  type: 'success' | 'error' | 'info' | 'otp';
   title: string;
   description?: string;
   otpCode?: string;
@@ -128,6 +128,7 @@ export interface Order {
 export interface WalletFunds {
   availableBalance: number;
   usedMargin: number;
+  blockedBalance?: number;
   totalPnL: number;
   todayPnL: number;
   deposited: number;

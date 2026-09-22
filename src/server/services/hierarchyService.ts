@@ -1,7 +1,7 @@
-import { jsonUserRepository } from '../repositories/JsonUserRepository';
-import { jsonHierarchyRepository } from '../repositories/JsonHierarchyRepository';
-import { auditService } from './auditService';
-import { UserRecord, UserRole } from '../db/database';
+import { jsonUserRepository } from '../repositories/JsonUserRepository.ts';
+import { jsonHierarchyRepository } from '../repositories/JsonHierarchyRepository.ts';
+import { auditService } from './auditService.ts';
+import type { UserRecord, UserRole } from '../db/database.ts';
 import crypto from 'crypto';
 
 export interface HierarchyNodeView {

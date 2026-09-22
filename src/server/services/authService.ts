@@ -1,9 +1,9 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { db, UserRecord } from '../db/database.ts';
+import { db, type UserRecord } from '../db/database.ts';
 import { otpService } from './otpService.ts';
-import { RegisterInput, ResetPasswordInput } from '../schemas/authSchemas.ts';
+import type { RegisterInput, ResetPasswordInput } from '../schemas/authSchemas.ts';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'vertex_jwt_secret_dev_key_2026_super_secure';
 const JWT_EXPIRES_IN = '7d';

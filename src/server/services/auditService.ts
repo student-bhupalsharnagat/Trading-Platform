@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { UserRole } from '../db/database';
+import type { UserRole } from '../db/database.ts';
 
 export interface AuditLogItem {
   id: string;

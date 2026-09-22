@@ -1,4 +1,4 @@
-import { UserRecord, UserRole } from '../db/database';
+import type { UserRecord, UserRole } from '../db/database.ts';
 
 export interface IUserRepository {
   findById(id: string): Promise<UserRecord | null>;

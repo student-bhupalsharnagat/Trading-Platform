@@ -1,7 +1,7 @@
-import { jsonUserRepository } from '../repositories/JsonUserRepository';
-import { jsonHierarchyRepository } from '../repositories/JsonHierarchyRepository';
-import { UserRecord } from '../db/database';
-import { AdminDashboardKPIs } from '../../admin/types/adminTypes';
+import { jsonUserRepository } from '../repositories/JsonUserRepository.ts';
+import { jsonHierarchyRepository } from '../repositories/JsonHierarchyRepository.ts';
+import type { UserRecord } from '../db/database.ts';
+import type { AdminDashboardKPIs } from '../../admin/types/adminTypes.ts';
 
 export class AdminDashboardService {
   public async getKPIs(caller: UserRecord): Promise<AdminDashboardKPIs> {

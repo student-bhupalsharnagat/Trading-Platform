@@ -1,4 +1,4 @@
-import { ILedgerRepository, LedgerEntry } from './ILedgerRepository';
+import type { ILedgerRepository, LedgerEntry } from './ILedgerRepository.ts';
 import crypto from 'crypto';
 
 const inMemoryLedger: LedgerEntry[] = [];

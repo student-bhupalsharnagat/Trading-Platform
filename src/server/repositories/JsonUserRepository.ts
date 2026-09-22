@@ -1,5 +1,5 @@
-import { IUserRepository } from './IUserRepository';
-import { db, UserRecord, UserRole } from '../db/database';
+import type { IUserRepository } from './IUserRepository.ts';
+import { db, type UserRecord, type UserRole } from '../db/database.ts';
 import crypto from 'crypto';
 
 export class JsonUserRepository implements IUserRepository {

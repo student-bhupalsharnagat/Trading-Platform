@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../hooks/useAuth.ts';
 import { authApi } from '../services/authApi.ts';
 import { Instrument, PortfolioData, AppNotification } from '../types.ts';
@@ -40,6 +40,16 @@ import {
   Clock,
   HelpCircle,
   Shield,
+  RefreshCw,
+  AlertTriangle,
+  Filter,
+  ArrowRight,
+  RotateCcw,
+  FileText,
+  Check,
+  SlidersHorizontal,
+  Plus,
+  Percent,
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -78,6 +88,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const [isWalletDrawerOpen, setIsWalletDrawerOpen] = useState(false);
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
+
+  // Orders Sub-Tab and Filter State (Zerodha Kite & Upstox Level)
+  const [orderFilterTab, setOrderFilterTab] = useState<'ALL' | 'EXECUTED' | 'PENDING' | 'CANCELLED'>('ALL');
+  const [orderSearchQuery, setOrderSearchQuery] = useState('');
+  const [orderSideFilter, setOrderSideFilter] = useState<'ALL' | 'BUY' | 'SELL'>('ALL');
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
+  const [selectedOrderForDetail, setSelectedOrderForDetail] = useState<any | null>(null);
+
+  // Portfolio Sub-Tab State (Positions vs Holdings)
+  const [portfolioSubTab, setPortfolioSubTab] = useState<'POSITIONS' | 'HOLDINGS'>('POSITIONS');
+  const [showExitAllModal, setShowExitAllModal] = useState(false);
+  const [isExitingAll, setIsExitingAll] = useState(false);
 
   // Notifications states
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -178,11 +200,91 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     }
   };
 
+  const selectedChartInstrumentRef = useRef(selectedChartInstrument);
+  selectedChartInstrumentRef.current = selectedChartInstrument;
+  const orderWindowInstrumentRef = useRef(orderWindowInstrument);
+  orderWindowInstrumentRef.current = orderWindowInstrument;
+
+  // Connect to Live Trading WebSocket for instantaneous updates
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: any = null;
+    let isMounted = true;
+
+    const connectWs = () => {
+      try {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          // Connected to trading stream
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.event === 'market.ticks' && data.payload?.instruments) {
+              setInstruments(data.payload.instruments);
+              if (selectedChartInstrumentRef.current) {
+                const updatedChart = data.payload.instruments.find(
+                  (i: Instrument) => i.id === selectedChartInstrumentRef.current?.id
+                );
+                if (updatedChart) setSelectedChartInstrument(updatedChart);
+              }
+              if (orderWindowInstrumentRef.current) {
+                const updatedOrder = data.payload.instruments.find(
+                  (i: Instrument) => i.id === orderWindowInstrumentRef.current?.id
+                );
+                if (updatedOrder) setOrderWindowInstrument(updatedOrder);
+              }
+            } else if (data.event === 'portfolio.mtm' && data.payload) {
+              setPortfolio((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  positions: data.payload.positions || prev.positions,
+                  wallet: data.payload.wallet ? { ...prev.wallet, ...data.payload.wallet } : prev.wallet,
+                };
+              });
+            } else if (
+              data.event === 'order.created' ||
+              data.event === 'trade.executed' ||
+              data.event === 'position.updated' ||
+              data.event === 'wallet.updated' ||
+              data.event === 'order.cancelled'
+            ) {
+              fetchData();
+            }
+          } catch {}
+        };
+
+        ws.onclose = () => {
+          if (isMounted) {
+            reconnectTimeout = setTimeout(connectWs, 3000);
+          }
+        };
+
+        ws.onerror = () => {
+          // Fallback to active interval polling
+        };
+      } catch {}
+    };
+
+    connectWs();
+
+    return () => {
+      isMounted = false;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (ws) ws.close();
+    };
+  }, []);
+
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 2000);
+    const interval = setInterval(fetchData, 1000);
     return () => clearInterval(interval);
-  }, [selectedChartInstrument?.id, orderWindowInstrument?.id]);
+  }, []);
 
   const handleLogout = async () => {
     await logout();
@@ -203,6 +305,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     setSelectedChartInstrument(inst);
   };
 
+  const handleOrderPlaced = (orderRes?: any) => {
+    setOrderWindowInstrument(null);
+    setSelectedChartInstrument(null);
+    setActiveNav('positions');
+
+    if (orderRes) {
+      setPortfolio((prev) => {
+        if (!prev) return prev;
+        const newOrders = orderRes.order
+          ? [orderRes.order, ...(prev.orders || []).filter((o: any) => o.id !== orderRes.order.id)]
+          : prev.orders;
+        const newPositions = orderRes.positions || prev.positions;
+        const newWallet = orderRes.wallet ? { ...prev.wallet, ...orderRes.wallet } : prev.wallet;
+        return {
+          ...prev,
+          orders: newOrders,
+          positions: newPositions,
+          wallet: newWallet,
+        };
+      });
+    }
+    fetchData();
+  };
+
   const handleSquareOffPosition = async (positionId: string, symbol: string) => {
     setClosingPositionId(positionId);
     try {
@@ -211,6 +337,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         type: 'success',
         title: 'Position Squared Off',
         description: `Successfully closed ${symbol} position.`,
+      });
+      // Optimistic update
+      setPortfolio((prev) => {
+        if (!prev) return prev;
+        const newPositions = (prev.positions || []).filter((p) => p.id !== positionId && p.symbol !== positionId);
+        const newWallet = res.wallet ? { ...prev.wallet, ...res.wallet } : prev.wallet;
+        return {
+          ...prev,
+          positions: newPositions,
+          wallet: newWallet,
+        };
       });
       fetchData();
     } catch (err: any) {
@@ -221,6 +358,66 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       });
     } finally {
       setClosingPositionId(null);
+    }
+  };
+
+  const handleCancelOrder = async (orderId: string) => {
+    setCancellingOrderId(orderId);
+    try {
+      await authApi.cancelOrder(orderId);
+      showToast({
+        type: 'info',
+        title: 'Order Cancelled',
+        description: `Order #${orderId} was cancelled.`,
+      });
+      setPortfolio((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          orders: (prev.orders || []).map((o: any) =>
+            o.id === orderId ? { ...o, status: 'CANCELLED' } : o
+          ),
+        };
+      });
+      fetchData();
+    } catch (err: any) {
+      showToast({
+        type: 'error',
+        title: 'Failed to cancel order',
+        description: err.message || 'Could not cancel order.',
+      });
+    } finally {
+      setCancellingOrderId(null);
+    }
+  };
+
+  const handleExitAllPositions = async () => {
+    setIsExitingAll(true);
+    try {
+      const res = await authApi.closeAllPositions();
+      showToast({
+        type: 'success',
+        title: 'All Positions Exited',
+        description: res.message || 'All positions squared off successfully.',
+      });
+      setShowExitAllModal(false);
+      setPortfolio((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          positions: [],
+          wallet: res.wallet ? { ...prev.wallet, ...res.wallet } : prev.wallet,
+        };
+      });
+      fetchData();
+    } catch (err: any) {
+      showToast({
+        type: 'error',
+        title: 'Failed to exit all positions',
+        description: err.message || 'Error occurred.',
+      });
+    } finally {
+      setIsExitingAll(false);
     }
   };
 
@@ -235,6 +432,88 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   });
 
   const isDemo = user?.status === 'demo' || user?.userId === 'vtx123';
+
+  // Live dynamic Mark-to-Market calculation using live ticking instruments
+  const livePositions = useMemo(() => {
+    return (portfolio?.positions || []).map((pos) => {
+      const liveInst = instruments.find((i) => i.symbol === pos.symbol);
+      const ltp = liveInst ? liveInst.lastPrice : pos.ltp;
+      const pnl = pos.type === 'BUY'
+        ? (ltp - pos.avgPrice) * pos.qty
+        : (pos.avgPrice - ltp) * pos.qty;
+      const pnlPercent = (pos.avgPrice * pos.qty) > 0
+        ? Number(((pnl / (pos.avgPrice * pos.qty)) * 100).toFixed(2))
+        : 0;
+      return {
+        ...pos,
+        ltp,
+        pnl: Number(pnl.toFixed(2)),
+        pnlPercent,
+        category: liveInst?.category || pos.category || 'COMMODITY',
+        lotSize: liveInst?.lotSize || pos.lotSize || 100,
+      };
+    });
+  }, [portfolio?.positions, instruments]);
+
+  const intradayPositions = useMemo(
+    () => livePositions.filter((p) => p.product === 'INTRADAY' || !p.product),
+    [livePositions]
+  );
+  const holdingPositions = useMemo(
+    () => livePositions.filter((p) => p.product === 'HOLDING'),
+    [livePositions]
+  );
+
+  const displayedPositions = useMemo(() => {
+    return positionFilter === 'INTRADAY'
+      ? intradayPositions
+      : positionFilter === 'HOLDING'
+      ? holdingPositions
+      : livePositions;
+  }, [positionFilter, intradayPositions, holdingPositions, livePositions]);
+
+  const totalUnrealizedPnL = useMemo(() => {
+    return livePositions.reduce((sum, pos) => sum + (pos.pnl || 0), 0);
+  }, [livePositions]);
+
+  const totalInvestedMargin = useMemo(() => {
+    return livePositions.reduce((sum, pos) => sum + (pos.avgPrice * pos.qty), 0);
+  }, [livePositions]);
+
+  const overallPnLPercent = totalInvestedMargin > 0
+    ? Number(((totalUnrealizedPnL / totalInvestedMargin) * 100).toFixed(2))
+    : 0;
+  const isProfit = totalUnrealizedPnL >= 0;
+
+  const todayRealizedPnL = portfolio?.wallet?.todayPnL || 0;
+  const isTodayProfit = todayRealizedPnL >= 0;
+  const netPnL = Number((todayRealizedPnL + totalUnrealizedPnL).toFixed(2));
+  const isNetProfit = netPnL >= 0;
+
+  // Holdings calculations
+  const totalHoldingInvestment = useMemo(
+    () => holdingPositions.reduce((sum, h) => sum + (h.avgPrice * h.qty), 0),
+    [holdingPositions]
+  );
+  const totalHoldingCurrentVal = useMemo(
+    () => holdingPositions.reduce((sum, h) => sum + (h.ltp * h.qty), 0),
+    [holdingPositions]
+  );
+  const totalHoldingPnL = totalHoldingCurrentVal - totalHoldingInvestment;
+  const isHoldingProfit = totalHoldingPnL >= 0;
+
+  // Visual flash effect on live PnL tick
+  const [pnlTickDirection, setPnlTickDirection] = useState<'UP' | 'DOWN' | null>(null);
+  const prevPnlRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (prevPnlRef.current !== null && totalUnrealizedPnL !== prevPnlRef.current) {
+      setPnlTickDirection(totalUnrealizedPnL > prevPnlRef.current ? 'UP' : 'DOWN');
+      const timer = setTimeout(() => setPnlTickDirection(null), 800);
+      return () => clearTimeout(timer);
+    }
+    prevPnlRef.current = totalUnrealizedPnL;
+  }, [totalUnrealizedPnL]);
 
   // If Live Chart is active, render full live chart view matching Screenshot 2
   if (selectedChartInstrument) {
@@ -260,12 +539,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               setOrderWindowInstrument(null);
               setSelectedChartInstrument(inst);
             }}
-            onOrderPlaced={() => {
-              setOrderWindowInstrument(null);
-              setSelectedChartInstrument(null);
-              setActiveNav('positions');
-              fetchData();
-            }}
+            onOrderPlaced={handleOrderPlaced}
           />
         )}
 
@@ -508,17 +782,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               </p>
             </div>
             <div className="p-3 bg-[#080E18] rounded-xl border border-[#1A2638]">
-              <span className="text-[11px] text-slate-400">Total Unrealized P&L</span>
-              <p className="text-base font-mono font-bold text-emerald-400 mt-0.5 flex items-center gap-1">
-                <ArrowUpRight className="w-4 h-4" /> +₹
-                {portfolio?.wallet?.totalPnL?.toLocaleString('en-IN', { minimumFractionDigits: 2 }) || '34,386.86'}
+              <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                <span>Total Unrealized P&L</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              </span>
+              <p
+                className={`text-base font-mono font-bold mt-0.5 flex items-center gap-1 ${
+                  isProfit ? 'text-emerald-400' : 'text-rose-400'
+                }`}
+              >
+                {isProfit ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
+                {isProfit ? '+' : ''}₹
+                {totalUnrealizedPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             </div>
             <div className="p-3 bg-[#080E18] rounded-xl border border-[#1A2638]">
               <span className="text-[11px] text-slate-400">Today's P&L</span>
-              <p className="text-base font-mono font-bold text-emerald-400 mt-0.5 flex items-center gap-1">
-                <ArrowUpRight className="w-4 h-4" /> +₹
-                {portfolio?.wallet?.todayPnL?.toLocaleString('en-IN', { minimumFractionDigits: 2 }) || '504.52'}
+              <p
+                className={`text-base font-mono font-bold mt-0.5 flex items-center gap-1 ${
+                  isNetProfit ? 'text-emerald-400' : 'text-rose-400'
+                }`}
+              >
+                {isNetProfit ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
+                {isNetProfit ? '+' : ''}₹
+                {netPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             </div>
           </div>
@@ -619,11 +906,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
                   {/* Today's P&L */}
                   <div className="text-center">
-                    <div className="text-[10px] sm:text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">
-                      {t('todayPnl')}
+                    <div className="text-[10px] sm:text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate flex items-center justify-center gap-1">
+                      <span>{t('todayPnl')}</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                     </div>
-                    <div className="text-sm sm:text-base lg:text-lg font-mono font-black text-emerald-500 tracking-tight mt-0.5 truncate">
-                      +₹{(portfolio?.wallet?.todayPnL ?? 4820).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                    <div
+                      className={`text-sm sm:text-base lg:text-lg font-mono font-black tracking-tight mt-0.5 truncate transition-colors duration-200 ${
+                        isProfit ? 'text-emerald-500' : 'text-rose-500'
+                      }`}
+                    >
+                      {isProfit ? '+' : ''}₹
+                      {totalUnrealizedPnL.toLocaleString('en-IN', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
                     </div>
                   </div>
 
@@ -632,8 +928,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                     <div className="text-[10px] sm:text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">
                       {t('overallPnl')}
                     </div>
-                    <div className="text-sm sm:text-base lg:text-lg font-mono font-black text-emerald-500 tracking-tight mt-0.5 truncate">
-                      +₹{(portfolio?.wallet?.totalPnL ?? 21268).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                    <div
+                      className={`text-sm sm:text-base lg:text-lg font-mono font-black tracking-tight mt-0.5 truncate transition-colors duration-200 ${
+                        isNetProfit ? 'text-emerald-500' : 'text-rose-500'
+                      }`}
+                    >
+                      {isNetProfit ? '+' : ''}₹
+                      {netPnL.toLocaleString('en-IN', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
                     </div>
                   </div>
                 </div>
@@ -822,151 +1126,44 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           );
         })()}
 
-        {/* 2. ORDERS TAB */}
-        {activeNav === 'orders' && (
-          <div className="space-y-4 animate-fadeIn">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white">Order Book</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">View your pending, executed, and completed orders</p>
-              </div>
-              <span className="text-xs text-slate-500 dark:text-slate-400 font-mono px-2.5 py-1 bg-slate-100 dark:bg-[#0B111C] border border-slate-200 dark:border-[#1A2638] rounded-lg">
-                {portfolio?.orders?.length || 0} Orders
-              </span>
-            </div>
+        {/* 2. ORDERS TAB (Zerodha Kite & Upstox Level) */}
+        {activeNav === 'orders' && (() => {
+          const allOrders = portfolio?.orders || [];
+          const executedCount = allOrders.filter((o) => o.status === 'EXECUTED').length;
+          const pendingCount = allOrders.filter((o) => o.status === 'PENDING' || o.status === 'OPEN').length;
+          const cancelledCount = allOrders.filter((o) => o.status === 'CANCELLED' || o.status === 'REJECTED').length;
 
-            {/* Desktop Table View (hidden on mobile, visible md+) */}
-            <div className="hidden md:block overflow-x-auto rounded-2xl border border-slate-200 dark:border-[#1A2638] bg-white dark:bg-[#0B111C] shadow-xs">
-              <table className="w-full text-left text-xs font-sans">
-                <thead className="bg-slate-50 dark:bg-[#0E1626] border-b border-slate-200 dark:border-[#1A2638] text-slate-500 dark:text-slate-400 uppercase font-semibold text-[11px] tracking-wider">
-                  <tr>
-                    <th className="py-3 px-4">Order ID & Time</th>
-                    <th className="py-3 px-4">Instrument</th>
-                    <th className="py-3 px-4">Type</th>
-                    <th className="py-3 px-4">Product</th>
-                    <th className="py-3 px-4 text-right">Lots / Qty</th>
-                    <th className="py-3 px-4 text-right">Price</th>
-                    <th className="py-3 px-4 text-center">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-[#162234]">
-                  {portfolio?.orders?.map((ord) => (
-                    <tr key={ord.id} className="hover:bg-slate-50/75 dark:hover:bg-[#121C2D]/60 transition-colors">
-                      <td className="py-3 px-4 font-mono">
-                        <div className="font-bold text-slate-900 dark:text-white">#{ord.id}</div>
-                        <div className="text-[11px] text-slate-400">{ord.time} · {ord.date}</div>
-                      </td>
-                      <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">{ord.symbol}</td>
-                      <td className="py-3 px-4">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-black tracking-wider ${
-                            ord.type === 'BUY'
-                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
-                              : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
-                          }`}
-                        >
-                          {ord.type}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-[#162234] text-slate-600 dark:text-slate-300 font-mono text-[10px] font-bold">
-                          {ord.product || 'INTRADAY'}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono font-bold text-slate-800 dark:text-slate-200">
-                        {ord.lots || 1} ({ord.qty})
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 dark:text-white">
-                        ₹{ord.price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <span className="px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 rounded-md text-[11px] font-bold font-mono">
-                          {ord.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          const filteredOrders = allOrders.filter((ord) => {
+            if (orderFilterTab === 'EXECUTED' && ord.status !== 'EXECUTED') return false;
+            if (orderFilterTab === 'PENDING' && ord.status !== 'PENDING' && ord.status !== 'OPEN') return false;
+            if (orderFilterTab === 'CANCELLED' && ord.status !== 'CANCELLED' && ord.status !== 'REJECTED') return false;
 
-            {/* Mobile Cards View (visible on mobile, hidden md+) */}
-            <div className="md:hidden space-y-2.5">
-              {portfolio?.orders?.map((ord) => (
-                <div
-                  key={ord.id}
-                  className="p-4 bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1A2638] rounded-xl flex items-center justify-between flex-wrap gap-2 shadow-xs"
-                >
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-black ${
-                          ord.type === 'BUY'
-                            ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/40'
-                            : 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40'
-                        }`}
-                      >
-                        {ord.type}
-                      </span>
-                      <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">{ord.symbol}</h3>
-                      <span className="text-xs text-slate-400 font-mono">#{ord.id}</span>
-                    </div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-mono">
-                      Lots: <span className="text-slate-900 dark:text-white font-bold">{ord.lots || 1}</span> ({ord.qty} Qty) • Exec Price: ₹
-                      {ord.price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })} • Product: {ord.product || 'INTRADAY'}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <span className="px-2 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 rounded text-xs font-bold font-mono">
-                      {ord.status}
-                    </span>
-                    <div className="text-[10px] text-slate-400 font-mono mt-1">
-                      {ord.time} · {ord.date}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            if (orderSideFilter !== 'ALL' && ord.type !== orderSideFilter) return false;
 
-            {(!portfolio?.orders || portfolio.orders.length === 0) && (
-              <div className="text-center py-12 px-4 bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1A2638] rounded-2xl text-slate-500 text-xs">
-                No orders placed today yet.
-              </div>
-            )}
-          </div>
-        )}
+            if (orderSearchQuery.trim()) {
+              const q = orderSearchQuery.toLowerCase();
+              const matchSymbol = ord.symbol.toLowerCase().includes(q);
+              const matchId = ord.id.toLowerCase().includes(q);
+              if (!matchSymbol && !matchId) return false;
+            }
 
-        {/* 3. POSITIONS TAB */}
-        {activeNav === 'positions' && (() => {
-          const positionsList = portfolio?.positions || [];
-          const filteredPosList = positionsList.filter((pos) => {
-            if (positionFilter === 'INTRADAY') return pos.product === 'INTRADAY';
-            if (positionFilter === 'HOLDING') return pos.product === 'HOLDING';
             return true;
           });
 
-          const totalUnrealizedPnL = positionsList.reduce((sum, pos) => sum + (pos.pnl || 0), 0);
-          const totalInvestedMargin = positionsList.reduce((sum, pos) => sum + (pos.avgPrice * pos.qty), 0);
-          const overallPnLPercent = totalInvestedMargin > 0
-            ? Number(((totalUnrealizedPnL / totalInvestedMargin) * 100).toFixed(2))
-            : 0;
-          const isProfit = totalUnrealizedPnL >= 0;
-          const todayPnL = portfolio?.wallet?.todayPnL || 504.52;
-          const isTodayProfit = todayPnL >= 0;
-
           return (
             <div className="space-y-4 animate-fadeIn">
-              {/* Positions Header */}
-              <div className="flex items-center justify-between">
+              {/* Order Book Header */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
                 <div>
-                  <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-                    <span>Positions</span>
-                    <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-600 dark:text-amber-300 text-[10px] font-mono font-bold">
-                      {positionsList.length} ACTIVE
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">Order Book</h2>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-mono font-bold flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      LIVE FEED
                     </span>
-                  </h2>
+                  </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Real-time market mark-to-market (MTM) P&L tracking
+                    Real-time order execution, pending queue, and audit trail
                   </p>
                 </div>
 
@@ -974,7 +1171,476 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                   <button
                     type="button"
                     onClick={() => setActiveNav('watchlist')}
-                    className="px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                    className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold transition-all flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Place New Order</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Order Status Counters Strip */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setOrderFilterTab('ALL')}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    orderFilterTab === 'ALL'
+                      ? 'bg-amber-500/10 border-amber-500/50 shadow-xs'
+                      : 'bg-white dark:bg-[#0B111C] border-slate-200 dark:border-[#1A2638] hover:border-slate-300 dark:hover:border-[#2A3B52]'
+                  }`}
+                >
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold block">Total Orders</span>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <span className="text-lg font-black font-mono text-slate-900 dark:text-white">{allOrders.length}</span>
+                    <span className="text-[10px] font-mono text-slate-400">All types</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setOrderFilterTab('EXECUTED')}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    orderFilterTab === 'EXECUTED'
+                      ? 'bg-emerald-500/15 border-emerald-500/50 shadow-xs'
+                      : 'bg-white dark:bg-[#0B111C] border-slate-200 dark:border-[#1A2638] hover:border-slate-300 dark:hover:border-[#2A3B52]'
+                  }`}
+                >
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-semibold block">Executed / Filled</span>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <span className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">{executedCount}</span>
+                    <span className="text-[10px] font-mono text-emerald-600/70 dark:text-emerald-400/70">Completed</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setOrderFilterTab('PENDING')}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    orderFilterTab === 'PENDING'
+                      ? 'bg-amber-500/15 border-amber-500/50 shadow-xs'
+                      : 'bg-white dark:bg-[#0B111C] border-slate-200 dark:border-[#1A2638] hover:border-slate-300 dark:hover:border-[#2A3B52]'
+                  }`}
+                >
+                  <span className="text-[10px] text-amber-600 dark:text-amber-400 uppercase font-semibold block">Open / Pending</span>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <span className="text-lg font-black font-mono text-amber-600 dark:text-amber-400">{pendingCount}</span>
+                    <span className="text-[10px] font-mono text-amber-600/70 dark:text-amber-400/70">In Queue</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setOrderFilterTab('CANCELLED')}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    orderFilterTab === 'CANCELLED'
+                      ? 'bg-rose-500/10 border-rose-500/50 shadow-xs'
+                      : 'bg-white dark:bg-[#0B111C] border-slate-200 dark:border-[#1A2638] hover:border-slate-300 dark:hover:border-[#2A3B52]'
+                  }`}
+                >
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold block">Cancelled</span>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <span className="text-lg font-black font-mono text-slate-700 dark:text-slate-300">{cancelledCount}</span>
+                    <span className="text-[10px] font-mono text-slate-400">Void</span>
+                  </div>
+                </button>
+              </div>
+
+              {/* Filter Tabs & Search Bar */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-2 bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1A2638] rounded-2xl shadow-xs">
+                {/* Tabs */}
+                <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                  {(['ALL', 'EXECUTED', 'PENDING', 'CANCELLED'] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setOrderFilterTab(tab)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                        orderFilterTab === tab
+                          ? 'bg-amber-500 text-slate-950 shadow-xs font-extrabold'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      {tab === 'ALL' && `All (${allOrders.length})`}
+                      {tab === 'EXECUTED' && `Executed (${executedCount})`}
+                      {tab === 'PENDING' && `Open (${pendingCount})`}
+                      {tab === 'CANCELLED' && `Cancelled (${cancelledCount})`}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Search & Side Filter */}
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1 sm:w-56">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={orderSearchQuery}
+                      onChange={(e) => setOrderSearchQuery(e.target.value)}
+                      placeholder="Search symbol or #ID..."
+                      className="w-full pl-8 pr-3 py-1.5 rounded-xl text-xs bg-slate-50 dark:bg-[#121B2B] border border-slate-200 dark:border-[#1D2B40] text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                    />
+                    {orderSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setOrderSearchQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1 p-0.5 bg-slate-100 dark:bg-[#121B2B] rounded-xl border border-slate-200 dark:border-[#1D2B40]">
+                    {(['ALL', 'BUY', 'SELL'] as const).map((side) => (
+                      <button
+                        key={side}
+                        type="button"
+                        onClick={() => setOrderSideFilter(side)}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                          orderSideFilter === side
+                            ? side === 'BUY'
+                              ? 'bg-emerald-500 text-white font-extrabold'
+                              : side === 'SELL'
+                              ? 'bg-rose-500 text-white font-extrabold'
+                              : 'bg-white dark:bg-[#1E2E44] text-slate-900 dark:text-white shadow-xs'
+                            : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                        }`}
+                      >
+                        {side}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Desktop Table View */}
+              <div className="hidden md:block overflow-x-auto rounded-2xl border border-slate-200 dark:border-[#1A2638] bg-white dark:bg-[#0B111C] shadow-xs">
+                <table className="w-full text-left text-xs font-sans">
+                  <thead className="bg-slate-50 dark:bg-[#0E1626] border-b border-slate-200 dark:border-[#1A2638] text-slate-500 dark:text-slate-400 uppercase font-semibold text-[11px] tracking-wider">
+                    <tr>
+                      <th className="py-3 px-4">Order ID & Time</th>
+                      <th className="py-3 px-4">Instrument</th>
+                      <th className="py-3 px-4">Side</th>
+                      <th className="py-3 px-4">Product</th>
+                      <th className="py-3 px-4">Type</th>
+                      <th className="py-3 px-4 text-right">Lots / Qty</th>
+                      <th className="py-3 px-4 text-right">Price</th>
+                      <th className="py-3 px-4 text-center">Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-[#162234]">
+                    {filteredOrders.map((ord) => {
+                      const inst = instruments.find((i) => i.symbol === ord.symbol);
+                      const isBuy = ord.type === 'BUY';
+                      const isExecuted = ord.status === 'EXECUTED';
+                      const isPending = ord.status === 'PENDING' || ord.status === 'OPEN';
+                      const isCancelled = ord.status === 'CANCELLED' || ord.status === 'REJECTED';
+
+                      return (
+                        <tr key={ord.id} className="hover:bg-slate-50/75 dark:hover:bg-[#121C2D]/60 transition-colors">
+                          <td className="py-3 px-4 font-mono">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedOrderForDetail(ord)}
+                              className="font-bold text-slate-900 dark:text-white hover:text-amber-500 text-left flex items-center gap-1 cursor-pointer"
+                            >
+                              <span>#{ord.id}</span>
+                              <FileText className="w-3 h-3 text-slate-400" />
+                            </button>
+                            <div className="text-[11px] text-slate-400 mt-0.5">{ord.time} · {ord.date}</div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="font-extrabold text-slate-900 dark:text-white text-sm">{ord.symbol}</div>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {inst?.category || 'COMMODITY'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span
+                              className={`px-2.5 py-0.5 rounded text-[10px] font-black tracking-wider ${
+                                isBuy
+                                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                                  : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                              }`}
+                            >
+                              {ord.type}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-[#162234] text-slate-600 dark:text-slate-300 font-mono text-[10px] font-bold">
+                              {ord.product || 'INTRADAY'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                            {ord.orderType || 'MARKET'}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono font-bold text-slate-800 dark:text-slate-200">
+                            {ord.lots || 1} <span className="text-slate-400 text-[11px]">({ord.qty})</span>
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 dark:text-white">
+                            ₹{ord.price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            {isExecuted && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 rounded-md text-[11px] font-bold font-mono">
+                                <Check className="w-3 h-3" />
+                                <span>EXECUTED</span>
+                              </span>
+                            )}
+                            {isPending && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 rounded-md text-[11px] font-bold font-mono">
+                                <Clock className="w-3 h-3 animate-spin" />
+                                <span>PENDING</span>
+                              </span>
+                            )}
+                            {isCancelled && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 dark:bg-[#1D2B40] border border-slate-300 dark:border-[#2D4566] text-slate-500 dark:text-slate-400 rounded-md text-[11px] font-bold font-mono">
+                                <X className="w-3 h-3" />
+                                <span>{ord.status}</span>
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {inst && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedChartInstrument(inst)}
+                                  className="p-1.5 rounded-lg bg-slate-100 dark:bg-[#162234] hover:bg-slate-200 dark:hover:bg-[#203046] text-slate-700 dark:text-slate-300 transition-all cursor-pointer"
+                                  title="View Chart"
+                                >
+                                  <BarChart2 className="w-3.5 h-3.5 text-amber-500" />
+                                </button>
+                              )}
+
+                              {isPending && (
+                                <button
+                                  type="button"
+                                  disabled={cancellingOrderId === ord.id}
+                                  onClick={() => handleCancelOrder(ord.id)}
+                                  className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
+                                >
+                                  {cancellingOrderId === ord.id ? 'Cancelling...' : 'Cancel'}
+                                </button>
+                              )}
+
+                              {isExecuted && inst && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenOrder(inst, ord.type)}
+                                  className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold transition-all cursor-pointer flex items-center gap-1"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                  <span>Repeat</span>
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => setSelectedOrderForDetail(ord)}
+                                className="p-1.5 rounded-lg bg-slate-100 dark:bg-[#162234] hover:bg-slate-200 dark:hover:bg-[#203046] text-slate-500 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer"
+                                title="Order Audit Trail"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile Cards View */}
+              <div className="md:hidden space-y-2.5">
+                {filteredOrders.map((ord) => {
+                  const inst = instruments.find((i) => i.symbol === ord.symbol);
+                  const isBuy = ord.type === 'BUY';
+                  const isPending = ord.status === 'PENDING' || ord.status === 'OPEN';
+                  const isExecuted = ord.status === 'EXECUTED';
+
+                  return (
+                    <div
+                      key={ord.id}
+                      className="p-4 bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1A2638] rounded-2xl shadow-xs space-y-3"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                              isBuy
+                                ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/40'
+                                : 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40'
+                            }`}
+                          >
+                            {ord.type}
+                          </span>
+                          <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">{ord.symbol}</h3>
+                          <span className="text-[10px] text-slate-400 font-mono">#{ord.id}</span>
+                        </div>
+
+                        <div>
+                          {isExecuted && (
+                            <span className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 rounded text-[10px] font-bold font-mono">
+                              EXECUTED
+                            </span>
+                          )}
+                          {isPending && (
+                            <span className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 rounded text-[10px] font-bold font-mono">
+                              PENDING
+                            </span>
+                          )}
+                          {!isExecuted && !isPending && (
+                            <span className="px-2 py-0.5 bg-slate-100 dark:bg-[#1D2B40] text-slate-500 rounded text-[10px] font-bold font-mono">
+                              {ord.status}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 text-xs font-mono py-2 border-y border-slate-100 dark:border-[#162234]">
+                        <div>
+                          <span className="text-[10px] text-slate-400 block uppercase">Price</span>
+                          <span className="font-bold text-slate-900 dark:text-white">₹{ord.price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block uppercase">Lots (Qty)</span>
+                          <span className="font-bold text-slate-800 dark:text-slate-200">{ord.lots || 1} ({ord.qty})</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block uppercase">Product</span>
+                          <span className="font-bold text-slate-800 dark:text-slate-200">{ord.product || 'INTRADAY'}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1">
+                        <div className="text-[10px] text-slate-400 font-mono">{ord.time} · {ord.date}</div>
+
+                        <div className="flex items-center gap-2">
+                          {inst && (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedChartInstrument(inst)}
+                              className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-[#162234] text-slate-700 dark:text-slate-300 text-xs font-bold flex items-center gap-1"
+                            >
+                              <BarChart2 className="w-3 h-3 text-amber-500" />
+                              <span>Chart</span>
+                            </button>
+                          )}
+
+                          {isPending && (
+                            <button
+                              type="button"
+                              disabled={cancellingOrderId === ord.id}
+                              onClick={() => handleCancelOrder(ord.id)}
+                              className="px-3 py-1 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-bold"
+                            >
+                              {cancellingOrderId === ord.id ? 'Cancelling...' : 'Cancel'}
+                            </button>
+                          )}
+
+                          {isExecuted && inst && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenOrder(inst, ord.type)}
+                              className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold flex items-center gap-1"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>Repeat</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {filteredOrders.length === 0 && (
+                <div className="text-center py-12 px-4 bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1A2638] rounded-2xl shadow-xs">
+                  <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-[#162234] flex items-center justify-center mx-auto text-slate-400 mb-3">
+                    <FileText className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">No Orders Found</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto">
+                    {orderSearchQuery
+                      ? 'No orders matching your search query.'
+                      : 'You do not have any orders in this view yet.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setActiveNav('watchlist')}
+                    className="mt-4 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs transition-all cursor-pointer shadow-md active:scale-95"
+                  >
+                    Go to Watchlist & Place Trade
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* 3. PORTFOLIO & POSITIONS TAB (Zerodha Kite & Upstox Level) */}
+        {activeNav === 'positions' && (() => {
+          return (
+            <div className="space-y-4 animate-fadeIn">
+              {/* Portfolio Header with Sub-Tabs */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center p-1 bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1A2638] rounded-2xl shadow-xs">
+                    <button
+                      type="button"
+                      onClick={() => setPortfolioSubTab('POSITIONS')}
+                      className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                        portfolioSubTab === 'POSITIONS'
+                          ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Positions</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/10 dark:bg-black/20 font-mono">
+                        {livePositions.length}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPortfolioSubTab('HOLDINGS')}
+                      className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                        portfolioSubTab === 'HOLDINGS'
+                          ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <BookOpen className="w-3.5 h-3.5" />
+                      <span>Holdings</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/10 dark:bg-black/20 font-mono">
+                        {holdingPositions.length}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {livePositions.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowExitAllModal(true)}
+                      className="px-3.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-extrabold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                    >
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      <span>Exit All Positions</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveNav('watchlist')}
+                    className="px-3.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-extrabold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
                   >
                     <ArrowUpRight className="w-3.5 h-3.5" />
                     <span>Trade More</span>
@@ -982,7 +1648,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 </div>
               </div>
 
-              {/* 🌟 BIG HIGHLIGHT HERO CARD FOR PROFIT & LOSS */}
+              {/* 🌟 BIG HIGHLIGHT HERO CARD FOR PROFIT & LOSS (Zerodha Kite Standard) */}
               <div
                 className={`rounded-2xl p-5 sm:p-6 border-2 transition-all shadow-xl relative overflow-hidden ${
                   isProfit
@@ -1002,7 +1668,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <span className="text-xs sm:text-sm font-bold tracking-wider uppercase text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                       <Activity className="w-4 h-4 text-amber-500" />
-                      <span>Total Unrealized P&L</span>
+                      <span>Total Unrealized P&L (MTM)</span>
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping ml-1" title="Live 1s Tick Feed" />
                     </span>
 
                     {/* High-visibility Profit/Loss Badge */}
@@ -1023,7 +1690,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                   <div className="my-3 sm:my-4 flex items-baseline flex-wrap gap-2 sm:gap-3">
                     <div
                       id="big-pnl-highlight"
-                      className={`text-3xl sm:text-4xl lg:text-5xl font-black font-mono tracking-tight ${
+                      className={`text-3xl sm:text-4xl lg:text-5xl font-black font-mono tracking-tight transition-all duration-300 px-3 py-1 rounded-xl ${
+                        pnlTickDirection === 'UP'
+                          ? 'ring-2 ring-emerald-500 bg-emerald-500/10'
+                          : pnlTickDirection === 'DOWN'
+                          ? 'ring-2 ring-rose-500 bg-rose-500/10'
+                          : ''
+                      } ${
                         isProfit
                           ? 'text-emerald-500 dark:text-emerald-400'
                           : 'text-rose-500 dark:text-rose-400'
@@ -1035,8 +1708,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                       })}
                     </div>
 
-                    <div className="text-xs sm:text-sm font-bold text-slate-500 dark:text-slate-300">
-                      Unrealized Gain / Loss
+                    <div className="flex items-center gap-2">
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[11px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                        <span>LIVE 1s FEED</span>
+                      </div>
+                      {pnlTickDirection === 'UP' && (
+                        <span className="text-emerald-600 dark:text-emerald-400 font-mono text-xs font-black animate-bounce">
+                          ▲ TICK UP
+                        </span>
+                      )}
+                      {pnlTickDirection === 'DOWN' && (
+                        <span className="text-rose-600 dark:text-rose-400 font-mono text-xs font-black animate-bounce">
+                          ▼ TICK DOWN
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -1044,14 +1730,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-3.5 border-t border-slate-200 dark:border-white/10 text-xs">
                     <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/5">
                       <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-medium uppercase tracking-wide">
-                        Today Realized P&L
+                        Realized P&L
                       </span>
                       <span
                         className={`text-sm font-mono font-black mt-0.5 block ${
                           isTodayProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
                         }`}
                       >
-                        {isTodayProfit ? '+' : ''}₹{todayPnL.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        {isTodayProfit ? '+' : ''}₹{todayRealizedPnL.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/5">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-medium uppercase tracking-wide">
+                        Net Total P&L
+                      </span>
+                      <span
+                        className={`text-sm font-mono font-black mt-0.5 block ${
+                          isNetProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                        }`}
+                      >
+                        {isNetProfit ? '+' : ''}₹{netPnL.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
 
@@ -1060,7 +1759,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                         Used Margin
                       </span>
                       <span className="text-sm font-mono font-bold text-slate-900 dark:text-white mt-0.5 block">
-                        ₹{(portfolio?.wallet?.usedMargin || 38210).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        ₹{(portfolio?.wallet?.usedMargin || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
 
@@ -1068,215 +1767,513 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                       <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-medium uppercase tracking-wide">
                         Available Balance
                       </span>
-                      <span className="text-sm font-mono font-bold text-amber-600 dark:text-amber-400 mt-0.5 block">
-                        ₹{(portfolio?.wallet?.availableBalance || 142840).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
-
-                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/5">
-                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-medium uppercase tracking-wide">
-                        Active Contracts
-                      </span>
-                      <span className="text-sm font-mono font-bold text-slate-700 dark:text-slate-200 mt-0.5 block">
-                        {positionsList.length} Open Positions
-                      </span>
+                      <div className="flex items-center justify-between mt-0.5">
+                        <span className="text-sm font-mono font-bold text-amber-600 dark:text-amber-400">
+                          ₹{(portfolio?.wallet?.availableBalance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setIsWalletModalOpen(true)}
+                          className="text-[10px] text-amber-500 hover:underline font-bold"
+                        >
+                          + Funds
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Filter Pills (All / Intraday MIS / Holding CNC) */}
-              <div className="flex items-center gap-1.5 p-1 bg-white dark:bg-[#0A101C] rounded-xl border border-slate-200 dark:border-[#1A2638] w-fit shadow-xs">
-                <button
-                  type="button"
-                  onClick={() => setPositionFilter('ALL')}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    positionFilter === 'ALL'
-                      ? 'bg-amber-500 text-slate-950 shadow-xs'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  All ({positionsList.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPositionFilter('INTRADAY')}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    positionFilter === 'INTRADAY'
-                      ? 'bg-amber-500 text-slate-950 shadow-xs'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  Intraday MIS ({positionsList.filter((p) => p.product === 'INTRADAY').length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPositionFilter('HOLDING')}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    positionFilter === 'HOLDING'
-                      ? 'bg-amber-500 text-slate-950 shadow-xs'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  Holding CNC ({positionsList.filter((p) => p.product === 'HOLDING').length})
-                </button>
-              </div>
-
-              {/* 📊 INDIVIDUAL POSITIONS LIST WITH PROMINENT P&L HIGHLIGHT */}
-              <div className="space-y-3">
-                {filteredPosList.map((pos) => {
-                  const isPosProfit = pos.pnl >= 0;
-                  const inst = instruments.find((i) => i.symbol === pos.symbol);
-
-                  return (
-                    <div
-                      key={pos.id}
-                      className="p-4 sm:p-5 bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1D2B40] hover:border-slate-300 dark:hover:border-[#2D4566] rounded-2xl transition-all shadow-xs space-y-3"
-                    >
-                      {/* Row 1: Symbol, Type, Lots & Square Off Button */}
-                      <div className="flex items-start justify-between flex-wrap gap-2">
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
-                                pos.type === 'BUY'
-                                  ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/40'
-                                  : 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40'
-                              }`}
-                            >
-                              {pos.type}
-                            </span>
-                            <h3 className="font-black text-base sm:text-lg text-slate-900 dark:text-white">
-                              {pos.symbol}
-                            </h3>
-                            <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-[#162234] border border-slate-200 dark:border-[#233650] text-[10px] font-mono text-slate-700 dark:text-slate-300 font-bold">
-                              {pos.product || 'INTRADAY'}
-                            </span>
-                            <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px] font-mono font-bold">
-                              {pos.lots || 1} Lot ({pos.qty} Qty)
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Square Off / Exit Button */}
-                        <div className="flex items-center gap-2">
-                          {inst && (
-                            <button
-                              type="button"
-                              onClick={() => setSelectedChartInstrument(inst)}
-                              className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-[#142032] hover:bg-slate-200 dark:hover:bg-[#1E2E44] border border-slate-200 dark:border-[#23354E] text-slate-700 dark:text-slate-300 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
-                              title="View Live Chart"
-                            >
-                              <BarChart2 className="w-3.5 h-3.5 text-amber-500" />
-                              <span>Chart</span>
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            disabled={closingPositionId === pos.id}
-                            onClick={() => handleSquareOffPosition(pos.id, pos.symbol)}
-                            className="px-3.5 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 active:bg-rose-500/35 border border-rose-500/40 text-rose-600 dark:text-rose-300 text-xs font-black transition-all cursor-pointer disabled:opacity-50 shadow-xs flex items-center gap-1"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                            <span>{closingPositionId === pos.id ? 'Closing...' : 'Exit Position'}</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* 🌟 DEDICATED BIG P&L HIGHLIGHT BOX PER POSITION */}
-                      <div
-                        className={`p-3.5 sm:p-4 rounded-xl border-2 transition-all flex items-center justify-between flex-wrap gap-2 ${
-                          isPosProfit
-                            ? 'bg-emerald-500/5 dark:bg-gradient-to-r dark:from-emerald-950/70 dark:via-[#0B2117]/80 dark:to-[#0A1813] border-emerald-500/40 shadow-xs'
-                            : 'bg-rose-500/5 dark:bg-gradient-to-r dark:from-rose-950/70 dark:via-[#240C12]/80 dark:to-[#180A0E] border-rose-500/40 shadow-xs'
-                        }`}
-                      >
-                        <div>
-                          <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                            {isPosProfit ? (
-                              <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
-                            ) : (
-                              <TrendingDown className="w-3.5 h-3.5 text-rose-500" />
-                            )}
-                            <span>{isPosProfit ? 'PROFIT' : 'LOSS'} (UNREALIZED)</span>
-                          </span>
-
-                          <div
-                            className={`text-2xl sm:text-3xl font-black font-mono tracking-tight mt-0.5 ${
-                              isPosProfit
-                                ? 'text-emerald-600 dark:text-emerald-400'
-                                : 'text-rose-600 dark:text-rose-400'
-                            }`}
-                          >
-                            {isPosProfit ? '+' : ''}₹{pos.pnl.toLocaleString('en-IN', {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
-                          </div>
-                        </div>
-
-                        {/* Percentage Return Badge */}
-                        <div
-                          className={`px-3 py-1.5 rounded-lg text-sm font-mono font-black border flex items-center gap-1 ${
-                            isPosProfit
-                              ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
-                              : 'bg-rose-500/15 border-rose-500/30 text-rose-700 dark:text-rose-300'
-                          }`}
-                        >
-                          <span>{isPosProfit ? '↗' : '↘'}</span>
-                          <span>{isPosProfit ? '+' : ''}{pos.pnlPercent}%</span>
-                        </div>
-                      </div>
-
-                      {/* Trade Details Bar */}
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-200 dark:border-[#162234] text-xs font-mono text-slate-500 dark:text-slate-400">
-                        <div>
-                          <span className="text-[10px] text-slate-400 block uppercase">Avg Buy/Sell Price</span>
-                          <span className="text-slate-800 dark:text-slate-200 font-bold">
-                            ₹{pos.avgPrice?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-slate-400 block uppercase">Current LTP</span>
-                          <span className="text-slate-900 dark:text-white font-bold">
-                            ₹{pos.ltp?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-slate-400 block uppercase">Total Exposure</span>
-                          <span className="text-slate-800 dark:text-slate-200 font-bold">
-                            ₹{(pos.avgPrice * pos.qty).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-slate-400 block uppercase">Position ID</span>
-                          <span className="text-slate-500 dark:text-slate-400">#{pos.id}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {filteredPosList.length === 0 && (
-                  <div className="text-center py-12 px-4 bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1A2638] rounded-2xl shadow-xs">
-                    <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-500 mb-3">
-                      <BookOpen className="w-6 h-6" />
-                    </div>
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">No Open Positions</h3>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto">
-                      You do not have any active positions in this view. Choose an instrument from the Watchlist to place a trade.
-                    </p>
+              {/* Positions Sub-View */}
+              {portfolioSubTab === 'POSITIONS' && (
+                <div className="space-y-3">
+                  {/* Filter Pills */}
+                  <div className="flex items-center gap-1.5 p-1 bg-white dark:bg-[#0A101C] rounded-xl border border-slate-200 dark:border-[#1A2638] w-fit shadow-xs">
                     <button
                       type="button"
-                      onClick={() => setActiveNav('watchlist')}
-                      className="mt-4 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs transition-all cursor-pointer shadow-md active:scale-95"
+                      onClick={() => setPositionFilter('ALL')}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        positionFilter === 'ALL'
+                          ? 'bg-amber-500 text-slate-950 shadow-xs'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
                     >
-                      Go to Watchlist
+                      All ({livePositions.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPositionFilter('INTRADAY')}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        positionFilter === 'INTRADAY'
+                          ? 'bg-amber-500 text-slate-950 shadow-xs'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      Intraday MIS ({intradayPositions.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPositionFilter('HOLDING')}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        positionFilter === 'HOLDING'
+                          ? 'bg-amber-500 text-slate-950 shadow-xs'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      Holding CNC ({holdingPositions.length})
                     </button>
                   </div>
-                )}
-              </div>
+
+                  {/* Individual Positions Cards */}
+                  <div className="space-y-3">
+                    {displayedPositions.map((pos) => {
+                      const isPosProfit = pos.pnl >= 0;
+                      const inst = instruments.find((i) => i.symbol === pos.symbol);
+
+                      return (
+                        <div
+                          key={pos.id}
+                          className="p-4 sm:p-5 bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1D2B40] hover:border-slate-300 dark:hover:border-[#2D4566] rounded-2xl transition-all shadow-xs space-y-3"
+                        >
+                          {/* Row 1: Symbol, Type, Lots & Actions */}
+                          <div className="flex items-start justify-between flex-wrap gap-2">
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
+                                    pos.type === 'BUY'
+                                      ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/40'
+                                      : 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40'
+                                  }`}
+                                >
+                                  {pos.type}
+                                </span>
+                                <h3 className="font-black text-base sm:text-lg text-slate-900 dark:text-white">
+                                  {pos.symbol}
+                                </h3>
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-[#162234] border border-slate-200 dark:border-[#233650] text-[10px] font-mono text-slate-700 dark:text-slate-300 font-bold">
+                                  {pos.product || 'INTRADAY'}
+                                </span>
+                                <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px] font-mono font-bold">
+                                  {pos.lots || 1} Lot ({pos.qty} Qty)
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="flex items-center gap-2">
+                              {inst && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenOrder(inst, pos.type)}
+                                    className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                                    title="Add More Quantity"
+                                  >
+                                    <Plus className="w-3.5 h-3.5" />
+                                    <span>Add More</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedChartInstrument(inst)}
+                                    className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-[#142032] hover:bg-slate-200 dark:hover:bg-[#1E2E44] border border-slate-200 dark:border-[#23354E] text-slate-700 dark:text-slate-300 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                                    title="View Live Chart"
+                                  >
+                                    <BarChart2 className="w-3.5 h-3.5 text-amber-500" />
+                                    <span>Chart</span>
+                                  </button>
+                                </>
+                              )}
+
+                              <button
+                                type="button"
+                                disabled={closingPositionId === pos.id}
+                                onClick={() => handleSquareOffPosition(pos.id, pos.symbol)}
+                                className="px-3.5 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 active:bg-rose-500/35 border border-rose-500/40 text-rose-600 dark:text-rose-300 text-xs font-black transition-all cursor-pointer disabled:opacity-50 shadow-xs flex items-center gap-1"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                                <span>{closingPositionId === pos.id ? 'Exiting...' : 'Exit Position'}</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* 🌟 DEDICATED BIG P&L HIGHLIGHT BOX PER POSITION */}
+                          <div
+                            className={`p-3.5 sm:p-4 rounded-xl border-2 transition-all flex items-center justify-between flex-wrap gap-2 ${
+                              isPosProfit
+                                ? 'bg-emerald-500/5 dark:bg-gradient-to-r dark:from-emerald-950/70 dark:via-[#0B2117]/80 dark:to-[#0A1813] border-emerald-500/40 shadow-xs'
+                                : 'bg-rose-500/5 dark:bg-gradient-to-r dark:from-rose-950/70 dark:via-[#240C12]/80 dark:to-[#180A0E] border-rose-500/40 shadow-xs'
+                            }`}
+                          >
+                            <div>
+                              <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                                {isPosProfit ? (
+                                  <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
+                                ) : (
+                                  <TrendingDown className="w-3.5 h-3.5 text-rose-500" />
+                                )}
+                                <span className="flex items-center gap-1.5">
+                                  <span>{isPosProfit ? 'PROFIT' : 'LOSS'} (LIVE MTM)</span>
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                                </span>
+                              </span>
+
+                              <div
+                                className={`text-2xl sm:text-3xl font-black font-mono tracking-tight mt-0.5 ${
+                                  isPosProfit
+                                    ? 'text-emerald-600 dark:text-emerald-400'
+                                    : 'text-rose-600 dark:text-rose-400'
+                                }`}
+                              >
+                                {isPosProfit ? '+' : ''}₹{pos.pnl.toLocaleString('en-IN', {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </div>
+                            </div>
+
+                            {/* Percentage Return Badge */}
+                            <div
+                              className={`px-3 py-1.5 rounded-lg text-sm font-mono font-black border flex items-center gap-1 ${
+                                isPosProfit
+                                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                                  : 'bg-rose-500/15 border-rose-500/30 text-rose-700 dark:text-rose-300'
+                              }`}
+                            >
+                              <span>{isPosProfit ? '↗' : '↘'}</span>
+                              <span>{isPosProfit ? '+' : ''}{pos.pnlPercent}%</span>
+                            </div>
+                          </div>
+
+                          {/* Trade Details Bar */}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-200 dark:border-[#162234] text-xs font-mono text-slate-500 dark:text-slate-400">
+                            <div>
+                              <span className="text-[10px] text-slate-400 block uppercase">Avg Buy/Sell Price</span>
+                              <span className="text-slate-800 dark:text-slate-200 font-bold">
+                                ₹{pos.avgPrice?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-slate-400 block uppercase">Current LTP</span>
+                              <span className="text-slate-900 dark:text-white font-bold flex items-center gap-1">
+                                <span>₹{pos.ltp?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-slate-400 block uppercase">Total Exposure</span>
+                              <span className="text-slate-800 dark:text-slate-200 font-bold">
+                                ₹{(pos.avgPrice * pos.qty).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-slate-400 block uppercase">Position ID</span>
+                              <span className="text-slate-500 dark:text-slate-400">#{pos.id}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {displayedPositions.length === 0 && (
+                      <div className="text-center py-12 px-4 bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1A2638] rounded-2xl shadow-xs">
+                        <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-500 mb-3">
+                          <BookOpen className="w-6 h-6" />
+                        </div>
+                        <h3 className="text-sm font-bold text-slate-900 dark:text-white">No Open Positions</h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto">
+                          You do not have any active positions in this view. Choose an instrument from the Watchlist to place a trade.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setActiveNav('watchlist')}
+                          className="mt-4 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs transition-all cursor-pointer shadow-md active:scale-95"
+                        >
+                          Go to Watchlist
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Holdings Sub-View (Zerodha Kite & Upstox Level Delivery Holdings) */}
+              {portfolioSubTab === 'HOLDINGS' && (
+                <div className="space-y-4">
+                  {/* Holdings Summary Bar */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-4 bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1A2638] rounded-2xl shadow-xs">
+                    <div>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold block">Total Investment</span>
+                      <span className="text-base font-black font-mono text-slate-900 dark:text-white mt-1 block">
+                        ₹{totalHoldingInvestment.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold block">Current Value</span>
+                      <span className="text-base font-black font-mono text-slate-900 dark:text-white mt-1 block">
+                        ₹{totalHoldingCurrentVal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold block">Overall P&L</span>
+                      <span
+                        className={`text-base font-black font-mono mt-1 block ${
+                          isHoldingProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                        }`}
+                      >
+                        {isHoldingProfit ? '+' : ''}₹{totalHoldingPnL.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold block">Total Holdings</span>
+                      <span className="text-base font-black font-mono text-slate-700 dark:text-slate-300 mt-1 block">
+                        {holdingPositions.length} Assets
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Holdings Table */}
+                  <div className="space-y-3">
+                    {holdingPositions.map((h) => {
+                      const isHoldingProf = h.pnl >= 0;
+                      const inst = instruments.find((i) => i.symbol === h.symbol);
+
+                      return (
+                        <div
+                          key={h.id}
+                          className="p-4 bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1D2B40] rounded-2xl shadow-xs space-y-3"
+                        >
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">{h.symbol}</h3>
+                                <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold font-mono">
+                                  CNC HOLDING
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-400 font-mono mt-0.5">
+                                Qty: <span className="font-bold text-slate-800 dark:text-slate-200">{h.qty}</span> • Avg: ₹
+                                {h.avgPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </p>
+                            </div>
+
+                            <div className="text-right">
+                              <span
+                                className={`text-base font-black font-mono block ${
+                                  isHoldingProf ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                                }`}
+                              >
+                                {isHoldingProf ? '+' : ''}₹{h.pnl.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </span>
+                              <span className="text-xs font-mono text-slate-400 font-bold">
+                                ({isHoldingProf ? '+' : ''}{h.pnlPercent}%)
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-[#162234] text-xs">
+                            <span className="text-slate-400 font-mono">LTP: ₹{h.ltp.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+
+                            <div className="flex items-center gap-2">
+                              {inst && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenOrder(inst, 'BUY')}
+                                    className="px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold text-xs"
+                                  >
+                                    Buy More
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedChartInstrument(inst)}
+                                    className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-[#162234] text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1"
+                                  >
+                                    <BarChart2 className="w-3.5 h-3.5 text-amber-500" />
+                                    <span>Chart</span>
+                                  </button>
+                                </>
+                              )}
+
+                              <button
+                                type="button"
+                                disabled={closingPositionId === h.id}
+                                onClick={() => handleSquareOffPosition(h.id, h.symbol)}
+                                className="px-3 py-1 rounded-lg bg-rose-500/15 text-rose-600 dark:text-rose-400 font-bold text-xs"
+                              >
+                                {closingPositionId === h.id ? 'Selling...' : 'Sell Holding'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {holdingPositions.length === 0 && (
+                      <div className="text-center py-12 px-4 bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1A2638] rounded-2xl shadow-xs">
+                        <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-[#162234] flex items-center justify-center mx-auto text-slate-400 mb-3">
+                          <BookOpen className="w-6 h-6" />
+                        </div>
+                        <h3 className="text-sm font-bold text-slate-900 dark:text-white">No Holdings Found</h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto">
+                          You do not have any delivery holdings yet. Buy instruments with CNC product type from the Watchlist.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setActiveNav('watchlist')}
+                          className="mt-4 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs transition-all cursor-pointer shadow-md active:scale-95"
+                        >
+                          Explore Watchlist
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Exit All Confirmation Modal */}
+              {showExitAllModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fadeIn">
+                  <div className="bg-white dark:bg-[#0E1624] border border-rose-500/40 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-500">
+                        <AlertTriangle className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-black text-slate-900 dark:text-white">Exit All Open Positions?</h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Emergency / Market-wide Square Off</p>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                      This action will immediately square off all <span className="font-bold text-slate-900 dark:text-white">{livePositions.length} active position(s)</span> at current live market prices. Margin will be released back to your available balance.
+                    </p>
+
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#0A101C] border border-slate-200 dark:border-[#1A2638] flex items-center justify-between text-xs font-mono">
+                      <span className="text-slate-500">Estimated Total Unrealized P&L:</span>
+                      <span className={`font-black ${isProfit ? 'text-emerald-500' : 'text-rose-500'}`}>
+                        {isProfit ? '+' : ''}₹{totalUnrealizedPnL.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowExitAllModal(false)}
+                        className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-[#1A2638] hover:bg-slate-200 dark:hover:bg-[#25364E] text-slate-700 dark:text-slate-300 text-xs font-bold transition-all cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isExitingAll}
+                        onClick={handleExitAllPositions}
+                        className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5 shadow-lg shadow-rose-600/20 active:scale-95"
+                      >
+                        {isExitingAll && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                        <span>{isExitingAll ? 'Square Off in Progress...' : 'Confirm Exit All'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Order Detail & Audit Modal */}
+              {selectedOrderForDetail && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fadeIn">
+                  <div className="bg-white dark:bg-[#0E1624] border border-slate-200 dark:border-[#1D2B40] rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                            selectedOrderForDetail.type === 'BUY'
+                              ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/40'
+                              : 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40'
+                          }`}
+                        >
+                          {selectedOrderForDetail.type}
+                        </span>
+                        <h3 className="text-base font-black text-slate-900 dark:text-white">
+                          {selectedOrderForDetail.symbol}
+                        </h3>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setSelectedOrderForDetail(null)}
+                        className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="p-3 bg-slate-50 dark:bg-[#0A101C] border border-slate-200 dark:border-[#1A2638] rounded-xl text-xs font-mono space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Order Reference</span>
+                        <span className="font-bold text-slate-900 dark:text-white">#{selectedOrderForDetail.id}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Order Status</span>
+                        <span className="font-bold text-emerald-500">{selectedOrderForDetail.status}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Product Code</span>
+                        <span className="font-bold text-slate-800 dark:text-slate-200">{selectedOrderForDetail.product || 'INTRADAY MIS'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Filled Lots / Qty</span>
+                        <span className="font-bold text-slate-800 dark:text-slate-200">{selectedOrderForDetail.lots || 1} ({selectedOrderForDetail.qty} Qty)</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Execution Price</span>
+                        <span className="font-bold text-slate-900 dark:text-white">₹{selectedOrderForDetail.price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Order Timestamp</span>
+                        <span className="text-slate-500">{selectedOrderForDetail.time} · {selectedOrderForDetail.date}</span>
+                      </div>
+                    </div>
+
+                    {/* Execution Audit Trail Timeline */}
+                    <div className="space-y-2 pt-2">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Execution Audit Trail</span>
+                      <div className="space-y-2 text-xs">
+                        <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                          <span>Order received & placed by trader</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                          <span>Pre-trade risk & margin validation passed</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                          <span>Order routed to Matching Engine</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                          <span>Trade execution confirmed & positions updated</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedOrderForDetail(null)}
+                        className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-all cursor-pointer"
+                      >
+                        Close Details
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })()}
@@ -1514,9 +2511,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       <NotificationsModal
         isOpen={isNotificationsOpen}
         notifications={notifications}
+        unreadCount={unreadNotificationsCount}
         onClose={() => setIsNotificationsOpen(false)}
         onMarkAllRead={handleMarkAllNotificationsRead}
-        onMarkAsRead={handleMarkNotificationRead}
+        onMarkRead={handleMarkNotificationRead}
         onClearAll={handleClearNotifications}
       />
 
@@ -1532,12 +2530,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             setOrderWindowInstrument(null);
             setSelectedChartInstrument(inst);
           }}
-          onOrderPlaced={() => {
-            setOrderWindowInstrument(null);
-            setSelectedChartInstrument(null);
-            setActiveNav('positions');
-            fetchData();
-          }}
+          onOrderPlaced={handleOrderPlaced}
         />
       )}
 

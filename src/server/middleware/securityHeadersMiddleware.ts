@@ -10,7 +10,6 @@ const isProd = process.env.NODE_ENV === 'production';
 export function securityHeadersMiddleware(req: Request, res: Response, next: NextFunction): void {
   // Baseline Security Headers
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'geolocation=(), camera=(), microphone=()');
@@ -20,10 +19,19 @@ export function securityHeadersMiddleware(req: Request, res: Response, next: Nex
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
 
-  // Content Security Policy
+  // Content Security Policy - Configured for TradingView charts, Google Fonts, and AI Studio iframe preview
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'self' ws: wss: http: https:;"
+    [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://s3.tradingview.com https://*.tradingview.com https://tradingview.com https://*.tradingview-widget.com",
+      "frame-src 'self' https://s.tradingview.com https://*.tradingview.com https://tradingview.com https://*.tradingview-widget.com https://*.google.com",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://*.tradingview.com https://*.tradingview-widget.com",
+      "img-src 'self' data: blob: https: https://*.tradingview.com",
+      "font-src 'self' data: https: https://fonts.gstatic.com",
+      "connect-src 'self' ws: wss: http: https: https://*.tradingview.com wss://*.tradingview.com",
+      "frame-ancestors 'self' https: http:",
+    ].join('; ')
   );
 
   next();

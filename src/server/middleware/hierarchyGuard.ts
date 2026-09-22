@@ -1,7 +1,7 @@
 import { Response, NextFunction } from 'express';
-import { jsonUserRepository } from '../repositories/JsonUserRepository';
-import { jsonHierarchyRepository } from '../repositories/JsonHierarchyRepository';
-import { AuthenticatedRequest } from './authMiddleware';
+import { jsonUserRepository } from '../repositories/JsonUserRepository.ts';
+import { jsonHierarchyRepository } from '../repositories/JsonHierarchyRepository.ts';
+import type { AuthenticatedRequest } from './authMiddleware.ts';
 
 export function hierarchyGuard(paramName = 'id') {
   return async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {

@@ -1,8 +1,8 @@
 import { Router, Response } from 'express';
-import { requireAuth, AuthenticatedRequest } from '../../middleware/authMiddleware';
-import { requireRole } from '../../middleware/requireRole';
-import { hierarchyGuard } from '../../middleware/hierarchyGuard';
-import { hierarchyService } from '../../services/hierarchyService';
+import { requireAuth, AuthenticatedRequest } from '../../middleware/authMiddleware.ts';
+import { requireRole } from '../../middleware/requireRole.ts';
+import { hierarchyGuard } from '../../middleware/hierarchyGuard.ts';
+import { hierarchyService } from '../../services/hierarchyService.ts';
 
 const router = Router();
 

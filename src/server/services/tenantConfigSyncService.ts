@@ -26,7 +26,11 @@ export interface TenantSyncResult {
 }
 
 export class TenantConfigSyncService {
-  constructor(private store: ITenantConfigStore = tenantConfigStore) {}
+  private store: ITenantConfigStore;
+
+  constructor(store: ITenantConfigStore = tenantConfigStore) {
+    this.store = store;
+  }
 
   public async syncTenantConfig(
     authoritativeTenantId: string,

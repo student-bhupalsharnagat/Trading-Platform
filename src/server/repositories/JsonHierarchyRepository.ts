@@ -1,6 +1,6 @@
-import { IHierarchyRepository } from './IHierarchyRepository';
-import { jsonUserRepository } from './JsonUserRepository';
-import { UserRecord } from '../db/database';
+import type { IHierarchyRepository } from './IHierarchyRepository.ts';
+import { jsonUserRepository } from './JsonUserRepository.ts';
+import type { UserRecord } from '../db/database.ts';
 
 export class JsonHierarchyRepository implements IHierarchyRepository {
   public async getDescendants(pathPrefix: string): Promise<UserRecord[]> {

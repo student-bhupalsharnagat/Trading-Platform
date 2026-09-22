@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { requireAuth } from '../../middleware/authMiddleware';
-import { requireRole } from '../../middleware/requireRole';
-import { auditService } from '../../services/auditService';
+import { requireAuth } from '../../middleware/authMiddleware.ts';
+import { requireRole } from '../../middleware/requireRole.ts';
+import { auditService } from '../../services/auditService.ts';
 
 const router = Router();
 

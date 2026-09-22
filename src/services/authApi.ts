@@ -161,6 +161,20 @@ export const authApi = {
     });
   },
 
+  async closeAllPositions(): Promise<{ success: boolean; message: string; wallet: any; positions: Position[] }> {
+    return fetchJson('/api/trading/positions/close-all', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+
+  async cancelOrder(orderId: string): Promise<{ success: boolean; message: string }> {
+    return fetchJson('/api/trading/order/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ orderId }),
+    });
+  },
+
   async depositFunds(amount: number, method = 'UPI Instant'): Promise<{ success: boolean; message: string; wallet: any }> {
     return fetchJson('/api/trading/funds/deposit', {
       method: 'POST',

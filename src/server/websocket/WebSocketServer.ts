@@ -392,6 +392,26 @@ export class TradingWebSocketServer {
     return deliveredCount;
   }
 
+  /**
+   * Broadcasts market ticks or global system events to all open sockets across all tenants.
+   */
+  public broadcastToAll(event: string, payload: any): void {
+    const message = JSON.stringify({
+      event,
+      payload,
+      timestamp: new Date().toISOString(),
+    });
+
+    this.activeSockets.forEach((client: AuthenticatedWebSocket) => {
+      if (client.readyState === WebSocket.OPEN) {
+        try {
+          client.send(message);
+          this.totalMessagesSent++;
+        } catch {}
+      }
+    });
+  }
+
   public sendToSocket(ws: WebSocket, message: WebSocketEventMessage): void {
     if (ws.readyState === WebSocket.OPEN) {
       try {

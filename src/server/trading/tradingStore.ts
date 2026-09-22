@@ -7,6 +7,7 @@ import {
   AppNotification,
   Candle,
 } from '../../types.ts';
+import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
 
 // Helper to generate realistic historical candle data
 export function generateHistoricalCandles(
@@ -585,11 +586,11 @@ export function resetTenantTradingState(tenantId: string): void {
   tenantOrders[normTenant] = JSON.parse(JSON.stringify(initialOrders));
 }
 
-// Background tick simulator
+// Background tick simulator - generates real-time market ticks and recalculates MTM PnL
 const tickTimer = setInterval(() => {
   INSTRUMENTS = INSTRUMENTS.map((inst) => {
     const volatilityPct = 0.0006;
-    const delta = (Math.random() - 0.49) * (inst.lastPrice * volatilityPct);
+    const delta = (Math.random() - 0.495) * (inst.lastPrice * volatilityPct);
     const updatedPrice = Number(Math.max(1, inst.lastPrice + delta).toFixed(2));
     const change = Number((updatedPrice - inst.prevClose).toFixed(2));
     const changePercent = Number(((change / inst.prevClose) * 100).toFixed(2));
@@ -615,7 +616,9 @@ const tickTimer = setInterval(() => {
   });
 
   // Recalculate live PnL dynamically across active tenant portfolios
-  for (const tenantId of Object.keys(tenantPositions)) {
+  const activeTenants = new Set(['vertex-default', ...Object.keys(tenantPositions)]);
+
+  for (const tenantId of activeTenants) {
     let livePnL = 0;
     const positions = tenantPositions[tenantId] || [];
     tenantPositions[tenantId] = positions.map((pos) => {
@@ -623,7 +626,9 @@ const tickTimer = setInterval(() => {
       const ltp = liveInst ? liveInst.lastPrice : pos.ltp;
       const pnl =
         pos.type === 'BUY' ? (ltp - pos.avgPrice) * pos.qty : (pos.avgPrice - ltp) * pos.qty;
-      const pnlPercent = Number(((pnl / (pos.avgPrice * pos.qty)) * 100).toFixed(2));
+      const pnlPercent = (pos.avgPrice * pos.qty) > 0
+        ? Number(((pnl / (pos.avgPrice * pos.qty)) * 100).toFixed(2))
+        : 0;
       livePnL += pnl;
 
       return {
@@ -637,8 +642,43 @@ const tickTimer = setInterval(() => {
     const wallet = getTenantWallet(tenantId);
     wallet.todayPnL = Number((500 + livePnL).toFixed(2));
     wallet.totalPnL = Number((34000 + livePnL).toFixed(2));
+
+    // Broadcast live MTM portfolio update to the tenant's connected clients
+    try {
+      tradingWebSocketServer.broadcastToTenant(tenantId, 'portfolio.mtm', {
+        positions: tenantPositions[tenantId],
+        wallet,
+        unrealizedPnL: Number(livePnL.toFixed(2)),
+        timestamp: new Date().toISOString(),
+      });
+    } catch {
+      // Ignore websocket broadcast during initial boot
+    }
   }
-}, 1500);
+
+  // Broadcast market ticks to all connected clients
+  try {
+    const ticks = INSTRUMENTS.map((i) => ({
+      id: i.id,
+      symbol: i.symbol,
+      lastPrice: i.lastPrice,
+      change: i.change,
+      changePercent: i.changePercent,
+      ask: i.ask,
+      bid: i.bid,
+      highPrice: i.highPrice,
+      lowPrice: i.lowPrice,
+      trend: i.trend,
+    }));
+    tradingWebSocketServer.broadcastToAll('market.ticks', {
+      instruments: INSTRUMENTS,
+      ticks,
+      timestamp: new Date().toISOString(),
+    });
+  } catch {
+    // Ignore websocket broadcast during initial boot
+  }
+}, 1000);
 
 if (tickTimer.unref) {
   tickTimer.unref();
