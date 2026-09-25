@@ -28,7 +28,7 @@
       "created_at": "2026-08-30T21:52:55.953Z",
       "updated_at": "2026-08-30T21:52:55.953Z",
       "demo_balance": 1000000,
-      "last_login_at": "2026-09-22T15:29:06.836Z"
+      "last_login_at": "2026-09-25T08:10:13.899Z"
     },
     {
       "id": "super-admin-root-0001",
@@ -37,7 +37,7 @@
       "country_code": "+91",
       "mobile": "9999999999",
       "email": "admin@goldfut.com",
-      "password_hash": "$2b$10$sxmdyaurt/LTr/c5PMQuuedxv8TDpmeS8JpH9V9KgOGsneGi60T/y",
+      "password_hash": "$2b$10$XBQoI4KKs9Ex5AAfLpAUquuXvdSkIVA/9p8rTRZV/Dgog7sUt9ulu",
       "role": "SUPER_ADMIN",
       "parent_id": null,
       "hierarchy_path": "root",
@@ -47,9 +47,9 @@
       "is_verified": true,
       "status": "active",
       "created_at": "2026-09-16T07:46:37.415Z",
-      "updated_at": "2026-09-20T19:42:12.570Z",
+      "updated_at": "2026-09-25T08:47:54.580Z",
       "demo_balance": 1000000,
-      "last_login_at": "2026-09-20T19:42:12.682Z"
+      "last_login_at": "2026-09-25T08:47:54.705Z"
     },
     {
       "id": "master-node-0001",
@@ -159,7 +159,7 @@
       "status": "active",
       "is_frozen": true,
       "created_at": "2026-09-16T08:21:05.501Z",
-      "updated_at": "2026-09-20T19:43:51.807Z",
+      "updated_at": "2026-09-25T08:47:58.131Z",
       "demo_balance": 1000000
     },
     {
@@ -195,7 +195,7 @@
       "status": "active",
       "is_frozen": false,
       "created_at": "2026-09-16T08:36:29.509Z",
-      "updated_at": "2026-09-20T19:44:33.552Z",
+      "updated_at": "2026-09-25T08:48:00.912Z",
       "demo_balance": 1000000
     },
     {
@@ -231,7 +231,7 @@
       "status": "active",
       "is_frozen": false,
       "created_at": "2026-09-16T09:02:47.152Z",
-      "updated_at": "2026-09-20T19:44:46.965Z",
+      "updated_at": "2026-09-25T08:48:05.598Z",
       "demo_balance": 1000000
     },
     {
@@ -249,7 +249,7 @@
       "status": "active",
       "is_frozen": false,
       "created_at": "2026-09-16T09:02:47.153Z",
-      "updated_at": "2026-09-20T19:44:45.957Z",
+      "updated_at": "2026-09-25T08:48:04.488Z",
       "demo_balance": 1000000
     },
     {
@@ -828,6 +828,19 @@
       "status": "demo",
       "created_at": "2026-09-22T15:29:06.836Z",
       "updated_at": "2026-09-22T15:29:06.836Z",
+      "demo_balance": 1000000
+    },
+    {
+      "id": "demo-user-uuid-0000-000000000001",
+      "full_name": "Demo Trader",
+      "user_id": "vtx123",
+      "country_code": "+91",
+      "mobile": "9876543210",
+      "password_hash": "$2a$10$DEMO_ACCOUNT_NOT_PASSWORD_ACCESSIBLE_DIRECTLY",
+      "is_verified": true,
+      "status": "demo",
+      "created_at": "2026-09-25T08:10:13.898Z",
+      "updated_at": "2026-09-25T08:10:13.898Z",
       "demo_balance": 1000000
     }
   ],
