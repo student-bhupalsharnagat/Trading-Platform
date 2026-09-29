@@ -28,15 +28,13 @@ export const registerSchema = z
     mobile: z
       .string()
       .trim()
-      .min(7, { message: 'Please enter a valid mobile number.' })
-      .max(25, { message: 'Phone number is too long.' })
-      .optional(),
+      .optional()
+      .or(z.literal('')),
     phone: z
       .string()
       .trim()
-      .min(7, { message: 'Please enter a valid phone number.' })
-      .max(25, { message: 'Phone number is too long.' })
-      .optional(),
+      .optional()
+      .or(z.literal('')),
     password: z
       .string()
       .min(8, { message: 'Password must contain at least 8 characters.' })
@@ -56,7 +54,7 @@ export const registerSchema = z
   .refine(
     (data) => {
       const rawPhone = data.phone || data.mobile;
-      if (!rawPhone) return false;
+      if (!rawPhone) return true;
       const normalized = PhoneUtils.normalize(rawPhone, data.countryCode || '+91');
       return normalized !== null;
     },

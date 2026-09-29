@@ -74,27 +74,12 @@ export class AuthService {
     ipAddress?: string
   ): Promise<{
     user: SafeUser;
+    token?: string;
     devOtp?: string;
-    expiresAt: Date;
+    expiresAt?: Date;
     message: string;
   }> {
     const normalizedUserId = input.userId.trim().toLowerCase();
-
-    // Normalize phone number to E.164
-    const rawPhone = input.phone || input.mobile || '';
-    const normalizedPhone = PhoneUtils.normalize(rawPhone, input.countryCode || '+91');
-
-    if (!normalizedPhone) {
-      const err = new Error('Invalid international phone number.');
-      (err as any).statusCode = 400;
-      (err as any).field = 'mobile';
-      throw err;
-    }
-
-    // Normalize email
-    const normalizedEmail = (input.email && input.email.trim().length > 0)
-      ? input.email.trim().toLowerCase()
-      : `${normalizedUserId}@vertex-trading.com`;
 
     // Check duplicate User ID (scoped per tenant)
     if (db.findUserByUserId(normalizedUserId)) {
@@ -104,20 +89,32 @@ export class AuthService {
       throw err;
     }
 
-    // Check duplicate Email
-    if (db.findUserByEmail(normalizedEmail)) {
-      const err = new Error('Email address is already registered.');
-      (err as any).statusCode = 409;
-      (err as any).field = 'email';
-      throw err;
+    // Optional email normalization and duplicate check
+    let normalizedEmail: string | undefined = undefined;
+    if (input.email && input.email.trim().length > 0) {
+      normalizedEmail = input.email.trim().toLowerCase();
+      if (db.findUserByEmail(normalizedEmail)) {
+        const err = new Error('Email address is already registered.');
+        (err as any).statusCode = 409;
+        (err as any).field = 'email';
+        throw err;
+      }
     }
 
-    // Check duplicate Mobile / E.164 Phone
-    if (db.findUserByPhoneE164(normalizedPhone.e164)) {
-      const err = new Error('Phone number is already registered with another account.');
-      (err as any).statusCode = 409;
-      (err as any).field = 'mobile';
-      throw err;
+    // Optional phone normalization and duplicate check
+    const rawPhone = input.phone || input.mobile || '';
+    let normalizedPhone: { countryCode: string; nationalNumber: string; e164: string } | undefined = undefined;
+    if (rawPhone && rawPhone.trim().length > 0) {
+      const norm = PhoneUtils.normalize(rawPhone, input.countryCode || '+91');
+      if (norm) {
+        normalizedPhone = norm;
+        if (db.findUserByPhoneE164(norm.e164)) {
+          const err = new Error('Phone number is already registered with another account.');
+          (err as any).statusCode = 409;
+          (err as any).field = 'mobile';
+          throw err;
+        }
+      }
     }
 
     // Validate referral code if provided
@@ -135,37 +132,28 @@ export class AuthService {
 
     // Hash password with Argon2id (never store plaintext)
     const passwordHash = await PasswordHashUtil.hashPassword(input.password);
+    const nowIso = new Date().toISOString();
 
-    // Save pending user to database (status: PENDING_EMAIL_VERIFICATION)
+    // Save active user directly to database (status: ACTIVE)
     const user = db.createUser({
       fullName: input.fullName,
       userId: normalizedUserId,
       email: normalizedEmail,
-      countryCode: normalizedPhone.countryCode,
-      mobile: normalizedPhone.nationalNumber,
-      phoneE164: normalizedPhone.e164,
+      countryCode: normalizedPhone?.countryCode,
+      mobile: normalizedPhone?.nationalNumber,
+      phoneE164: normalizedPhone?.e164,
       passwordHash,
       referralCode: `VTX${Math.floor(1000 + Math.random() * 9000)}`,
       referredBy,
-      isVerified: false,
-      status: 'PENDING_EMAIL_VERIFICATION',
+      isVerified: true,
+      status: 'ACTIVE',
       tenantId: tenantId || 'vertex-default',
     });
 
-    // Generate & dispatch secure OTP (dispatched via EmailOtpProvider abstraction)
-    const otpResult = await otpService.createAndSendOtp(
-      user.user_id,
-      {
-        email: user.email,
-        countryCode: user.country_code,
-        mobile: user.mobile,
-        phoneE164: user.phone_e164,
-      },
-      'registration',
-      ipAddress
-    );
+    // Generate JWT session token
+    const token = this.generateToken(user);
 
-    // Audit Log signup & OTP send events
+    // Audit Log signup & activation
     auditService.log({
       actorId: user.user_id,
       actorName: user.full_name,
@@ -177,8 +165,7 @@ export class AuthService {
       ipAddress,
       newValue: {
         userId: user.user_id,
-        email: user.email,
-        status: 'PENDING_EMAIL_VERIFICATION',
+        status: 'ACTIVE',
         tenantId: user.tenant_id,
       },
     });
@@ -187,27 +174,25 @@ export class AuthService {
       actorId: user.user_id,
       actorName: user.full_name,
       actorRole: 'CLIENT',
-      action: 'EMAIL_OTP_SENT',
+      action: 'USER_ACTIVATED',
       module: 'AUTH',
       targetId: user.user_id,
       ipAddress,
       newValue: {
-        purpose: 'registration',
-        email: user.email,
-        expiresAt: otpResult.expiresAt.toISOString(),
+        status: 'ACTIVE',
       },
     });
 
-    // Publish idempotent Central Admin client.registered event (zero credentials/secrets exposed)
-    const clientRegPayload: ClientRegisteredPayload = {
+    // Publish Central Admin client.registered and client.activated events
+    const clientPayload: ClientRegisteredPayload = {
       tenantId: user.tenant_id || 'vertex-default',
       tradingUserId: user.user_id,
       userId: user.user_id,
       clientCode: user.user_id.toUpperCase(),
       name: user.full_name,
-      email: user.email,
-      phone: user.phone_e164 || user.mobile,
-      status: user.status,
+      email: user.email || '',
+      phone: user.phone_e164 || user.mobile || '',
+      status: 'ACTIVE',
       createdAt: user.created_at,
     };
 
@@ -215,18 +200,24 @@ export class AuthService {
       eventId: `evt-reg-${user.user_id}-${Date.now()}`,
       eventType: 'client.registered',
       tenantId: user.tenant_id || 'vertex-default',
-      payload: clientRegPayload,
+      payload: clientPayload,
     }).catch((e) => console.warn('[Outbox] Client registration event enqueue warning:', e));
 
-    internalEventDispatcher.dispatchClientRegistered(clientRegPayload).catch((e) =>
+    transactionalOutboxService.enqueue({
+      eventId: `evt-act-${user.user_id}-${Date.now()}`,
+      eventType: 'client.activated',
+      tenantId: user.tenant_id || 'vertex-default',
+      payload: { ...clientPayload, clientId: user.id || user.user_id },
+    }).catch((e) => console.warn('[Outbox] Client activation event enqueue warning:', e));
+
+    internalEventDispatcher.dispatchClientRegistered(clientPayload).catch((e) =>
       console.warn('[Event] Client registration event dispatch warning:', e)
     );
 
     return {
       user: sanitizeUser(user),
-      devOtp: otpResult.devOtp,
-      expiresAt: otpResult.expiresAt,
-      message: 'Account created. Please verify your phone number with the OTP code sent to your mobile.',
+      token,
+      message: 'Account created successfully.',
     };
   }
 

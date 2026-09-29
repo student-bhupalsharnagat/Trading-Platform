@@ -70,23 +70,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const register = async (data: any) => {
     const res = await authApi.register(data);
-    if (res.devOtp) {
-      setLatestDevOtp(res.devOtp);
-      showToast({
-        type: 'otp',
-        title: 'VERTEX Email Verification Code',
-        description: `OTP sent to ${data.email || 'your email'}. (Dev code provided below)`,
-        otpCode: res.devOtp,
-        duration: 30000,
-      });
-    } else {
-      showToast({
-        type: 'success',
-        title: 'Account Created',
-        description: res.message || 'Please check your email for the verification code.',
-      });
+    if (res.user) {
+      setUser(res.user);
     }
-    setPendingVerificationUserId(res.userId || data.userId);
+    showToast({
+      type: 'success',
+      title: 'Account Created',
+      description: res.message || 'Account created successfully!',
+    });
+    setPendingVerificationUserId(null);
     return res;
   };
 

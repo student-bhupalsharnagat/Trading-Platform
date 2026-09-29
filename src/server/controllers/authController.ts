@@ -38,13 +38,16 @@ export class AuthController {
 
       const result = await authService.register(validatedData, tenantId, ipAddress);
 
+      if (result.token) {
+        res.cookie(COOKIE_NAME, result.token, COOKIE_OPTIONS);
+      }
+
       res.status(201).json({
         success: true,
         message: result.message,
         userId: result.user.userId,
-        expiresAt: result.expiresAt,
-        devOtp: result.devOtp,
         user: result.user,
+        token: result.token,
       });
     } catch (err) {
       next(err);

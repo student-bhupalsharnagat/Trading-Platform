@@ -212,8 +212,12 @@ class DatabaseService {
     tenantId?: string;
   }): UserRecord {
     const normalizedUserId = userData.userId.trim().toLowerCase();
-    const cleanMobile = userData.mobile.replace(/\D/g, '');
-    const cleanE164 = userData.phoneE164 ? userData.phoneE164.trim() : `+${(userData.countryCode || '+91').replace(/\D/g, '')}${cleanMobile}`;
+    const cleanMobile = userData.mobile ? userData.mobile.replace(/\D/g, '') : '';
+    const cleanE164 = userData.phoneE164
+      ? userData.phoneE164.trim()
+      : cleanMobile
+      ? `+${(userData.countryCode || '+91').replace(/\D/g, '')}${cleanMobile}`
+      : undefined;
 
     // Check unique constraints (scoped per tenant if specified)
     const existingByUserId = this.state.users.find(
@@ -228,17 +232,19 @@ class DatabaseService {
       throw err;
     }
 
-    const existingByMobile = this.state.users.find(
-      (u) =>
-        ((u.mobile && u.mobile.replace(/\D/g, '') === cleanMobile) ||
-          (u.phone_e164 && u.phone_e164 === cleanE164)) &&
-        (!userData.tenantId || (u.tenant_id || 'vertex-default') === userData.tenantId)
-    );
-    if (existingByMobile) {
-      const err = new Error('Phone number is already registered with another account.');
-      (err as any).statusCode = 409;
-      (err as any).field = 'mobile';
-      throw err;
+    if (cleanMobile || cleanE164) {
+      const existingByMobile = this.state.users.find(
+        (u) =>
+          ((cleanMobile && u.mobile && u.mobile.replace(/\D/g, '') === cleanMobile) ||
+            (cleanE164 && u.phone_e164 && u.phone_e164 === cleanE164)) &&
+          (!userData.tenantId || (u.tenant_id || 'vertex-default') === userData.tenantId)
+      );
+      if (existingByMobile) {
+        const err = new Error('Phone number is already registered with another account.');
+        (err as any).statusCode = 409;
+        (err as any).field = 'mobile';
+        throw err;
+      }
     }
 
     const now = new Date().toISOString();
@@ -251,7 +257,7 @@ class DatabaseService {
       user_id: normalizedUserId,
       email: userData.email,
       country_code: userData.countryCode || '+91',
-      mobile: cleanMobile,
+      mobile: cleanMobile || undefined,
       phone_e164: cleanE164,
       password_hash: userData.passwordHash,
       role: userData.role || 'CLIENT',
@@ -261,6 +267,8 @@ class DatabaseService {
       address: userData.address,
       commission_rate: userData.commissionRate,
       is_verified: userData.isVerified ?? false,
+      email_verified_at: userData.isVerified ? now : undefined,
+      phone_verified_at: userData.isVerified ? now : undefined,
       status: initialStatus,
       is_frozen: false,
       failed_login_attempts: 0,
