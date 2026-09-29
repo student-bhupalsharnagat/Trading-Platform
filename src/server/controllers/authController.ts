@@ -21,12 +21,22 @@ const COOKIE_OPTIONS = {
   path: '/',
 };
 
+function getClientIp(req: Request): string {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string') {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.socket.remoteAddress || req.ip || '127.0.0.1';
+}
+
 export class AuthController {
   public async register(req: TenantRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const validatedData = registerSchema.parse(req.body);
       const tenantId = req.tenant?.tenant.id || 'vertex-default';
-      const result = await authService.register(validatedData, tenantId);
+      const ipAddress = getClientIp(req);
+
+      const result = await authService.register(validatedData, tenantId, ipAddress);
 
       res.status(201).json({
         success: true,
@@ -44,9 +54,12 @@ export class AuthController {
   public async verifyOtp(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const validatedData = verifyOtpSchema.parse(req.body);
+      const ipAddress = getClientIp(req);
+
       const result = await authService.verifyRegistrationOtp(
         validatedData.userId,
-        validatedData.otp
+        validatedData.otp,
+        ipAddress
       );
 
       // Set secure HttpOnly cookie upon successful verification
@@ -54,7 +67,7 @@ export class AuthController {
 
       res.status(200).json({
         success: true,
-        message: 'Account verified successfully.',
+        message: 'Phone number verified successfully. Your account is now active.',
         user: result.user,
         token: result.token,
       });
@@ -66,7 +79,13 @@ export class AuthController {
   public async resendOtp(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const validatedData = resendOtpSchema.parse(req.body);
-      const result = await authService.resendOtp(validatedData.userId, validatedData.purpose);
+      const ipAddress = getClientIp(req);
+
+      const result = await authService.resendOtp(
+        validatedData.userId,
+        validatedData.purpose,
+        ipAddress
+      );
 
       res.status(200).json({
         success: true,
@@ -82,9 +101,11 @@ export class AuthController {
   public async login(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const validatedData = loginSchema.parse(req.body);
-      const result = await authService.login(validatedData.userId, validatedData.password);
+      const ipAddress = getClientIp(req);
 
-      // Set secure HttpOnly cookie
+      const result = await authService.login(validatedData.userId, validatedData.password, ipAddress);
+
+      // Set secure HttpOnly SameSite cookie
       res.cookie(COOKIE_NAME, result.token, COOKIE_OPTIONS);
 
       res.status(200).json({
@@ -100,7 +121,8 @@ export class AuthController {
 
   public async demoLogin(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const result = await authService.getDemoSession();
+      const ipAddress = getClientIp(req);
+      const result = await authService.getDemoSession(ipAddress);
       res.cookie(COOKIE_NAME, result.token, COOKIE_OPTIONS);
 
       res.status(200).json({
@@ -116,8 +138,9 @@ export class AuthController {
 
   public async logout(req: Request, res: Response): Promise<void> {
     const token = req.cookies?.[COOKIE_NAME] || req.headers.authorization?.replace('Bearer ', '');
+    const ipAddress = getClientIp(req);
     if (token) {
-      authService.revokeToken(token);
+      authService.revokeToken(token, undefined, ipAddress);
     }
     res.clearCookie(COOKIE_NAME, { path: '/' });
     res.status(200).json({
@@ -136,7 +159,9 @@ export class AuthController {
   public async forgotPassword(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const validatedData = forgotPasswordSchema.parse(req.body);
-      const result = await authService.forgotPassword(validatedData.identifier);
+      const ipAddress = getClientIp(req);
+
+      const result = await authService.forgotPassword(validatedData.identifier, ipAddress);
 
       res.status(200).json({
         success: true,
@@ -153,7 +178,12 @@ export class AuthController {
   public async resetPassword(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const validatedData = resetPasswordSchema.parse(req.body);
-      const result = await authService.resetPassword(validatedData);
+      const ipAddress = getClientIp(req);
+
+      const result = await authService.resetPassword(validatedData, ipAddress);
+
+      // Clear any active session cookie on password reset
+      res.clearCookie(COOKIE_NAME, { path: '/' });
 
       res.status(200).json({
         success: true,
@@ -164,26 +194,30 @@ export class AuthController {
     }
   }
 
-  // Developer helper endpoint to preview the latest generated OTP for immediate UI assistance
   public async getDevOtp(req: Request, res: Response): Promise<void> {
+    // Only available in non-production environments
     if (process.env.NODE_ENV === 'production') {
-      res.status(404).json({ success: false, message: 'Not found' });
-      return;
-    }
-    const userId = (req.params.userId || '').trim().toLowerCase();
-    const purpose = (req.query.purpose as any) || 'registration';
-    const otpRecord = db.getLatestActiveOtp(userId, purpose);
-
-    if (otpRecord && otpRecord.dev_otp_preview) {
-      res.json({
-        success: true,
-        otp: otpRecord.dev_otp_preview,
-        expiresAt: otpRecord.expires_at,
-      });
+      res.status(404).json({ success: false, message: 'Not found.' });
       return;
     }
 
-    res.json({ success: false, message: 'No active OTP preview' });
+    const { userId } = req.params;
+    const otp = db.getLatestActiveOtp(userId, 'registration') ||
+      db.getLatestActiveOtp(userId, 'password_reset') ||
+      db.getLatestActiveOtp(userId, 'login');
+
+    if (!otp) {
+      res.status(404).json({ success: false, message: 'No active OTP found.' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      userId,
+      purpose: otp.purpose,
+      devOtp: otp.dev_otp_preview,
+      expiresAt: otp.expires_at,
+    });
   }
 }
 

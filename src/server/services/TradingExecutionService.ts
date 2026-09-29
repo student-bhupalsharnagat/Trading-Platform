@@ -5,6 +5,8 @@ import { postgresPositionRepository } from '../repositories/trading/PostgresPosi
 import { postgresWalletRepository } from '../repositories/trading/PostgresWalletRepository.ts';
 import { postgresOrderEventRepository } from '../repositories/trading/PostgresOrderEventRepository.ts';
 import { postgresMarginRepository } from '../repositories/trading/PostgresMarginRepository.ts';
+import { postgresClientMappingRepository } from '../repositories/trading/PostgresClientMappingRepository.ts';
+import { db } from '../db/database.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
 import { transactionalOutboxService } from './TransactionalOutboxService.ts';
 import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
@@ -486,21 +488,89 @@ export class TradingExecutionService {
       );
 
       // 8. Transactional Outbox: Persist outbound event atomically in the same ACID transaction
+      const clientMapping = await postgresClientMappingRepository.findByTradingUserId(tenantId, userId, client);
+      const userRecord = db.findUserByUserId(userId);
+      const clientCode = clientMapping?.external_client_code || userRecord?.user_id.toUpperCase() || userId.toUpperCase();
+      const clientName = userRecord?.full_name || userId;
+
+      const tradePayload = {
+        tenantId,
+        userId,
+        clientId: userId,
+        tradingUserId: userId,
+        clientCode,
+        clientName,
+        orderId: newOrder.id,
+        tradeId: newTrade.id,
+        symbol: inst.symbol,
+        exchange: (inst as any).exchange || 'NSE',
+        side: newOrder.side,
+        quantity: Number(newOrder.quantity),
+        executionPrice: Number(newOrder.price),
+        executionValue: Number(executionValue),
+        totalValue: Number(executionValue),
+        fees: Number((executionValue * 0.0003).toFixed(2)),
+        commission: Number((inst as any).commission || 0),
+        executedAt: newTrade.executed_at,
+      };
+
       await transactionalOutboxService.enqueue(
         {
           eventId: `evt-trade-${newTrade.id}`,
           tenantId,
           eventType: 'trade.executed',
-          payload: {
-            orderId: newOrder.id,
-            tradeId: newTrade.id,
-            userId,
-            symbol: inst.symbol,
-            side: newOrder.side,
-            quantity: newOrder.quantity,
-            executionPrice: newOrder.price,
-            executedAt: newTrade.executed_at,
-          },
+          payload: tradePayload,
+        },
+        client
+      );
+
+      const positionPayload = {
+        tenantId,
+        userId,
+        clientId: userId,
+        tradingUserId: userId,
+        positionId: updatedPosition.id,
+        symbol: inst.symbol,
+        quantity: Number(updatedPosition.quantity),
+        averagePrice: Number(updatedPosition.average_price),
+        buyPrice: Number(updatedPosition.average_price),
+        currentPrice: Number(execPrice),
+        realizedPnl: Number(updatedPosition.realized_pnl),
+        unrealizedPnl: Number(updatedPosition.unrealized_pnl || 0),
+        marginUsed: Number(updatedPosition.margin_used),
+        status: updatedPosition.quantity === 0 ? ('CLOSED' as const) : ('OPEN' as const),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await transactionalOutboxService.enqueue(
+        {
+          eventId: `evt-pos-${updatedPosition.id}-${Date.now()}`,
+          tenantId,
+          eventType: 'position.updated',
+          payload: positionPayload,
+        },
+        client
+      );
+
+      const walletPayload = {
+        tenantId,
+        userId,
+        clientId: userId,
+        tradingUserId: userId,
+        availableBalance: Number(updatedWallet.available_balance),
+        usedMargin: Number(updatedWallet.used_margin),
+        blockedBalance: Number(updatedWallet.blocked_balance || 0),
+        realizedPnl: Number(updatedWallet.realized_pnl || 0),
+        equity: Number((updatedWallet.available_balance + updatedWallet.used_margin).toFixed(2)),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await transactionalOutboxService.enqueue(
+        {
+          eventId: `evt-wallet-${userId}-${Date.now()}`,
+          tenantId,
+          eventType: 'wallet.updated',
+          payload: walletPayload,
         },
         client
       );
@@ -510,6 +580,9 @@ export class TradingExecutionService {
         newTrade,
         updatedPosition,
         updatedWallet,
+        tradePayload,
+        positionPayload,
+        walletPayload,
       };
     });
 
@@ -605,16 +678,18 @@ export class TradingExecutionService {
       console.error('[WebSocket] Broadcast error:', wsErr);
     }
 
-    // Dispatch Phase 5D trade.executed event to Central Admin asynchronously (non-blocking)
-    internalEventDispatcher.dispatchTradeExecuted({
-      tenantId,
-      orderId: result.newOrder.id,
-      userId,
-      symbol: result.newOrder.instrument_id,
-      side: result.newOrder.side as 'BUY' | 'SELL',
-      quantity: result.newOrder.quantity,
-      executionPrice: result.newOrder.price,
-    }).catch((e) => console.error('[Event] trade.executed dispatch error:', e));
+    // Dispatch events to Central Admin asynchronously (non-blocking)
+    internalEventDispatcher.dispatchTradeExecuted(result.tradePayload).catch((e) =>
+      console.error('[Event] trade.executed dispatch error:', e)
+    );
+
+    internalEventDispatcher.dispatchPositionUpdated(result.positionPayload).catch((e) =>
+      console.error('[Event] position.updated dispatch error:', e)
+    );
+
+    internalEventDispatcher.dispatchWalletUpdated(result.walletPayload).catch((e) =>
+      console.error('[Event] wallet.updated dispatch error:', e)
+    );
 
     return {
       success: true,
@@ -671,9 +746,62 @@ export class TradingExecutionService {
       // Delete position
       await postgresPositionRepository.deletePosition(tenantId, pos.id, client);
 
+      const closedPositionPayload = {
+        tenantId,
+        userId,
+        clientId: userId,
+        tradingUserId: userId,
+        positionId: pos.id,
+        symbol: pos.instrument_id,
+        quantity: 0,
+        averagePrice: Number(pos.average_price),
+        buyPrice: Number(pos.average_price),
+        currentPrice: Number(inst?.lastPrice || pos.average_price),
+        realizedPnl: Number(newRealized),
+        unrealizedPnl: 0,
+        marginUsed: 0,
+        status: 'CLOSED' as const,
+        updatedAt: new Date().toISOString(),
+      };
+
+      await transactionalOutboxService.enqueue(
+        {
+          eventId: `evt-pos-close-${pos.id}-${Date.now()}`,
+          tenantId,
+          eventType: 'position.updated',
+          payload: closedPositionPayload,
+        },
+        client
+      );
+
+      const walletPayload = {
+        tenantId,
+        userId,
+        clientId: userId,
+        tradingUserId: userId,
+        availableBalance: Number(updatedWallet.available_balance),
+        usedMargin: Number(updatedWallet.used_margin),
+        blockedBalance: Number(updatedWallet.blocked_balance || 0),
+        realizedPnl: Number(updatedWallet.realized_pnl || 0),
+        equity: Number((updatedWallet.available_balance + updatedWallet.used_margin).toFixed(2)),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await transactionalOutboxService.enqueue(
+        {
+          eventId: `evt-wallet-close-${userId}-${Date.now()}`,
+          tenantId,
+          eventType: 'wallet.updated',
+          payload: walletPayload,
+        },
+        client
+      );
+
       return {
         pos,
         updatedWallet,
+        closedPositionPayload,
+        walletPayload,
       };
     });
 
@@ -681,6 +809,15 @@ export class TradingExecutionService {
     const target = { targetUserId: userId };
     tradingWebSocketServer.broadcastToTenant(tenantId, 'position.updated', { ...result.pos, quantity: 0 }, (ws) => ws.userId === userId || ws.role === 'SUPER_ADMIN', false, target);
     tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', result.updatedWallet, (ws) => ws.userId === userId || ws.role === 'SUPER_ADMIN', false, target);
+
+    // Dispatch Central Admin events
+    internalEventDispatcher.dispatchPositionUpdated(result.closedPositionPayload).catch((e) =>
+      console.error('[Event] position.updated dispatch error on close:', e)
+    );
+
+    internalEventDispatcher.dispatchWalletUpdated(result.walletPayload).catch((e) =>
+      console.error('[Event] wallet.updated dispatch error on close:', e)
+    );
 
     return {
       success: true,

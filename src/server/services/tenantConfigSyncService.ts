@@ -16,6 +16,10 @@ export interface TenantSyncPayload {
   maxLeverage?: number;
   brandingVersion?: number;
   configVersion?: number;
+  brandName?: string;
+  shortName?: string;
+  logoUrl?: string;
+  primaryColor?: string;
 }
 
 export interface TenantSyncResult {
@@ -173,7 +177,7 @@ export class TenantConfigSyncService {
       configVersion: cached.configVersion,
     });
 
-    // 6. Update the local tenant repository so runtime security middlewares observe it immediately
+    // 6. Update the local tenant repository so runtime security & branding middlewares observe it immediately
     const repoUpdates: any = {};
     if (payload.tradingEnabled !== undefined) repoUpdates.trading_enabled = payload.tradingEnabled;
     if (payload.registrationEnabled !== undefined) repoUpdates.registration_enabled = payload.registrationEnabled;
@@ -184,6 +188,17 @@ export class TenantConfigSyncService {
 
     if (Object.keys(repoUpdates).length > 0) {
       await tenantRepository.updatePlatformConfig(authoritativeTenantId, repoUpdates);
+    }
+
+    const brandingUpdates: any = {};
+    if (payload.brandName !== undefined) brandingUpdates.brandName = payload.brandName;
+    if (payload.shortName !== undefined) brandingUpdates.shortName = payload.shortName;
+    if (payload.logoUrl !== undefined) brandingUpdates.logoUrl = payload.logoUrl;
+    if (payload.primaryColor !== undefined) brandingUpdates.primaryColor = payload.primaryColor;
+
+    if (Object.keys(brandingUpdates).length > 0) {
+      await tenantRepository.updateBranding(authoritativeTenantId, brandingUpdates);
+      tenantConfigCache.invalidate(authoritativeTenantId);
     }
 
     if (payload.maintenanceMode !== undefined || payload.tenantStatus !== undefined || payload.tradingEnabled !== undefined) {
@@ -212,6 +227,10 @@ export class TenantConfigSyncService {
     try {
       await postgresTenantConfigRepository.upsertConfig({
         tenant_id: authoritativeTenantId,
+        brand_name: payload.brandName,
+        short_name: payload.shortName,
+        logo_url: payload.logoUrl,
+        primary_color: payload.primaryColor,
         trading_enabled: cached.tradingEnabled ?? true,
         registration_enabled: cached.registrationEnabled ?? true,
         api_enabled: cached.apiEnabled ?? true,

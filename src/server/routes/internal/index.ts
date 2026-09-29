@@ -20,6 +20,7 @@ import { postgresWalletRepository } from '../../repositories/trading/PostgresWal
 import { executionGateway } from '../../gateways/ExecutionGateway.ts';
 import { operationIdempotencyStore } from '../../events/OperationIdempotencyStore.ts';
 import { postgresTenantConfigRepository } from '../../repositories/trading/PostgresTenantConfigRepository.ts';
+import { authoritativeTradingDataService } from '../../services/authoritativeTradingDataService.ts';
 
 const router = Router();
 
@@ -370,6 +371,66 @@ router.post(
       res.status(status).json({
         success: false,
         error: err.message || 'Failed to update platform configuration.',
+        code: err.code,
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/internal/v1/tenant/branding (alias: /tenant/brand)
+ * White Label branding update (brandName, shortName, logoUrl, primaryColor) from Central Admin.
+ */
+router.post(
+  ['/tenant/branding', '/tenant/brand'],
+  async (req: InternalAuthorizedRequest, res: Response) => {
+    try {
+      const tenantId = getInternalTenantId(req);
+      const { brandName, shortName, logoUrl, primaryColor, source } = req.body || {};
+
+      if (!brandName || typeof brandName !== 'string') {
+        res.status(400).json({
+          success: false,
+          error: 'Field "brandName" is required and must be a string.',
+        });
+        return;
+      }
+
+      await handleIdempotentOperation(req, res, async () => {
+        // Use tenantConfigSyncService to sync branding across JSON repo, PostgreSQL, cache, and emit WebSocket event
+        const syncResult = await tenantConfigSyncService.syncTenantConfig(tenantId, {
+          brandName,
+          shortName,
+          logoUrl,
+          primaryColor,
+        }, source || 'CENTRAL_ADMIN');
+
+        const updatedBranding = await tenantRepository.getBranding(tenantId);
+
+        tradingWebSocketServer.broadcastToTenant(tenantId, 'branding.updated', {
+          branding: updatedBranding,
+        });
+
+        auditService.logEmergencyEvent({
+          action: 'TENANT_BRANDING_UPDATED',
+          source: source || 'CENTRAL_ADMIN',
+          tenantId,
+          reason: `White Label brandName updated to '${brandName}'`,
+          result: { tenantId, brandName, shortName },
+        });
+
+        return {
+          success: true,
+          tenantId,
+          branding: updatedBranding,
+          timestamp: syncResult.timestamp,
+        };
+      });
+    } catch (err: any) {
+      const status = err.statusCode || 500;
+      res.status(status).json({
+        success: false,
+        error: err.message || 'Failed to update tenant branding.',
         code: err.code,
       });
     }
@@ -1660,6 +1721,342 @@ router.get('/events/health', (req: InternalAuthorizedRequest, res: Response) => 
     res.status(status).json({
       success: false,
       error: err.message || 'Failed to retrieve event dispatcher health.',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/summary
+ * Consolidated authoritative trading summary for Central Admin.
+ */
+router.get('/trading/summary', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const summary = await authoritativeTradingDataService.getTradingSummary(tenantId);
+    res.json({ success: true, ...summary });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve trading summary',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/orders
+ * Authoritative list of tenant orders.
+ */
+router.get('/trading/orders', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const userId = req.query.userId as string;
+    const status = req.query.status as string;
+    const orders = await authoritativeTradingDataService.getOrders(tenantId, { userId, status });
+    res.json({ success: true, ...orders });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve orders',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/trades
+ * Authoritative list of executed trades.
+ */
+router.get('/trading/trades', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const userId = req.query.userId as string;
+    const orderId = req.query.orderId as string;
+    const trades = await authoritativeTradingDataService.getTrades(tenantId, { userId, orderId });
+    res.json({ success: true, ...trades });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve trades',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/positions
+ * Authoritative list of open/closed positions.
+ */
+router.get('/trading/positions', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const userId = req.query.userId as string;
+    const status = req.query.status as string;
+    const positions = await authoritativeTradingDataService.getPositions(tenantId, { userId, status });
+    res.json({ success: true, ...positions });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve positions',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/risk-summary
+ * Aggregated risk and margin metrics.
+ */
+router.get('/trading/risk-summary', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const risk = await authoritativeTradingDataService.getRiskSummary(tenantId);
+    res.json({ success: true, ...risk });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve trading risk summary',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/financial-summary
+ * Aggregated authoritative tenant financial overview.
+ */
+router.get('/trading/financial-summary', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const summary = await authoritativeTradingDataService.getFinancialSummary(tenantId);
+    res.json({ success: true, ...summary });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve financial summary',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/clients/:clientId/account
+ * Client financial account overview and risk metrics.
+ */
+router.get('/trading/clients/:clientId/account', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const clientId = req.params.clientId;
+    const account = await authoritativeTradingDataService.getClientAccount(tenantId, clientId);
+    res.json({ success: true, ...account });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve client account',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/clients/:clientId/orders
+ * Client-specific orders.
+ */
+router.get('/trading/clients/:clientId/orders', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const clientId = req.params.clientId;
+    const status = req.query.status as string;
+    const orders = await authoritativeTradingDataService.getOrders(tenantId, { userId: clientId, status });
+    res.json({ success: true, ...orders });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve client orders',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/clients/:clientId/trades
+ * Client-specific executed trades.
+ */
+router.get('/trading/clients/:clientId/trades', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const clientId = req.params.clientId;
+    const trades = await authoritativeTradingDataService.getTrades(tenantId, { userId: clientId });
+    res.json({ success: true, ...trades });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve client trades',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/clients/:clientId/positions
+ * Client-specific open/closed positions.
+ */
+router.get('/trading/clients/:clientId/positions', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const clientId = req.params.clientId;
+    const status = req.query.status as string;
+    const positions = await authoritativeTradingDataService.getPositions(tenantId, { userId: clientId, status });
+    res.json({ success: true, ...positions });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve client positions',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/clients/:clientId/ledger
+ * Immutable financial ledger for client.
+ */
+router.get('/trading/clients/:clientId/ledger', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const clientId = req.params.clientId;
+    const ledger = await authoritativeTradingDataService.getClientLedger(tenantId, clientId);
+    res.json({ success: true, ...ledger });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve client ledger',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/clients/:clientId/funds
+ * Authoritative deposit and withdrawal history for client.
+ */
+router.get('/trading/clients/:clientId/funds', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const clientId = req.params.clientId;
+    const funds = await authoritativeTradingDataService.getClientFunds(tenantId, clientId);
+    res.json({ success: true, ...funds });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve client funds',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * POST /api/internal/v1/trading/clients/map
+ * Links Admin Client ID with Trading User ID
+ */
+router.post('/trading/clients/map', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const { tradingUserId, externalClientId, externalClientCode } = req.body || {};
+
+    if (!tradingUserId) {
+      res.status(400).json({ success: false, error: 'Field "tradingUserId" is required.' });
+      return;
+    }
+
+    await handleIdempotentOperation(req, res, async () => {
+      const mapping = await authoritativeTradingDataService.linkClientIdentity(
+        tenantId,
+        tradingUserId,
+        externalClientId,
+        externalClientCode
+      );
+      return { success: true, tenantId, mapping };
+    });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to map client identity',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * POST /api/internal/v1/trading/funds/request
+ * Creates a deposit or withdrawal request
+ */
+router.post('/trading/funds/request', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const { userId, type, amount, paymentMethod, referenceId } = req.body || {};
+
+    if (!userId || !type || !amount || (type !== 'DEPOSIT' && type !== 'WITHDRAWAL')) {
+      res.status(400).json({
+        success: false,
+        error: 'Fields "userId", "type" (DEPOSIT|WITHDRAWAL), and positive "amount" are required.',
+      });
+      return;
+    }
+
+    await handleIdempotentOperation(req, res, async () => {
+      const tx = await authoritativeTradingDataService.createFundTransaction(
+        tenantId,
+        userId,
+        type,
+        Number(amount),
+        paymentMethod,
+        referenceId
+      );
+      return { success: true, tenantId, transaction: tx };
+    });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to request fund transaction',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * POST /api/internal/v1/trading/funds/process
+ * Approves or rejects a deposit/withdrawal and mutates wallet & immutable ledger
+ */
+router.post('/trading/funds/process', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const { transactionId, action, reason } = req.body || {};
+    const adminId = (req.body?.adminId as string) || 'CENTRAL_ADMIN';
+
+    if (!transactionId || !action || (action !== 'APPROVE' && action !== 'REJECT')) {
+      res.status(400).json({
+        success: false,
+        error: 'Fields "transactionId" and "action" (APPROVE|REJECT) are required.',
+      });
+      return;
+    }
+
+    await handleIdempotentOperation(req, res, async () => {
+      const updated = await authoritativeTradingDataService.processFundTransaction(
+        tenantId,
+        transactionId,
+        action,
+        adminId,
+        reason
+      );
+      return { success: true, tenantId, transaction: updated };
+    });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to process fund transaction',
       code: err.code,
     });
   }

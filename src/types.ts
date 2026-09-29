@@ -2,19 +2,32 @@ export * from './types/tenant.ts';
 
 export type UserRole = 'SUPER_ADMIN' | 'MASTER' | 'BROKER' | 'SUB_BROKER' | 'CLIENT';
 
+export type AccountStatus =
+  | 'PENDING_PHONE_VERIFICATION'
+  | 'ACTIVE'
+  | 'SUSPENDED'
+  | 'LOCKED'
+  | 'DISABLED'
+  | 'active'
+  | 'suspended'
+  | 'demo'
+  | 'deactivated';
+
 export interface User {
   id: string;
   fullName: string;
   userId: string;
   countryCode: string;
   mobile: string;
+  phoneE164?: string;
+  phoneVerifiedAt?: string;
   email?: string;
   role?: UserRole;
   parentId?: string | null;
   hierarchyPath?: string;
   company?: string;
   isVerified: boolean;
-  status: 'active' | 'suspended' | 'demo' | 'deactivated';
+  status: AccountStatus;
   referralCode?: string;
   createdAt: string;
   lastLoginAt?: string;

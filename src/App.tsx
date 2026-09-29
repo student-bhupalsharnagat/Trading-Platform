@@ -92,6 +92,7 @@ function AppContent() {
           <VerifyOTP
             initialUserId={routeState.userId}
             initialMobile={routeState.mobile}
+            initialEmail={routeState.email}
             initialCountryCode={routeState.countryCode || '+91'}
             purpose={routeState.purpose || 'registration'}
             onNavigate={navigate}

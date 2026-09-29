@@ -104,6 +104,30 @@ export class PostgresWalletRepository implements ITradingWalletRepository {
     }
     return this.mapRow(res.rows[0]);
   }
+
+  public async upsertWallet(
+    wallet: Partial<TradingWallet> & { tenant_id: string; user_id: string },
+    client?: DbClient
+  ): Promise<TradingWallet> {
+    const existing = await this.getWallet(wallet.tenant_id, wallet.user_id, client);
+    if (existing) {
+      return this.updateWallet(wallet.tenant_id, wallet.user_id, wallet, client);
+    }
+    const created = await this.getOrCreateWallet(
+      wallet.tenant_id,
+      wallet.user_id,
+      wallet.available_balance ?? 1000000,
+      client
+    );
+    if (
+      wallet.blocked_balance !== undefined ||
+      wallet.used_margin !== undefined ||
+      wallet.realized_pnl !== undefined
+    ) {
+      return this.updateWallet(wallet.tenant_id, wallet.user_id, wallet, client);
+    }
+    return created;
+  }
 }
 
 export const postgresWalletRepository = new PostgresWalletRepository();

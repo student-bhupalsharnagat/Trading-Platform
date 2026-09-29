@@ -15,6 +15,11 @@ import {
   InternalEvent,
   InternalEventType,
   TradeExecutedPayload,
+  ClientRegisteredPayload,
+  ClientActivatedPayload,
+  PositionUpdatedPayload,
+  WalletUpdatedPayload,
+  FundTransactionPayload,
   MarginBreachPayload,
   ExecutionFailurePayload,
   EmergencyControlPayload,
@@ -193,33 +198,44 @@ export class InternalEventDispatcher {
 
   /**
    * Helper: Dispatches a Trade Executed event.
-   * Only required operational details are included; no secrets or tokens.
+   * Only authoritative operational details are included; no secrets or tokens.
    */
-  public async dispatchTradeExecuted(params: {
-    tenantId: string;
-    orderId: string;
-    userId: string;
-    symbol: string;
-    side: 'BUY' | 'SELL';
-    quantity: number;
-    executionPrice: number;
-    executedAt?: string;
-  }): Promise<InternalEvent<TradeExecutedPayload>> {
+  public async dispatchTradeExecuted(
+    params: TradeExecutedPayload & { tenantId: string }
+  ): Promise<InternalEvent<TradeExecutedPayload>> {
+    const tradeId = params.tradeId || `TRD-${Date.now()}`;
+    const qty = Number(params.quantity);
+    const price = Number(params.executionPrice);
+    const val = Number(params.executionValue ?? params.totalValue ?? (qty * price));
+
+    const payload: TradeExecutedPayload = {
+      tenantId: params.tenantId,
+      userId: params.userId,
+      clientId: params.clientId || params.tradingUserId || params.userId,
+      tradingUserId: params.tradingUserId || params.clientId || params.userId,
+      clientCode: params.clientCode || (params.userId ? params.userId.toUpperCase() : 'CLIENT'),
+      clientName: params.clientName || params.userId || 'Client',
+      orderId: params.orderId,
+      tradeId,
+      symbol: params.symbol,
+      exchange: params.exchange || 'NSE',
+      side: params.side,
+      quantity: qty,
+      executionPrice: price,
+      executionValue: val,
+      totalValue: val,
+      fees: Number(params.fees ?? 0),
+      commission: Number(params.commission ?? 0),
+      executedAt: params.executedAt || new Date().toISOString(),
+    };
+
     const event: InternalEvent<TradeExecutedPayload> = {
-      eventId: `evt-trade-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+      eventId: `evt-trade-${tradeId}`,
       eventType: 'trade.executed',
       tenantId: params.tenantId,
       timestamp: new Date().toISOString(),
       version: 1,
-      payload: {
-        orderId: params.orderId,
-        userId: params.userId,
-        symbol: params.symbol,
-        side: params.side,
-        quantity: params.quantity,
-        executionPrice: params.executionPrice,
-        executedAt: params.executedAt || new Date().toISOString(),
-      },
+      payload,
     };
 
     await this.dispatch(event);
@@ -371,6 +387,103 @@ export class InternalEventDispatcher {
         discrepancyDetails: params.discrepancyDetails,
         detectedAt: params.detectedAt || new Date().toISOString(),
       },
+    };
+
+    await this.dispatch(event);
+    return event;
+  }
+
+  /**
+   * Publishes a client.registered event upon B2C customer registration.
+   */
+  public async dispatchClientRegistered(
+    payload: ClientRegisteredPayload
+  ): Promise<InternalEvent<ClientRegisteredPayload>> {
+    const event: InternalEvent<ClientRegisteredPayload> = {
+      eventId: `evt-client-${payload.userId}-${Date.now()}`,
+      eventType: 'client.registered',
+      tenantId: payload.tenantId,
+      timestamp: new Date().toISOString(),
+      version: 1,
+      payload,
+    };
+
+    await this.dispatch(event);
+    return event;
+  }
+
+  /**
+   * Publishes a client.activated event upon OTP verification and account activation.
+   */
+  public async dispatchClientActivated(
+    payload: ClientActivatedPayload,
+    customEventId?: string
+  ): Promise<InternalEvent<ClientActivatedPayload>> {
+    const event: InternalEvent<ClientActivatedPayload> = {
+      eventId: customEventId || `evt-act-${payload.tradingUserId || payload.userId}-${Date.now()}`,
+      eventType: 'client.activated',
+      tenantId: payload.tenantId,
+      timestamp: new Date().toISOString(),
+      version: 1,
+      payload,
+    };
+
+    await this.dispatch(event);
+    return event;
+  }
+
+  /**
+   * Publishes a position.updated event when positions change.
+   */
+  public async dispatchPositionUpdated(
+    payload: PositionUpdatedPayload
+  ): Promise<InternalEvent<PositionUpdatedPayload>> {
+    const event: InternalEvent<PositionUpdatedPayload> = {
+      eventId: `evt-pos-${payload.positionId}-${Date.now()}`,
+      eventType: 'position.updated',
+      tenantId: payload.tenantId,
+      timestamp: new Date().toISOString(),
+      version: 1,
+      payload,
+    };
+
+    await this.dispatch(event);
+    return event;
+  }
+
+  /**
+   * Publishes a wallet.updated event when balances/margins change.
+   */
+  public async dispatchWalletUpdated(
+    payload: WalletUpdatedPayload
+  ): Promise<InternalEvent<WalletUpdatedPayload>> {
+    const event: InternalEvent<WalletUpdatedPayload> = {
+      eventId: `evt-wallet-${payload.userId}-${Date.now()}`,
+      eventType: 'wallet.updated',
+      tenantId: payload.tenantId,
+      timestamp: new Date().toISOString(),
+      version: 1,
+      payload,
+    };
+
+    await this.dispatch(event);
+    return event;
+  }
+
+  /**
+   * Publishes a deposit or withdrawal fund event.
+   */
+  public async dispatchFundTransaction(
+    eventType: InternalEventType,
+    payload: FundTransactionPayload
+  ): Promise<InternalEvent<FundTransactionPayload>> {
+    const event: InternalEvent<FundTransactionPayload> = {
+      eventId: `evt-fund-${payload.transactionId}-${Date.now()}`,
+      eventType,
+      tenantId: payload.tenantId,
+      timestamp: new Date().toISOString(),
+      version: 1,
+      payload,
     };
 
     await this.dispatch(event);

@@ -113,8 +113,16 @@ async function startServer() {
   app.use('/api/trading', tradingRoutes);
   app.use('/api/admin', adminRoutes);
 
+  // Catch-all 404 for unmatched /api routes so they return JSON and NEVER fall through to HTML
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({
+      success: false,
+      message: `API route not found: ${req.method} ${req.originalUrl}`,
+    });
+  });
+
   // Central Error Handler for API routes
-  app.use('/api/*', errorHandler);
+  app.use(errorHandler);
 
   // Frontend Serving (Vite middleware in dev, static files in prod)
   if (!isProd) {

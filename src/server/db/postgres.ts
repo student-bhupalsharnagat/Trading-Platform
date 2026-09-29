@@ -72,12 +72,23 @@ class PostgresDatabase {
       } catch {
         // Fallback to memory
       }
+    } else {
+      const pidFile = path.join(dataDir, 'postmaster.pid');
+      if (fs.existsSync(pidFile)) {
+        try {
+          fs.unlinkSync(pidFile);
+        } catch {
+          // ignore
+        }
+      }
     }
 
     try {
       this.pglite = new PGlite(dataDir);
+      await this.pglite.waitReady;
     } catch {
       this.pglite = new PGlite();
+      await this.pglite.waitReady;
     }
     this.isPgLite = true;
     console.log('[Postgres] Initialized embedded PostgreSQL engine (PGlite)');

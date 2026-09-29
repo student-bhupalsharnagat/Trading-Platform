@@ -1,7 +1,7 @@
 import { jsonUserRepository } from '../repositories/JsonUserRepository.ts';
 import { jsonHierarchyRepository } from '../repositories/JsonHierarchyRepository.ts';
 import { auditService } from './auditService.ts';
-import type { UserRecord, UserRole } from '../db/database.ts';
+import type { UserRecord, UserRole, AccountStatus } from '../db/database.ts';
 import crypto from 'crypto';
 
 export interface HierarchyNodeView {
@@ -15,7 +15,7 @@ export interface HierarchyNodeView {
   parentId?: string | null;
   parentName?: string;
   hierarchyPath: string;
-  status: 'active' | 'suspended' | 'demo' | 'deactivated';
+  status: AccountStatus;
   company?: string;
   address?: string;
   commissionRate?: number;

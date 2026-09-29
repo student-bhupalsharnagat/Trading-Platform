@@ -44,7 +44,7 @@ export const Login: React.FC<LoginProps> = ({ onNavigate }) => {
         showToast({
           type: 'info',
           title: 'Verification Required',
-          description: 'Please verify your mobile number before logging in.',
+          description: 'Please verify your email address before logging in.',
         });
         onNavigate('/verify-otp', { userId: err.userId });
       } else {

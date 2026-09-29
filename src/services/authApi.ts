@@ -35,6 +35,7 @@ export const authApi = {
   async register(body: {
     fullName: string;
     userId: string;
+    email: string;
     countryCode: string;
     mobile: string;
     password: string;

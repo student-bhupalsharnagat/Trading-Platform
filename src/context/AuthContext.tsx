@@ -74,8 +74,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setLatestDevOtp(res.devOtp);
       showToast({
         type: 'otp',
-        title: 'VERTEX Verification Code',
-        description: `OTP sent to ${data.countryCode || '+91'} ${data.mobile}. (Dev code provided below)`,
+        title: 'VERTEX Email Verification Code',
+        description: `OTP sent to ${data.email || 'your email'}. (Dev code provided below)`,
         otpCode: res.devOtp,
         duration: 30000,
       });
@@ -83,7 +83,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       showToast({
         type: 'success',
         title: 'Account Created',
-        description: res.message || 'Please check your mobile for the verification code.',
+        description: res.message || 'Please check your email for the verification code.',
       });
     }
     setPendingVerificationUserId(res.userId || data.userId);
@@ -99,7 +99,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       showToast({
         type: 'success',
         title: 'Verification Successful',
-        description: 'Your mobile number is verified. Welcome to VERTEX!',
+        description: 'Your email address is verified. Welcome to VERTEX!',
       });
     }
     return res;

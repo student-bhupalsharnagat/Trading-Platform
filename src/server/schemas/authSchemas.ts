@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PhoneUtils } from '../utils/phoneUtils.ts';
 
 export const registerSchema = z
   .object({
@@ -7,23 +8,35 @@ export const registerSchema = z
       .trim()
       .min(2, { message: 'Full name must be at least 2 characters.' })
       .max(100, { message: 'Full name cannot exceed 100 characters.' })
-      .regex(/^[a-zA-Z\s.'-]+$/, { message: 'Full name can only contain letters and spaces.' }),
+      .regex(/^[a-zA-Z\s.'-]+$/, { message: 'Full name can only contain letters, spaces, and standard punctuation.' }),
     userId: z
       .string()
       .trim()
-      .min(4, { message: 'User ID must be between 4 and 20 characters.' })
-      .max(20, { message: 'User ID must be between 4 and 20 characters.' })
+      .min(3, { message: 'User ID must be between 3 and 30 characters.' })
+      .max(30, { message: 'User ID must be between 3 and 30 characters.' })
       .regex(/^[a-zA-Z0-9_]+$/, {
         message: 'User ID can only contain letters, numbers, and underscores (no spaces).',
       }),
-    countryCode: z.string().default('+91'),
+    countryCode: z.string().default('+91').optional(),
+    email: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .email({ message: 'Please enter a valid email address.' })
+      .optional()
+      .or(z.literal('')),
     mobile: z
       .string()
       .trim()
-      .transform((val) => val.replace(/\D/g, ''))
-      .refine((val) => val.length === 10 && /^[6-9]\d{9}$/.test(val), {
-        message: 'Please enter a valid 10-digit Indian mobile number.',
-      }),
+      .min(7, { message: 'Please enter a valid mobile number.' })
+      .max(25, { message: 'Phone number is too long.' })
+      .optional(),
+    phone: z
+      .string()
+      .trim()
+      .min(7, { message: 'Please enter a valid phone number.' })
+      .max(25, { message: 'Phone number is too long.' })
+      .optional(),
     password: z
       .string()
       .min(8, { message: 'Password must contain at least 8 characters.' })
@@ -40,6 +53,18 @@ export const registerSchema = z
       .optional()
       .or(z.literal('')),
   })
+  .refine(
+    (data) => {
+      const rawPhone = data.phone || data.mobile;
+      if (!rawPhone) return false;
+      const normalized = PhoneUtils.normalize(rawPhone, data.countryCode || '+91');
+      return normalized !== null;
+    },
+    {
+      message: 'Please enter a valid international phone number in E.164 format (e.g. +919876543210 or +14155552671).',
+      path: ['mobile'],
+    }
+  )
   .refine((data) => data.password === data.confirmPassword, {
     message: 'Passwords do not match.',
     path: ['confirmPassword'],
@@ -64,7 +89,7 @@ export const loginSchema = z.object({
   userId: z
     .string()
     .trim()
-    .min(1, { message: 'Please enter your User ID or Mobile No.' }),
+    .min(1, { message: 'Please enter your User ID or Phone Number.' }),
   password: z
     .string()
     .min(1, { message: 'Please enter your password.' }),
@@ -74,7 +99,7 @@ export const forgotPasswordSchema = z.object({
   identifier: z
     .string()
     .trim()
-    .min(3, { message: 'Please enter a valid User ID or registered mobile number.' }),
+    .min(3, { message: 'Please enter a valid User ID or registered phone number.' }),
 });
 
 export const resetPasswordSchema = z
@@ -106,3 +131,4 @@ export type ResendOtpInput = z.infer<typeof resendOtpSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+

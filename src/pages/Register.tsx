@@ -18,6 +18,7 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
   const [formData, setFormData] = useState({
     fullName: '',
     userId: '',
+    email: '',
     countryCode: '+91',
     mobile: '',
     password: '',
@@ -47,6 +48,14 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
       errs.userId = 'User ID must be 4 to 20 characters.';
     } else if (!/^[a-zA-Z0-9_]+$/.test(cleanUserId)) {
       errs.userId = 'User ID can only contain letters, numbers, and underscores.';
+    }
+
+    // 3. Email Address
+    const cleanEmail = formData.email.trim();
+    if (!cleanEmail) {
+      errs.email = 'Email address is required.';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      errs.email = 'Please enter a valid email address.';
     }
 
     // 3. Mobile Number
@@ -211,6 +220,22 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
           error={errors.userId}
           disabled={loading || demoLoading}
           autoComplete="username"
+        />
+
+        {/* 3. Email Address */}
+        <AuthInput
+          id="register-email"
+          label="Email Address"
+          placeholder="e.g. trader@example.com"
+          helperText="We'll send a 6-digit OTP code to verify your email"
+          value={formData.email}
+          onChange={(e) => {
+            setFormData({ ...formData, email: e.target.value });
+            if (errors.email) setErrors({ ...errors, email: '' });
+          }}
+          error={errors.email}
+          disabled={loading || demoLoading}
+          autoComplete="email"
         />
 
         {/* 3. Mobile Number */}

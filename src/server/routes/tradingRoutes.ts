@@ -33,6 +33,7 @@ import { marketDataGateway } from '../gateways/MarketDataGateway.ts';
 import { executionGateway } from '../gateways/ExecutionGateway.ts';
 import { brokerWebhookHandler } from '../gateways/broker/BrokerWebhookHandler.ts';
 import { brokerReconciliationService } from '../services/BrokerReconciliationService.ts';
+import { authoritativeTradingDataService } from '../services/authoritativeTradingDataService.ts';
 
 const router = Router();
 
@@ -625,76 +626,112 @@ router.get('/trades', requireAuth, async (req: TenantRequest, res: Response) => 
   }
 });
 
-// Add Funds (Deposit)
-router.post('/funds/deposit', requireAuth, (req: TenantRequest, res: Response) => {
-  const tenantId = getReqTenantId(req);
-  const wallet = getTenantWallet(tenantId);
-  const notifications = getTenantNotifications(tenantId);
+// Add Funds (Deposit) - Authoritative PostgreSQL Transaction & Immutable Ledger Flow
+router.post('/funds/deposit', requireAuth, async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const userObj = (req as any).user;
+    const userId = userObj?.userId || userObj?.user_id || 'demo-trader';
 
-  const { amount, method } = req.body;
-  const numAmount = Number(amount);
-  if (!numAmount || numAmount < 100) {
-    res.status(400).json({ success: false, message: 'Minimum deposit amount is ₹100.' });
-    return;
+    const { amount, method } = req.body;
+    const numAmount = Number(amount);
+    if (!numAmount || numAmount < 100) {
+      res.status(400).json({ success: false, message: 'Minimum deposit amount is ₹100.' });
+      return;
+    }
+
+    // 1. Create authoritative fund transaction in PostgreSQL (PENDING state + outbox deposit.created event)
+    const refId = `DEP-${Date.now()}`;
+    const tx = await authoritativeTradingDataService.createFundTransaction(
+      tenantId,
+      userId,
+      'DEPOSIT',
+      numAmount,
+      method || 'UPI Instant',
+      refId
+    );
+
+    // Customer deposit remains PENDING until admin approval.
+    // Wallet balance and immutable ledger are only mutated upon admin approval.
+    const wallet = getTenantWallet(tenantId);
+
+    const notifications = getTenantNotifications(tenantId);
+    notifications.unshift({
+      id: `NOTIF-${Date.now()}`,
+      title: 'Deposit Submitted',
+      message: `Deposit request of ₹${numAmount.toLocaleString('en-IN')} submitted and pending approval.`,
+      type: 'SYSTEM',
+      time: 'Just now',
+      read: false,
+    });
+
+    res.json({
+      success: true,
+      transactionId: tx.id,
+      status: 'PENDING',
+      message: `Deposit request of ₹${numAmount.toLocaleString('en-IN')} submitted and pending admin approval.`,
+      wallet,
+    });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
   }
-
-  wallet.availableBalance += numAmount;
-  wallet.deposited += numAmount;
-
-  notifications.unshift({
-    id: `NOTIF-${Date.now()}`,
-    title: 'Deposit Successful',
-    message: `₹${numAmount.toLocaleString('en-IN')} added via ${method || 'UPI Instant'}.`,
-    type: 'SYSTEM',
-    time: 'Just now',
-    read: false,
-  });
-
-  res.json({
-    success: true,
-    message: `Deposit of ₹${numAmount.toLocaleString('en-IN')} successful.`,
-    wallet,
-  });
 });
 
-// Withdraw Funds
-router.post('/funds/withdraw', requireAuth, (req: TenantRequest, res: Response) => {
-  const tenantId = getReqTenantId(req);
-  const wallet = getTenantWallet(tenantId);
-  const notifications = getTenantNotifications(tenantId);
+// Withdraw Funds - Authoritative PostgreSQL Transaction & Immutable Ledger Flow
+router.post('/funds/withdraw', requireAuth, async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const userObj = (req as any).user;
+    const userId = userObj?.userId || userObj?.user_id || 'demo-trader';
 
-  const { amount, bankName } = req.body;
-  const numAmount = Number(amount);
-  if (!numAmount || numAmount <= 0) {
-    res.status(400).json({ success: false, message: 'Invalid withdrawal amount.' });
-    return;
-  }
+    const { amount, bankName } = req.body;
+    const numAmount = Number(amount);
+    if (!numAmount || numAmount <= 0) {
+      res.status(400).json({ success: false, message: 'Invalid withdrawal amount.' });
+      return;
+    }
 
-  if (numAmount > wallet.availableBalance) {
-    res.status(400).json({
-      success: false,
-      message: `Insufficient balance. Available to withdraw: ₹${wallet.availableBalance.toLocaleString('en-IN')}`,
+    const pgWallet = await postgresWalletRepository.getOrCreateWallet(tenantId, userId);
+    if (numAmount > pgWallet.available_balance) {
+      res.status(400).json({
+        success: false,
+        message: `Insufficient balance. Available to withdraw: ₹${pgWallet.available_balance.toLocaleString('en-IN')}`,
+      });
+      return;
+    }
+
+    // Create authoritative PENDING withdrawal transaction + outbox event withdrawal.created
+    const refId = `WDR-${Date.now()}`;
+    const tx = await authoritativeTradingDataService.createFundTransaction(
+      tenantId,
+      userId,
+      'WITHDRAWAL',
+      numAmount,
+      bankName || 'Verified Bank',
+      refId
+    );
+
+    const wallet = getTenantWallet(tenantId);
+    const notifications = getTenantNotifications(tenantId);
+    notifications.unshift({
+      id: `NOTIF-${Date.now()}`,
+      title: 'Withdrawal Initiated',
+      message: `Payout request for ₹${numAmount.toLocaleString('en-IN')} sent to ${bankName || 'Verified Bank'} (Status: PENDING).`,
+      type: 'SYSTEM',
+      time: 'Just now',
+      read: false,
     });
-    return;
+
+    res.json({
+      success: true,
+      transactionId: tx.id,
+      status: 'PENDING',
+      message: `Withdrawal request of ₹${numAmount.toLocaleString('en-IN')} submitted and pending approval.`,
+      wallet,
+    });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
   }
-
-  wallet.availableBalance -= numAmount;
-  wallet.withdrawn += numAmount;
-
-  notifications.unshift({
-    id: `NOTIF-${Date.now()}`,
-    title: 'Withdrawal Initiated',
-    message: `Payout request for ₹${numAmount.toLocaleString('en-IN')} sent to ${bankName || 'Verified Bank'}.`,
-    type: 'SYSTEM',
-    time: 'Just now',
-    read: false,
-  });
-
-  res.json({
-    success: true,
-    message: `Withdrawal request of ₹${numAmount.toLocaleString('en-IN')} processed successfully.`,
-    wallet,
-  });
 });
 
 // Get & Create Support Tickets (scoped to resolved tenant)
