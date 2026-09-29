@@ -49,96 +49,17 @@ export function generateHistoricalCandles(
 export let INSTRUMENTS: Instrument[] = JSON.parse(JSON.stringify(DEFAULT_INSTRUMENTS));
 
 export const initialWallet: WalletFunds = {
-  availableBalance: 142840.0,
-  usedMargin: 38210.0,
-  totalPnL: 34386.86,
-  todayPnL: 504.52,
-  deposited: 200000.0,
-  withdrawn: 50000.0,
+  availableBalance: 0.0,
+  usedMargin: 0.0,
+  totalPnL: 0.0,
+  todayPnL: 0.0,
+  deposited: 0.0,
+  withdrawn: 0.0,
 };
 
-export const initialPositions: Position[] = [
-  {
-    id: 'POS-1',
-    symbol: 'GOLD FUT',
-    category: 'COMMODITY',
-    type: 'BUY',
-    product: 'INTRADAY',
-    qty: 100,
-    lots: 1,
-    lotSize: 100,
-    avgPrice: 156820.0,
-    ltp: 156578.01,
-    pnl: -241.99,
-    pnlPercent: -0.15,
-    timestamp: new Date(Date.now() - 3600000).toISOString(),
-    tenantId: 'vertex-default',
-  },
-  {
-    id: 'POS-2',
-    symbol: 'COPPER FUT',
-    category: 'COMMODITY',
-    type: 'BUY',
-    product: 'INTRADAY',
-    qty: 2500,
-    lots: 1,
-    lotSize: 2500,
-    avgPrice: 844.0,
-    ltp: 847.8,
-    pnl: 746.51,
-    pnlPercent: 0.45,
-    timestamp: new Date(Date.now() - 7200000).toISOString(),
-    tenantId: 'vertex-default',
-  },
-];
+export const initialPositions: Position[] = [];
 
-export const initialOrders: Order[] = [
-  {
-    id: 'ORD-99101',
-    symbol: 'GOLD FUT',
-    type: 'BUY',
-    orderType: 'MARKET',
-    product: 'INTRADAY',
-    qty: 100,
-    lots: 1,
-    lotSize: 100,
-    price: 156820.0,
-    status: 'EXECUTED',
-    time: '11:15:20',
-    date: '31 Aug 2026',
-    tenantId: 'vertex-default',
-  },
-  {
-    id: 'ORD-99102',
-    symbol: 'SILVER FUT',
-    type: 'SELL',
-    orderType: 'LIMIT',
-    product: 'INTRADAY',
-    qty: 30,
-    lots: 1,
-    lotSize: 30,
-    price: 2385.0,
-    status: 'EXECUTED',
-    time: '10:42:05',
-    date: '31 Aug 2026',
-    tenantId: 'vertex-default',
-  },
-  {
-    id: 'ORD-99103',
-    symbol: 'CRUDE OIL FUT',
-    type: 'BUY',
-    orderType: 'LIMIT',
-    product: 'HOLDING',
-    qty: 100,
-    lots: 1,
-    lotSize: 100,
-    price: 6240.0,
-    status: 'EXECUTED',
-    time: '09:30:12',
-    date: '31 Aug 2026',
-    tenantId: 'vertex-default',
-  },
-];
+export const initialOrders: Order[] = [];
 
 // In-memory collections scoped by tenant
 const tenantWallets: Record<string, WalletFunds> = {

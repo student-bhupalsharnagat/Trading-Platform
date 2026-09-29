@@ -276,7 +276,7 @@ class DatabaseService {
       referred_by: userData.referredBy,
       created_at: now,
       updated_at: now,
-      demo_balance: userData.demoBalance !== undefined ? userData.demoBalance : 1000000.0, // ₹10,00,000 virtual demo trading balance
+      demo_balance: userData.demoBalance !== undefined ? userData.demoBalance : 0.0,
     };
 
     this.state.users.push(newUser);

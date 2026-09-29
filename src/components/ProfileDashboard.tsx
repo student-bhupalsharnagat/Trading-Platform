@@ -179,7 +179,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
           <div className="p-2 bg-[#060B13] border border-[#141E2E] rounded-xl">
             <span className="text-[10px] font-bold text-slate-400 tracking-wider block">Open PnL</span>
             <span className="text-xs sm:text-sm font-mono font-bold text-emerald-400 mt-0.5 block">
-              +₹{wallet.todayPnL ? wallet.todayPnL.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '504.52'}
+              {(wallet.todayPnL || 0) >= 0 ? '+' : ''}₹{(wallet.todayPnL || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
             </span>
           </div>
 
@@ -187,7 +187,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
           <div className="p-2 bg-[#060B13] border border-[#141E2E] rounded-xl">
             <span className="text-[10px] font-bold text-slate-400 tracking-wider block">Margin Used</span>
             <span className="text-xs sm:text-sm font-mono font-bold text-slate-200 mt-0.5 block">
-              ₹{wallet.usedMargin ? wallet.usedMargin.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '38,210'}
+              ₹{(wallet.usedMargin || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
             </span>
           </div>
         </div>

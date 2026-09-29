@@ -33,10 +33,10 @@ export const DesktopMarketPanel: React.FC<DesktopMarketPanelProps> = ({
   const range = high - low;
   const currentPosPercent = range > 0 ? Math.min(100, Math.max(0, ((spotlightInstrument.lastPrice - low) / range) * 100)) : 50;
 
-  const available = wallet?.availableBalance ?? 242680;
-  const used = wallet?.usedMargin ?? 42320;
+  const available = wallet?.availableBalance ?? 0;
+  const used = wallet?.usedMargin ?? 0;
   const total = available + used;
-  const marginUsedPercent = total > 0 ? Math.round((used / total) * 100) : 15;
+  const marginUsedPercent = total > 0 ? Math.round((used / total) * 100) : 0;
 
   return (
     <div className="space-y-4">

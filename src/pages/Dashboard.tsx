@@ -206,11 +206,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const orderWindowInstrumentRef = useRef(orderWindowInstrument);
   orderWindowInstrumentRef.current = orderWindowInstrument;
 
+  const processedEventsRef = useRef<Set<string>>(new Set());
+
   // Connect to Live Trading WebSocket for instantaneous updates
   useEffect(() => {
     let ws: WebSocket | null = null;
     let reconnectTimeout: any = null;
     let isMounted = true;
+    let reconnectAttempts = 0;
 
     const connectWs = () => {
       try {
@@ -219,12 +222,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
-          // Connected to trading stream
+          reconnectAttempts = 0;
         };
 
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
+            if (!data || !data.event) return;
+
+            // Deduplicate incoming events
+            const eventKey = `${data.event}:${data.timestamp || ''}:${JSON.stringify(data.payload?.id || data.payload?.orderId || '')}`;
+            if (processedEventsRef.current.has(eventKey)) return;
+
+            if (processedEventsRef.current.size > 200) {
+              processedEventsRef.current.clear();
+            }
+            if (data.event !== 'market.ticks') {
+              processedEventsRef.current.add(eventKey);
+            }
+
             if (data.event === 'market.ticks' && data.payload?.instruments) {
               setInstruments(data.payload.instruments);
               if (selectedChartInstrumentRef.current) {
@@ -239,21 +255,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 );
                 if (updatedOrder) setOrderWindowInstrument(updatedOrder);
               }
-            } else if (data.event === 'portfolio.mtm' && data.payload) {
+            } else if (data.event === 'wallet.updated' && data.payload) {
+              const w = data.payload;
               setPortfolio((prev) => {
                 if (!prev) return prev;
                 return {
                   ...prev,
-                  positions: data.payload.positions || prev.positions,
-                  wallet: data.payload.wallet ? { ...prev.wallet, ...data.payload.wallet } : prev.wallet,
+                  wallet: {
+                    availableBalance: w.availableBalance ?? w.available_balance ?? prev.wallet.availableBalance,
+                    usedMargin: w.usedMargin ?? w.used_margin ?? prev.wallet.usedMargin,
+                    totalPnL: w.realizedPnl ?? w.realized_pnl ?? w.totalPnL ?? prev.wallet.totalPnL,
+                    todayPnL: prev.wallet.todayPnL,
+                    deposited: w.deposited ?? prev.wallet.deposited,
+                    withdrawn: w.withdrawn ?? prev.wallet.withdrawn,
+                  },
                 };
               });
+              fetchData();
             } else if (
               data.event === 'order.created' ||
               data.event === 'trade.executed' ||
               data.event === 'position.updated' ||
-              data.event === 'wallet.updated' ||
-              data.event === 'order.cancelled'
+              data.event === 'order.cancelled' ||
+              data.event === 'portfolio.mtm'
             ) {
               fetchData();
             }
@@ -262,12 +286,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
         ws.onclose = () => {
           if (isMounted) {
-            reconnectTimeout = setTimeout(connectWs, 3000);
+            reconnectAttempts++;
+            const delay = Math.min(10000, 1000 * Math.pow(1.5, reconnectAttempts));
+            reconnectTimeout = setTimeout(connectWs, delay);
           }
         };
 
         ws.onerror = () => {
-          // Fallback to active interval polling
+          // Closed event will trigger reconnect
         };
       } catch {}
     };
@@ -283,8 +309,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 1000);
-    return () => clearInterval(interval);
   }, []);
 
   const handleLogout = async () => {
@@ -622,7 +646,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           onBack={() => setSelectedChartInstrument(null)}
           onOpenOrderWindow={(inst, type) => handleOpenOrder(inst, type)}
           onOpenWallet={() => setIsWalletModalOpen(true)}
-          walletBalance={portfolio?.wallet?.availableBalance || 142840}
+          walletBalance={portfolio?.wallet?.availableBalance ?? 0}
         />
 
         {/* Modal Order Window overlay if triggered from chart */}
@@ -645,12 +669,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           isOpen={isWalletModalOpen}
           wallet={
             portfolio?.wallet || {
-              availableBalance: 142840,
-              usedMargin: 38210,
-              totalPnL: 34386.86,
-              todayPnL: 504.52,
-              deposited: 200000,
-              withdrawn: 50000,
+              availableBalance: 0,
+              usedMargin: 0,
+              totalPnL: 0,
+              todayPnL: 0,
+              deposited: 0,
+              withdrawn: 0,
             }
           }
           onClose={() => setIsWalletModalOpen(false)}
@@ -869,13 +893,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             <div className="p-3 bg-[#080E18] rounded-xl border border-[#1A2638]">
               <span className="text-[11px] text-slate-400">Available Funds</span>
               <p className="text-base font-mono font-bold text-amber-400 mt-0.5">
-                ₹{portfolio?.wallet?.availableBalance?.toLocaleString('en-IN', { minimumFractionDigits: 2 }) || '1,42,840.00'}
+                ₹{(portfolio?.wallet?.availableBalance ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </p>
             </div>
             <div className="p-3 bg-[#080E18] rounded-xl border border-[#1A2638]">
               <span className="text-[11px] text-slate-400">Used Margin</span>
               <p className="text-base font-mono font-bold text-slate-200 mt-0.5">
-                ₹{portfolio?.wallet?.usedMargin?.toLocaleString('en-IN', { minimumFractionDigits: 2 }) || '38,210.00'}
+                ₹{(portfolio?.wallet?.usedMargin ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </p>
             </div>
             <div className="p-3 bg-[#080E18] rounded-xl border border-[#1A2638]">
@@ -997,7 +1021,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                       {t('availableMargin')}
                     </div>
                     <div className="text-sm sm:text-base lg:text-lg font-mono font-black text-slate-900 dark:text-white tracking-tight mt-0.5 truncate">
-                      ₹{(portfolio?.wallet?.availableBalance ?? 242680).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      ₹{(portfolio?.wallet?.availableBalance ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                     </div>
                   </button>
 

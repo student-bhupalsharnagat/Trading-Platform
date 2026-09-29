@@ -114,121 +114,140 @@ router.get('/candles/:symbol', optionalAuth, (req: AuthenticatedRequest, res: Re
   });
 });
 
-// Get portfolio data (scoped to resolved tenant)
+// Get portfolio data (scoped to authenticated user & resolved tenant)
 router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response) => {
   const tenantId = getReqTenantId(req);
   const userObj = (req as any).user;
-  const userId = userObj?.userId || userObj?.user_id || userObj?.id || 'demo-trader';
+  const userId = userObj?.userId || userObj?.user_id || userObj?.id;
 
-  let wallet = getTenantWallet(tenantId);
-  let positions = getTenantPositions(tenantId);
-  let orders = getTenantOrders(tenantId);
-
-  try {
-    if (userId) {
-      const pgWallet = await postgresWalletRepository.getWallet(tenantId, userId);
-      if (pgWallet) {
-        wallet = {
-          availableBalance: pgWallet.available_balance,
-          usedMargin: pgWallet.used_margin,
-          totalPnL: pgWallet.realized_pnl,
-          todayPnL: wallet.todayPnL || 0,
-          deposited: 200000,
-          withdrawn: 50000,
-        };
-      }
-      const pgPositions = await postgresPositionRepository.getPositions(tenantId, userId);
-      if (pgPositions && pgPositions.length > 0) {
-        positions = pgPositions.map((p) => {
-          const inst = findInstrument(p.instrument_id);
-          const avgPrice = Number(p.average_price);
-          const ltp = inst ? inst.lastPrice : avgPrice;
-          const posType: 'BUY' | 'SELL' = Number(p.quantity) >= 0 ? 'BUY' : 'SELL';
-          const qty = Math.abs(Number(p.quantity));
-          const lotSize = inst?.lotSize || 1;
-          const lots = Math.max(1, Math.round(qty / lotSize));
-          const pnl = posType === 'BUY'
-            ? (ltp - avgPrice) * qty
-            : (avgPrice - ltp) * qty;
-          const pnlPercent = (avgPrice * qty) > 0
-            ? Number(((pnl / (avgPrice * qty)) * 100).toFixed(2))
-            : 0;
-
-          return {
-            id: p.id,
-            symbol: p.instrument_id,
-            category: inst?.category || 'EQUITY',
-            type: posType,
-            product: 'INTRADAY' as const,
-            lots,
-            qty,
-            lotSize,
-            avgPrice: Number(avgPrice.toFixed(2)),
-            ltp: Number(ltp.toFixed(2)),
-            pnl: Number(pnl.toFixed(2)),
-            pnlPercent,
-            timestamp: p.updated_at,
-            tenantId: p.tenant_id,
-          };
-        });
-      }
-      const pgOrders = await postgresOrderRepository.getOrders(tenantId, userId);
-      if (pgOrders && pgOrders.length > 0) {
-        orders = pgOrders.map((o) => {
-          const inst = findInstrument(o.instrument_id);
-          const lotSize = inst?.lotSize || 100;
-          return {
-            id: o.id,
-            symbol: o.instrument_id,
-            type: o.side as 'BUY' | 'SELL',
-            orderType: o.order_type as any,
-            product: 'INTRADAY',
-            lots: Math.max(1, Math.round(o.quantity / lotSize)),
-            qty: o.quantity,
-            lotSize,
-            price: o.price,
-            status: o.status as any,
-            time: new Date(o.created_at).toTimeString().split(' ')[0],
-            date: new Date(o.created_at).toLocaleDateString('en-GB'),
-            tenantId: o.tenant_id,
-          };
-        });
-      }
-    }
-  } catch {
-    // fallback to memory
+  if (!userId) {
+    return res.status(401).json({
+      success: false,
+      message: 'Authentication required to view trading portfolio.',
+      wallet: {
+        availableBalance: 0,
+        usedMargin: 0,
+        totalPnL: 0,
+        todayPnL: 0,
+        deposited: 0,
+        withdrawn: 0,
+      },
+      positions: [],
+      orders: [],
+    });
   }
 
-  // Real-time dynamic mark-to-market (MTM) calculation against live instrument prices
-  positions = positions.map((pos) => {
-    const inst = findInstrument(pos.symbol);
-    const ltp = inst ? inst.lastPrice : pos.ltp;
-    const pnl = pos.type === 'BUY'
-      ? (ltp - pos.avgPrice) * pos.qty
-      : (pos.avgPrice - ltp) * pos.qty;
-    const pnlPercent = (pos.avgPrice * pos.qty) > 0
-      ? Number(((pnl / (pos.avgPrice * pos.qty)) * 100).toFixed(2))
-      : 0;
-    return {
-      ...pos,
-      ltp,
-      pnl: Number(pnl.toFixed(2)),
-      pnlPercent,
+  try {
+    const pgWallet = await postgresWalletRepository.getOrCreateWallet(tenantId, userId, 0);
+    const pgPositions = await postgresPositionRepository.getPositions(tenantId, userId);
+    const pgOrders = await postgresOrderRepository.getOrders(tenantId, userId);
+
+    const positions = (pgPositions || []).map((p) => {
+      const inst = findInstrument(p.instrument_id);
+      const avgPrice = Number(p.average_price);
+      const ltp = inst ? inst.lastPrice : avgPrice;
+      const posType: 'BUY' | 'SELL' = Number(p.quantity) >= 0 ? 'BUY' : 'SELL';
+      const qty = Math.abs(Number(p.quantity));
+      const lotSize = inst?.lotSize || 1;
+      const lots = Math.max(1, Math.round(qty / lotSize));
+      const pnl = posType === 'BUY'
+        ? (ltp - avgPrice) * qty
+        : (avgPrice - ltp) * qty;
+      const pnlPercent = (avgPrice * qty) > 0
+        ? Number(((pnl / (avgPrice * qty)) * 100).toFixed(2))
+        : 0;
+
+      return {
+        id: p.id,
+        symbol: p.instrument_id,
+        category: inst?.category || 'EQUITY',
+        type: posType,
+        product: 'INTRADAY' as const,
+        lots,
+        qty,
+        lotSize,
+        avgPrice: Number(avgPrice.toFixed(2)),
+        ltp: Number(ltp.toFixed(2)),
+        pnl: Number(pnl.toFixed(2)),
+        pnlPercent,
+        timestamp: p.updated_at,
+        tenantId: p.tenant_id,
+      };
+    });
+
+    const orders = (pgOrders || []).map((o) => {
+      const inst = findInstrument(o.instrument_id);
+      const lotSize = inst?.lotSize || 100;
+      return {
+        id: o.id,
+        symbol: o.instrument_id,
+        type: o.side as 'BUY' | 'SELL',
+        orderType: o.order_type as any,
+        product: 'INTRADAY',
+        lots: Math.max(1, Math.round(o.quantity / lotSize)),
+        qty: o.quantity,
+        lotSize,
+        price: o.price,
+        status: o.status as any,
+        time: new Date(o.created_at).toTimeString().split(' ')[0],
+        date: new Date(o.created_at).toLocaleDateString('en-GB'),
+        tenantId: o.tenant_id,
+      };
+    });
+
+    // Real-time dynamic mark-to-market (MTM) calculation against live instrument prices
+    const updatedPositions = positions.map((pos) => {
+      const inst = findInstrument(pos.symbol);
+      const ltp = inst ? inst.lastPrice : pos.ltp;
+      const pnl = pos.type === 'BUY'
+        ? (ltp - pos.avgPrice) * pos.qty
+        : (pos.avgPrice - ltp) * pos.qty;
+      const pnlPercent = (pos.avgPrice * pos.qty) > 0
+        ? Number(((pnl / (pos.avgPrice * pos.qty)) * 100).toFixed(2))
+        : 0;
+      return {
+        ...pos,
+        ltp,
+        pnl: Number(pnl.toFixed(2)),
+        pnlPercent,
+      };
+    });
+
+    const totalUnrealizedPnL = updatedPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
+    const realizedPnL = pgWallet.realized_pnl || 0;
+
+    const wallet = {
+      availableBalance: pgWallet.available_balance,
+      usedMargin: pgWallet.used_margin,
+      totalPnL: Number((realizedPnL + totalUnrealizedPnL).toFixed(2)),
+      todayPnL: Number(totalUnrealizedPnL.toFixed(2)),
+      deposited: (pgWallet as any).deposited || 0,
+      withdrawn: (pgWallet as any).withdrawn || 0,
     };
-  });
 
-  const totalUnrealizedPnL = positions.reduce((sum, p) => sum + (p.pnl || 0), 0);
-  const realizedPnL = wallet.totalPnL || 0;
-  wallet.todayPnL = Number((500 + totalUnrealizedPnL).toFixed(2));
-  wallet.totalPnL = Number((realizedPnL + totalUnrealizedPnL).toFixed(2));
-
-  res.json({
-    success: true,
-    tenantId,
-    wallet,
-    positions,
-    orders,
-  });
+    return res.json({
+      success: true,
+      tenantId,
+      wallet,
+      positions: updatedPositions,
+      orders,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to load user portfolio',
+      wallet: {
+        availableBalance: 0,
+        usedMargin: 0,
+        totalPnL: 0,
+        todayPnL: 0,
+        deposited: 0,
+        withdrawn: 0,
+      },
+      positions: [],
+      orders: [],
+    });
+  }
 });
 
 // Place new Order (BUY / SELL) - Enforces Tenant trading freeze, active trader, and ACID persistence
@@ -394,7 +413,32 @@ router.post(
           totalPnL: result.wallet.realized_pnl,
           todayPnL: 0,
         },
-        positions: getTenantPositions(tenantId),
+        positions: (await postgresPositionRepository.getPositions(tenantId, orderUserId)).map((p) => {
+          const pInst = findInstrument(p.instrument_id);
+          const avgPrice = Number(p.average_price);
+          const ltp = pInst ? pInst.lastPrice : avgPrice;
+          const posType: 'BUY' | 'SELL' = Number(p.quantity) >= 0 ? 'BUY' : 'SELL';
+          const qty = Math.abs(Number(p.quantity));
+          const lotSize = pInst?.lotSize || 1;
+          const lots = Math.max(1, Math.round(qty / lotSize));
+          const pnl = posType === 'BUY' ? (ltp - avgPrice) * qty : (avgPrice - ltp) * qty;
+          return {
+            id: p.id,
+            symbol: p.instrument_id,
+            category: pInst?.category || 'EQUITY',
+            type: posType,
+            product: 'INTRADAY' as const,
+            lots,
+            qty,
+            lotSize,
+            avgPrice: Number(avgPrice.toFixed(2)),
+            ltp: Number(ltp.toFixed(2)),
+            pnl: Number(pnl.toFixed(2)),
+            pnlPercent: (avgPrice * qty) > 0 ? Number(((pnl / (avgPrice * qty)) * 100).toFixed(2)) : 0,
+            timestamp: p.updated_at,
+            tenantId: p.tenant_id,
+          };
+        }),
       });
     } catch (err: any) {
       const status = err.statusCode || (err.code === 'INSUFFICIENT_MARGIN' ? 400 : 500);
@@ -494,7 +538,32 @@ router.post(
           totalPnL: result.wallet.realized_pnl ?? result.wallet.totalPnL,
           todayPnL: 0,
         },
-        positions: getTenantPositions(tenantId),
+        positions: (await postgresPositionRepository.getPositions(tenantId, userId)).map((p) => {
+          const pInst = findInstrument(p.instrument_id);
+          const avgPrice = Number(p.average_price);
+          const ltp = pInst ? pInst.lastPrice : avgPrice;
+          const posType: 'BUY' | 'SELL' = Number(p.quantity) >= 0 ? 'BUY' : 'SELL';
+          const qty = Math.abs(Number(p.quantity));
+          const lotSize = pInst?.lotSize || 1;
+          const lots = Math.max(1, Math.round(qty / lotSize));
+          const pnl = posType === 'BUY' ? (ltp - avgPrice) * qty : (avgPrice - ltp) * qty;
+          return {
+            id: p.id,
+            symbol: p.instrument_id,
+            category: pInst?.category || 'EQUITY',
+            type: posType,
+            product: 'INTRADAY' as const,
+            lots,
+            qty,
+            lotSize,
+            avgPrice: Number(avgPrice.toFixed(2)),
+            ltp: Number(ltp.toFixed(2)),
+            pnl: Number(pnl.toFixed(2)),
+            pnlPercent: (avgPrice * qty) > 0 ? Number(((pnl / (avgPrice * qty)) * 100).toFixed(2)) : 0,
+            timestamp: p.updated_at,
+            tenantId: p.tenant_id,
+          };
+        }),
       });
     } catch (err: any) {
       res.status(err.statusCode || 500).json({ success: false, message: err.message || 'Failed to close position.' });

@@ -306,7 +306,7 @@ export class AuthoritativeTradingDataService {
     const wallet = await postgresWalletRepository.getOrCreateWallet(
       tenantId,
       resolvedUserId,
-      user.demo_balance || 1000000
+      user.demo_balance || 0
     );
 
     // Get positions

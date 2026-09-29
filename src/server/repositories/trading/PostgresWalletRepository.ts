@@ -25,7 +25,7 @@ export class PostgresWalletRepository implements ITradingWalletRepository {
   public async getOrCreateWallet(
     tenantId: string,
     userId: string,
-    initialBalance = 1000000,
+    initialBalance = 0,
     client?: DbClient
   ): Promise<TradingWallet> {
     const existing = await this.getWallet(tenantId, userId, client);
@@ -56,7 +56,7 @@ export class PostgresWalletRepository implements ITradingWalletRepository {
 
     if (res.rows.length === 0) {
       // Create wallet if it didn't exist yet, then lock it
-      await this.getOrCreateWallet(tenantId, userId, 1000000, client);
+      await this.getOrCreateWallet(tenantId, userId, 0, client);
       const lockedRes = await client.query(sql, [tenantId, userId]);
       return this.mapRow(lockedRes.rows[0]);
     }

@@ -1,11 +1,14 @@
 import { jsonUserRepository } from '../repositories/JsonUserRepository.ts';
 import { jsonHierarchyRepository } from '../repositories/JsonHierarchyRepository.ts';
+import { postgresTradeRepository } from '../repositories/trading/PostgresTradeRepository.ts';
+import { postgresPositionRepository } from '../repositories/trading/PostgresPositionRepository.ts';
 import type { UserRecord } from '../db/database.ts';
 import type { AdminDashboardKPIs } from '../../admin/types/adminTypes.ts';
 
 export class AdminDashboardService {
   public async getKPIs(caller: UserRecord): Promise<AdminDashboardKPIs> {
     const callerPath = caller.hierarchy_path || 'root';
+    const tenantId = caller.tenant_id || 'vertex-default';
     const descendants = await jsonHierarchyRepository.getDescendants(callerPath);
 
     const totalMasters = descendants.filter((d) => d.role === 'MASTER').length;
@@ -13,12 +16,21 @@ export class AdminDashboardService {
     const totalSubBrokers = descendants.filter((d) => d.role === 'SUB_BROKER').length;
     const clients = descendants.filter((d) => d.role === 'CLIENT');
     const totalClients = clients.length;
-    const activeClients = clients.filter((c) => c.status === 'active').length;
+    const activeClients = clients.filter((c) => c.status === 'active' || c.status === 'ACTIVE').length;
 
-    // Derived from available data
-    const commissionEarned = totalMasters * 25000 + totalBrokers * 12500 + totalSubBrokers * 5000;
-    const todayTurnover = totalClients * 450000;
-    const totalPnL = 124500.5;
+    // Derived from actual database trade and position records
+    const pgTrades = await postgresTradeRepository.getTrades(tenantId);
+    const pgPositions = await postgresPositionRepository.getPositions(tenantId);
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayTrades = pgTrades.filter((t) => (t.executed_at || '').startsWith(todayStr));
+    const todayTurnover = todayTrades.reduce((sum, t) => sum + Number(t.execution_value || 0), 0);
+    const tradingVolume = pgTrades.reduce((sum, t) => sum + Number(t.execution_value || 0), 0);
+    const totalPnL = pgPositions.reduce((sum, p) => sum + Number(p.realized_pnl || 0) + Number(p.unrealized_pnl || 0), 0);
+    const commissionEarned = pgTrades.reduce((sum, t) => sum + Number((t as any).fees || (t as any).commission || 0), 0);
+
+    const pendingKyc = clients.filter((c) => !c.is_verified || c.status === 'PENDING_EMAIL_VERIFICATION' || c.status === 'PENDING_PHONE_VERIFICATION').length;
+    const openTickets = 0;
 
     return {
       totalMasters,
@@ -29,22 +41,14 @@ export class AdminDashboardService {
       commissionEarned,
       todayTurnover,
       totalPnL,
-      pendingKyc: 3, // Real calculation placeholder
-      openTickets: 2, // Real calculation placeholder
-      tradingVolume: todayTurnover,
+      pendingKyc,
+      openTickets,
+      tradingVolume,
     };
   }
 
   public getChartData() {
-    return [
-      { date: '01 Sep', volume: 1200000, commission: 24000, clients: 12, pnl: 45000 },
-      { date: '02 Sep', volume: 1850000, commission: 37000, clients: 15, pnl: 62000 },
-      { date: '03 Sep', volume: 1600000, commission: 32000, clients: 19, pnl: 54000 },
-      { date: '04 Sep', volume: 2400000, commission: 48000, clients: 25, pnl: 89000 },
-      { date: '05 Sep', volume: 3100000, commission: 62000, clients: 34, pnl: 110000 },
-      { date: '06 Sep', volume: 2900000, commission: 58000, clients: 41, pnl: 95000 },
-      { date: '07 Sep', volume: 3800000, commission: 76000, clients: 48, pnl: 142000 },
-    ];
+    return [];
   }
 }
 
