@@ -24,6 +24,8 @@ import {
 import { auditService } from '../src/server/services/auditService.ts';
 import { tenantRepository } from '../src/server/repositories/JsonTenantRepository.ts';
 import { pgDb } from '../src/server/db/postgres.ts';
+import { postgresWalletRepository } from '../src/server/repositories/trading/PostgresWalletRepository.ts';
+import { runMigrations } from '../src/server/db/migrationRunner.ts';
 
 const config = getInternalAuthConfig();
 const SECRET = config.internalCommunicationSecret;
@@ -36,6 +38,7 @@ async function runPhase5CTests() {
 
   // Seed super admin and setup database
   await hierarchyService.ensureSuperAdmin();
+  await runMigrations();
 
   // Create an active test trader
   let testTrader = db.findUserByUserId('TRADER-TEST-5C');
@@ -47,6 +50,8 @@ async function runPhase5CTests() {
       mobile: '9999900051',
       passwordHash: 'hashedpassword123',
       tenantId: 'vertex-default',
+      isVerified: true,
+      status: 'ACTIVE',
     });
   } else {
     db.setUserFrozen(testTrader.user_id, false);
@@ -386,6 +391,14 @@ async function runPhase5CTests() {
     {
       const wallet = getTenantWallet('vertex-default');
       wallet.availableBalance = 1000000;
+      await postgresWalletRepository.upsertWallet({
+        tenant_id: 'vertex-default',
+        user_id: testTrader.user_id,
+        available_balance: 5000000,
+        used_margin: 0,
+        blocked_balance: 0,
+        realized_pnl: 0,
+      });
 
       const orderRes = await fetch(`${baseUrl}/api/trading/order`, {
         method: 'POST',

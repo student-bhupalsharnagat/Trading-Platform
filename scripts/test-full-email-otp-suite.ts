@@ -47,7 +47,8 @@ async function runFullSuite() {
   );
   assert(signupResult.user.userId === validUserId, 'User registered successfully with valid payload');
   const createdRecord = db.findUserByUserId(validUserId);
-  assert(createdRecord?.status === 'PENDING_EMAIL_VERIFICATION', 'Account status set to PENDING_EMAIL_VERIFICATION');
+  assert(createdRecord?.status === 'ACTIVE', 'Account status set to ACTIVE on direct signup');
+  assert(Boolean(signupResult.token), 'Session token issued on direct signup');
 
   // --- 2. Invalid Email Validation ---
   console.log('\n--- 2. Invalid Email Validation ---');
@@ -157,17 +158,17 @@ async function runFullSuite() {
   }
   assert(passwordMismatchCaught, 'Password mismatch correctly caught in frontend/schema validation');
 
-  // --- 14. Login Before Email Verification (Pre-Verification Check) ---
-  console.log('\n--- 14. Login Blocked Before Email Verification ---');
-  let preVerifyLoginBlocked = false;
-  try {
-    await authService.login(validUserId, validPassword, '127.0.0.1');
-  } catch (err: any) {
-    if (err.statusCode === 403 && err.requiresVerification) {
-      preVerifyLoginBlocked = true;
-    }
-  }
-  assert(preVerifyLoginBlocked, 'Account login strictly blocked with 403 prior to email OTP verification');
+  // --- 14. Immediate login after direct signup ---
+  console.log('\n--- 14. Login Allowed Immediately After Signup ---');
+  const immediateLogin = await authService.login(validUserId, validPassword, '127.0.0.1');
+  assert(Boolean(immediateLogin.token), 'Account login succeeds immediately after direct signup');
+
+  await otpService.createAndSendOtp(
+    validUserId,
+    { email: validEmail, countryCode: '+91', mobile: validMobile },
+    'registration',
+    '127.0.0.1'
+  );
 
   // --- 8. Wrong OTP ---
   console.log('\n--- 8. Wrong OTP Handling ---');
@@ -190,7 +191,7 @@ async function runFullSuite() {
   // --- 7. OTP Success & Account Activation ---
   console.log('\n--- 7. OTP Success & Activation ---');
   const activeOtpRecord = db.getLatestActiveOtp(validUserId, 'registration');
-  const rawOtp = signupResult.devOtp || activeOtpRecord?.dev_otp_preview!;
+  const rawOtp = activeOtpRecord?.dev_otp_preview!;
   const verifyRes = await authService.verifyRegistrationOtp(validUserId, rawOtp, '127.0.0.1');
   assert(verifyRes.success === true, 'Registration OTP verified successfully');
   const activatedRecord = db.findUserByUserId(validUserId);
@@ -219,6 +220,12 @@ async function runFullSuite() {
     'tenant-a',
     '127.0.0.2'
   );
+  await otpService.createAndSendOtp(
+    multiUserId,
+    { email: `max_att_${ts}@example.com` },
+    'registration',
+    '127.0.0.2'
+  );
   let maxAttemptsExceeded = false;
   for (let i = 1; i <= 6; i++) {
     const attemptRes = await otpService.verifyOtp(multiUserId, '111111', 'registration', '127.0.0.2');
@@ -242,6 +249,12 @@ async function runFullSuite() {
       confirmPassword: validPassword,
     },
     'tenant-a',
+    '127.0.0.3'
+  );
+  await otpService.createAndSendOtp(
+    expUserId,
+    { email: `exp_${ts}@example.com` },
+    'registration',
     '127.0.0.3'
   );
   const expOtpRecord = db.getLatestActiveOtp(expUserId, 'registration');
@@ -319,7 +332,7 @@ async function runFullSuite() {
     'tenant-a',
     '127.0.0.1'
   );
-  await authService.verifyRegistrationOtp(lockUserId, lockReg.devOtp!, '127.0.0.1');
+  assert(lockReg.user.status === 'ACTIVE', 'Lockout test account is active after signup');
   for (let i = 0; i < 5; i++) {
     try {
       await authService.login(lockUserId, 'BadPass@123', '127.0.0.1');
@@ -351,7 +364,7 @@ async function runFullSuite() {
     'tenant-a',
     '127.0.0.1'
   );
-  await authService.verifyRegistrationOtp(suspUserId, suspReg.devOtp!, '127.0.0.1');
+  assert(suspReg.user.status === 'ACTIVE', 'Suspension test account is active after signup');
   db.setUserFrozen(suspUserId, true);
   let loginSuspended = false;
   try {
@@ -407,6 +420,7 @@ async function runFullSuite() {
   console.log('\n================================================================');
   console.log('   ALL 22 COMPREHENSIVE EMAIL OTP & SECURITY TESTS PASSED!');
   console.log('================================================================');
+  process.exit(0);
 }
 
 runFullSuite().catch((err) => {

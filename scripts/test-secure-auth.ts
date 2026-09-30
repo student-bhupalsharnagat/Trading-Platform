@@ -149,7 +149,7 @@ async function runSecureAuthTests() {
     // -------------------------------------------------------------
     console.log('\n--- TEST SUITE 3: User Signup & Status PENDING_PHONE_VERIFICATION ---');
     const testUserId = `trader_${Date.now()}`;
-    const testPhone = `+1415555${Math.floor(1000 + Math.random() * 9000)}`;
+    const testPhone = `+1${String(Date.now()).slice(-10)}`;
 
     const signupPayload = {
       fullName: 'Alexander Hamilton',
@@ -163,31 +163,37 @@ async function runSecureAuthTests() {
     const signupRes = await makeRequest(baseUrl, 'POST', '/api/auth/register', {}, signupPayload);
     assert(signupRes.status === 201, 'Signup returns HTTP 201 Created');
     assert(signupRes.data.success === true, 'Signup response returns success: true');
-    assert(signupRes.data.user.status === 'PENDING_PHONE_VERIFICATION', 'Account status is PENDING_PHONE_VERIFICATION on signup');
-    assert(signupRes.data.user.isVerified === false, 'Account isVerified is false on signup');
+    assert(signupRes.data.user.status === 'ACTIVE', 'Account status is ACTIVE on direct signup');
+    assert(signupRes.data.user.isVerified === true, 'Account isVerified is true on direct signup');
+    assert(Boolean(signupRes.data.token), 'Session token issued on signup');
     assert(signupRes.data.user.phoneE164 === testPhone, 'Phone stored in normalized E.164 format');
 
     // Verify stored DB record
     const userInDb = db.findUserByUserId(testUserId);
     assert(Boolean(userInDb), 'User record persisted in database');
     assert(userInDb?.password_hash.startsWith('$argon2id$'), 'Stored password in DB is Argon2id hash');
-    assert(userInDb?.status === 'PENDING_PHONE_VERIFICATION', 'Stored DB status is PENDING_PHONE_VERIFICATION');
+    assert(userInDb?.status === 'ACTIVE', 'Stored DB status is ACTIVE');
 
     // -------------------------------------------------------------
-    // Test 4: Unverified Login Attempt Rejection
+    // Test 4: Newly created account can sign in immediately
     // -------------------------------------------------------------
-    console.log('\n--- TEST SUITE 4: Unverified Account Login Protection ---');
+    console.log('\n--- TEST SUITE 4: Direct Signup Login ---');
     const unverifiedLogin = await makeRequest(baseUrl, 'POST', '/api/auth/login', {}, {
       userId: testUserId,
       password: 'StrongPassword@2026',
     });
-    assert(unverifiedLogin.status === 403, 'Unverified account login rejected with HTTP 403');
-    assert(unverifiedLogin.data.requiresVerification === true, 'Unverified login signals requiresVerification: true');
+    assert(unverifiedLogin.status === 200, 'Newly created account login succeeds with HTTP 200');
+    assert(unverifiedLogin.data.success === true, 'Direct signup login returns success');
 
     // -------------------------------------------------------------
     // Test 5: OTP Hashing & Single-Use Enforcement
     // -------------------------------------------------------------
     console.log('\n--- TEST SUITE 5: Secure OTP Storage & Verification ---');
+    const resendForOtp = await makeRequest(baseUrl, 'POST', '/api/auth/resend-otp', {}, {
+      userId: testUserId,
+      purpose: 'registration',
+    });
+    assert(resendForOtp.status === 200, 'Registration OTP can still be issued on demand');
     const otpRecord = db.getLatestActiveOtp(testUserId, 'registration');
     assert(Boolean(otpRecord), 'OTP record exists for user');
     assert(otpRecord?.otp_hash !== undefined && otpRecord.otp_hash.length === 64, 'OTP is stored as cryptographic HMAC hash, never plaintext');
@@ -224,7 +230,7 @@ async function runSecureAuthTests() {
     // -------------------------------------------------------------
     console.log('\n--- TEST SUITE 6: OTP Resend Cooldown Enforcement ---');
     const resendUserId = `resend_test_${Date.now()}`;
-    const resendPhone = `+1415555${Math.floor(1000 + Math.random() * 9000)}`;
+    const resendPhone = `+1${String(Date.now() + 17).slice(-10)}`;
     db.createUser({
       fullName: 'Resend Tester',
       userId: resendUserId,
@@ -417,14 +423,12 @@ async function runSecureAuthTests() {
     otpProviderRegistry.setPrimaryProvider('custom-mock-carrier');
 
     const swapTestUserId = `swap_tester_${Date.now()}`;
-    const swapPhone = `+1415555${Math.floor(1000 + Math.random() * 9000)}`;
-    await authService.register({
-      fullName: 'Provider Swappable User',
-      userId: swapTestUserId,
-      phone: swapPhone,
-      password: 'StrongPass@2026',
-      confirmPassword: 'StrongPass@2026',
-    });
+    const swapPhone = `+1${String(Date.now() + 31).slice(-10)}`;
+    await otpService.createAndSendOtp(
+      swapTestUserId,
+      { phoneE164: swapPhone },
+      'password_reset'
+    );
 
     assert(tracker.dispatched === true, 'Custom OTP provider received dispatch without changing signup logic');
     assert(tracker.phone === swapPhone, 'Custom OTP provider received normalized E.164 phone');
@@ -463,15 +467,13 @@ async function runSecureAuthTests() {
     otpProviderRegistry.setPrimaryProvider('failing-provider');
 
     let signupFailureCaught = false;
-    const failPhone = `+1415555${Math.floor(1000 + Math.random() * 9000)}`;
+    const failPhone = `+1${String(Date.now() + 53).slice(-10)}`;
     try {
-      await authService.register({
-        fullName: 'Fail Safe User',
-        userId: `fail_${Date.now()}`,
-        phone: failPhone,
-        password: 'Pass@12345678',
-        confirmPassword: 'Pass@12345678',
-      });
+      await otpService.createAndSendOtp(
+        `fail_${Date.now()}`,
+        { phoneE164: failPhone },
+        'password_reset'
+      );
     } catch (err: any) {
       signupFailureCaught = true;
       assert(err.statusCode === 502, 'Provider failure returns safe HTTP 502 error');

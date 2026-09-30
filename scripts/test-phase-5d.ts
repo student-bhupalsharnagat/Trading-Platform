@@ -56,6 +56,8 @@ import { eventIdempotencyStore } from '../src/server/events/EventIdempotencyStor
 import { tradingHaltService } from '../src/server/services/tradingHaltService.ts';
 import { emergencyControlService } from '../src/server/services/emergencyControlService.ts';
 import { tenantRepository } from '../src/server/repositories/JsonTenantRepository.ts';
+import { postgresWalletRepository } from '../src/server/repositories/trading/PostgresWalletRepository.ts';
+import { runMigrations } from '../src/server/db/migrationRunner.ts';
 
 const config = getInternalAuthConfig();
 const SECRET = config.internalCommunicationSecret;
@@ -67,6 +69,7 @@ async function runPhase5DTests() {
   console.log('================================================================\n');
 
   await hierarchyService.ensureSuperAdmin();
+  await runMigrations();
 
   // Create test trader in vertex-default
   let testTrader = db.findUserByUserId('TRADER-5D-TEST');
@@ -78,6 +81,8 @@ async function runPhase5DTests() {
       mobile: '9999900052',
       passwordHash: 'hashedpwd123',
       tenantId: 'vertex-default',
+      isVerified: true,
+      status: 'ACTIVE',
     });
   } else {
     db.setUserFrozen(testTrader.user_id, false);
@@ -379,6 +384,14 @@ async function runPhase5DTests() {
     {
       // Clean queue
       internalEventDispatcher.reset();
+      await postgresWalletRepository.upsertWallet({
+        tenant_id: 'vertex-default',
+        user_id: testTrader.user_id,
+        available_balance: 5000000,
+        used_margin: 0,
+        blocked_balance: 0,
+        realized_pnl: 0,
+      });
 
       const res = await fetch(`${baseUrl}/api/trading/order`, {
         method: 'POST',

@@ -148,6 +148,8 @@ export class OtpService {
     const otpHash = this.hashOtp(otpRaw, normalizedUserId);
     const expiresAt = new Date(now + OTP_TTL_MS);
 
+    const channelResults: boolean[] = [];
+
     // 5. Email Dispatch via EmailOtpProviderRegistry
     if (normalizedEmail) {
       const emailResult = await emailOtpProviderRegistry.dispatchEmailOtp({
@@ -157,6 +159,8 @@ export class OtpService {
         userId: normalizedUserId,
         ttlMinutes: 5,
       });
+
+      channelResults.push(emailResult.success);
 
       if (!emailResult.success && process.env.NODE_ENV === 'production' && !targetPhoneE164) {
         auditService.log({
@@ -181,13 +185,20 @@ export class OtpService {
 
     // Optional SMS dispatch
     if (targetPhoneE164) {
-      await otpProviderRegistry.dispatchOtp({
+      const smsResult = await otpProviderRegistry.dispatchOtp({
         phoneE164: targetPhoneE164,
         otp: otpRaw,
         purpose,
         userId: normalizedUserId,
         ttlMinutes: 5,
-      }).catch(() => null);
+      });
+      channelResults.push(Boolean(smsResult.success));
+    }
+
+    if (channelResults.length > 0 && channelResults.every((ok) => !ok)) {
+      const err = new Error('Failed to send verification code. Please check server configurations.');
+      (err as any).statusCode = 502;
+      throw err;
     }
 
     // 6. Store in Database with TTL and Attempt Limits (plain OTP is NEVER stored)

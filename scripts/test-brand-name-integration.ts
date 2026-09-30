@@ -72,6 +72,7 @@ async function run() {
   console.log('\n================================================================');
   console.log('ALL WHITE LABEL brandName INTEGRATION TESTS PASSED!');
   console.log('================================================================');
+  process.exit(0);
 }
 
 run().catch((err) => {

@@ -72,22 +72,23 @@ async function runTests() {
   const userRecord = db.findUserByUserId(testUserId);
   assert(Boolean(userRecord), 'User record persisted in database');
   assert(userRecord?.email === normalizedEmail, `Email stored securely and normalized: ${userRecord?.email}`);
-  assert(userRecord?.status === 'PENDING_EMAIL_VERIFICATION', `Account initial status is PENDING_EMAIL_VERIFICATION: ${userRecord?.status}`);
-  assert(userRecord?.is_verified === false, 'Account is_verified is initially false');
-  assert(userRecord?.email_verified_at === undefined, 'email_verified_at is initially undefined');
+  assert(userRecord?.status === 'ACTIVE', `Account initial status is ACTIVE: ${userRecord?.status}`);
+  assert(userRecord?.is_verified === true, 'Account is_verified is true after direct signup');
+  assert(Boolean(userRecord?.email_verified_at), 'email_verified_at is set on direct signup');
+  assert(Boolean(regResult.token), 'JWT issued immediately on signup');
 
-  // --- TEST 3: Login Blocked Before Verification ---
-  console.log('\n--- TEST 3: Login Blocked Before Email Verification ---');
-  let loginBlocked = false;
-  try {
-    await authService.login(testUserId, password, '127.0.0.1');
-  } catch (err: any) {
-    if (err.requiresVerification) {
-      loginBlocked = true;
-      assert(err.statusCode === 403, 'Login rejected with HTTP 403 Forbidden before email verification');
-    }
-  }
-  assert(loginBlocked, 'Unverified account login strictly BLOCKED before email verification');
+  // --- TEST 3: Immediate Login ---
+  console.log('\n--- TEST 3: Login Allowed Immediately After Signup ---');
+  const immediateLogin = await authService.login(testUserId, password, '127.0.0.1');
+  assert(Boolean(immediateLogin.token), 'Direct signup account can log in without OTP');
+
+  // Issue an OTP explicitly so hashing, expiry, and single-use rules stay covered.
+  await otpService.createAndSendOtp(
+    testUserId,
+    { email: normalizedEmail, countryCode: '+91', mobile: testMobile },
+    'registration',
+    '127.0.0.1'
+  );
 
   // --- TEST 4: Secure OTP Generation & Storage ---
   console.log('\n--- TEST 4: Secure OTP Hash & Storage (No Plaintext Leak) ---');
@@ -118,7 +119,7 @@ async function runTests() {
   // --- TEST 7: Successful OTP Verification & Account Activation ---
   console.log('\n--- TEST 7: Successful Email OTP Verification & Account Activation ---');
   // Retrieve devOtp generated during test registration
-  const devOtp = regResult.devOtp || latestOtp?.dev_otp_preview;
+  const devOtp = latestOtp?.dev_otp_preview;
   assert(Boolean(devOtp), 'Dev OTP preview retrieved for automated test verification');
 
   const verifyResult = await authService.verifyRegistrationOtp(testUserId, devOtp!, '127.0.0.1');
@@ -144,6 +145,7 @@ async function runTests() {
   console.log('\n================================================================');
   console.log('ALL EMAIL OTP AUTHENTICATION TESTS PASSED!');
   console.log('================================================================');
+  process.exit(0);
 }
 
 runTests().catch((err) => {
