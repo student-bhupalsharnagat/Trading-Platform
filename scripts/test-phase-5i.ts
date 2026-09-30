@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import express from 'express';
 import http from 'http';
 import { ProductionValidator } from '../src/server/config/productionValidator.ts';
+import { db } from '../src/server/db/database.ts';
 import { backupRestoreService } from '../src/server/db/backupRestoreService.ts';
 import { authService } from '../src/server/services/authService.ts';
 import { deepRedactSensitiveData } from '../src/server/services/auditService.ts';

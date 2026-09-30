@@ -542,16 +542,21 @@ export class AuthoritativeTradingDataService {
 
     const eventType = type === 'DEPOSIT' ? 'deposit.created' : 'withdrawal.created';
     const fundPayload = {
-      tenantId,
+      id: txId,
       transactionId: txId,
+      clientCode: resolvedUserId.toUpperCase(),
+      tenantId,
       userId: resolvedUserId,
       clientId: resolvedUserId,
       tradingUserId: resolvedUserId,
       amount: Number(amount),
       type,
       status: 'PENDING' as const,
+      method: paymentMethod,
       paymentMethod,
+      reference: referenceId || txId,
       referenceId,
+      createdAt: tx.created_at || new Date().toISOString(),
       timestamp: new Date().toISOString(),
     };
 
@@ -598,15 +603,22 @@ export class AuthoritativeTradingDataService {
       const updated = await postgresFundTransactionRepository.updateStatus(tenantId, txId, 'REJECTED', adminId, reason);
       const eventType = tx.transaction_type === 'DEPOSIT' ? 'deposit.rejected' : 'withdrawal.rejected';
       const rejectPayload = {
-        tenantId,
+        id: txId,
         transactionId: txId,
+        clientCode: tx.user_id.toUpperCase(),
+        tenantId,
         userId: tx.user_id,
         clientId: tx.user_id,
         tradingUserId: tx.user_id,
         amount: Number(tx.amount),
         type: tx.transaction_type,
         status: 'REJECTED' as const,
+        method: tx.payment_method || 'BANK_TRANSFER',
+        paymentMethod: tx.payment_method || 'BANK_TRANSFER',
+        reference: tx.reference_id || txId,
+        referenceId: tx.reference_id,
         reason,
+        createdAt: tx.created_at || new Date().toISOString(),
         timestamp: new Date().toISOString(),
       };
 
@@ -680,17 +692,24 @@ export class AuthoritativeTradingDataService {
 
       const eventType = tx.transaction_type === 'DEPOSIT' ? 'deposit.approved' : 'withdrawal.approved';
       const approvePayload = {
-        tenantId,
+        id: txId,
         transactionId: txId,
+        clientCode: tx.user_id.toUpperCase(),
+        tenantId,
         userId: tx.user_id,
         clientId: tx.user_id,
         tradingUserId: tx.user_id,
         amount: Number(tx.amount),
         type: tx.transaction_type,
         status: 'APPROVED' as const,
+        method: tx.payment_method || 'BANK_TRANSFER',
+        paymentMethod: tx.payment_method || 'BANK_TRANSFER',
+        reference: tx.reference_id || txId,
+        referenceId: tx.reference_id,
         balanceBefore: currentBal,
         balanceAfter: newBal,
         approvedBy: adminId,
+        createdAt: tx.created_at || new Date().toISOString(),
         timestamp: new Date().toISOString(),
       };
 
@@ -709,9 +728,12 @@ export class AuthoritativeTradingDataService {
         userId: tx.user_id,
         clientId: tx.user_id,
         tradingUserId: tx.user_id,
+        balance: Number((updatedWallet.available_balance + (updatedWallet.blocked_balance || 0)).toFixed(2)),
+        available: Number(updatedWallet.available_balance),
         availableBalance: Number(updatedWallet.available_balance),
-        usedMargin: Number(updatedWallet.used_margin),
+        blocked: Number(updatedWallet.blocked_balance || 0),
         blockedBalance: Number(updatedWallet.blocked_balance || 0),
+        usedMargin: Number(updatedWallet.used_margin),
         realizedPnl: Number(updatedWallet.realized_pnl || 0),
         equity: Number((updatedWallet.available_balance + updatedWallet.used_margin).toFixed(2)),
         updatedAt: new Date().toISOString(),
@@ -740,6 +762,156 @@ export class AuthoritativeTradingDataService {
     );
 
     return approvalResult.updatedTx;
+  }
+
+  /**
+   * Paged, tenant-scoped, read-only query for clients backfill.
+   */
+  public async getClientsPaged(
+    tenantId: string,
+    options: { page?: number; limit?: number; search?: string } = {}
+  ) {
+    const page = Math.max(1, Number(options.page || 1));
+    const limit = Math.min(200, Math.max(1, Number(options.limit || 50)));
+    const offset = (page - 1) * limit;
+
+    const allUsers = db.getUsersByTenant(tenantId);
+    let clients = allUsers.filter((u) => u.role === 'CLIENT' || !u.role);
+
+    if (options.search) {
+      const q = options.search.toLowerCase();
+      clients = clients.filter(
+        (c) =>
+          c.user_id.toLowerCase().includes(q) ||
+          c.full_name.toLowerCase().includes(q) ||
+          (c.email && c.email.toLowerCase().includes(q)) ||
+          (c.mobile && c.mobile.includes(q))
+      );
+    }
+
+    const total = clients.length;
+    const pagedClients = clients.slice(offset, offset + limit).map((c) => ({
+      id: c.id,
+      userId: c.user_id,
+      clientCode: c.user_id.toUpperCase(),
+      name: c.full_name,
+      fullName: c.full_name,
+      email: c.email || '',
+      phone: c.phone_e164 || c.mobile || '',
+      kycStatus: c.is_verified ? 'VERIFIED' : 'PENDING',
+      accountStatus: c.status,
+      status: c.status,
+      role: c.role || 'CLIENT',
+      tenantId: c.tenant_id || tenantId,
+      createdAt: c.created_at,
+    }));
+
+    return {
+      tenant_id: tenantId,
+      data_state: 'authoritative',
+      page,
+      limit,
+      total,
+      clients: pagedClients,
+      items: pagedClients,
+    };
+  }
+
+  /**
+   * Paged, tenant-scoped, read-only query for immutable ledger entries backfill.
+   */
+  public async getLedgerPaged(
+    tenantId: string,
+    options: { page?: number; limit?: number; userId?: string } = {}
+  ) {
+    const page = Math.max(1, Number(options.page || 1));
+    const limit = Math.min(200, Math.max(1, Number(options.limit || 50)));
+    const offset = (page - 1) * limit;
+
+    let entries: any[] = [];
+    if (options.userId) {
+      const resolvedUserId = await this.resolveTradingUserId(tenantId, options.userId);
+      entries = await postgresLedgerRepository.getByUserId(resolvedUserId, tenantId);
+    } else {
+      entries = await postgresLedgerRepository.getAll(tenantId);
+    }
+
+    const total = entries.length;
+    const paged = entries.slice(offset, offset + limit);
+
+    return {
+      tenant_id: tenantId,
+      data_state: 'authoritative',
+      page,
+      limit,
+      total,
+      ledger: paged,
+      items: paged,
+    };
+  }
+
+  /**
+   * Paged, tenant-scoped, read-only query for fund transactions backfill.
+   */
+  public async getFundsPaged(
+    tenantId: string,
+    options: {
+      page?: number;
+      limit?: number;
+      userId?: string;
+      type?: 'DEPOSIT' | 'WITHDRAWAL';
+      status?: string;
+    } = {}
+  ) {
+    const page = Math.max(1, Number(options.page || 1));
+    const limit = Math.min(200, Math.max(1, Number(options.limit || 50)));
+    const offset = (page - 1) * limit;
+
+    let resolvedUserId: string | undefined = undefined;
+    if (options.userId) {
+      resolvedUserId = await this.resolveTradingUserId(tenantId, options.userId);
+    }
+
+    const transactions = await postgresFundTransactionRepository.getByTenant(
+      tenantId,
+      resolvedUserId,
+      options.type,
+      options.status
+    );
+
+    const total = transactions.length;
+    const paged = transactions.slice(offset, offset + limit).map((tx) => ({
+      id: tx.id,
+      transactionId: tx.id,
+      clientCode: tx.user_id.toUpperCase(),
+      userId: tx.user_id,
+      tenantId: tx.tenant_id,
+      amount: tx.amount,
+      type: tx.transaction_type,
+      method: tx.payment_method,
+      paymentMethod: tx.payment_method,
+      reference: tx.reference_id || tx.id,
+      referenceId: tx.reference_id,
+      status: tx.status,
+      approvedBy: tx.approved_by,
+      approvedAt: tx.approved_at,
+      rejectedBy: tx.rejected_by,
+      rejectedAt: tx.rejected_at,
+      failureReason: tx.failure_reason,
+      createdAt: tx.created_at,
+      updatedAt: tx.updated_at,
+    }));
+
+    return {
+      tenant_id: tenantId,
+      data_state: 'authoritative',
+      page,
+      limit,
+      total,
+      funds: paged,
+      transactions: paged,
+      items: paged,
+    };
   }
 }
 

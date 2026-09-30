@@ -10,7 +10,11 @@ import { PhoneUtils } from '../utils/phoneUtils.ts';
 const resendCooldowns = new Map<string, number>();
 const requestRateLimits = new Map<string, { count: number; windowStart: number }>();
 
-const OTP_SECRET = process.env.OTP_SECRET || process.env.JWT_SECRET || 'vertex_otp_hmac_secret_key_2026';
+const isProduction = process.env.NODE_ENV === 'production';
+const OTP_SECRET = process.env.OTP_SECRET || process.env.JWT_SECRET || (isProduction ? '' : 'vertex_otp_hmac_secret_key_2026');
+if (isProduction && (!OTP_SECRET || OTP_SECRET.length < 32)) {
+  throw new Error('[SECURITY ERROR] OTP_SECRET or JWT_SECRET must be configured and at least 32 characters in production.');
+}
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes TTL as required
 const RESEND_COOLDOWN_MS = 60 * 1000; // 60 seconds cooldown
 const MAX_OTP_ATTEMPTS = 5; // Max 5 verification attempts

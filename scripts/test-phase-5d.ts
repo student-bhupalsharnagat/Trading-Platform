@@ -56,6 +56,7 @@ import { eventIdempotencyStore } from '../src/server/events/EventIdempotencyStor
 import { tradingHaltService } from '../src/server/services/tradingHaltService.ts';
 import { emergencyControlService } from '../src/server/services/emergencyControlService.ts';
 import { tenantRepository } from '../src/server/repositories/JsonTenantRepository.ts';
+import { postgresWalletRepository } from '../src/server/repositories/trading/PostgresWalletRepository.ts';
 
 const config = getInternalAuthConfig();
 const SECRET = config.internalCommunicationSecret;
@@ -377,6 +378,15 @@ async function runPhase5DTests() {
     // TEST 10: trade.executed event is created on successful order
     // -------------------------------------------------------------------------
     {
+      await postgresWalletRepository.upsertWallet({
+        tenant_id: 'vertex-default',
+        user_id: testTrader.user_id,
+        available_balance: 1000000,
+        used_margin: 0,
+        blocked_balance: 0,
+        realized_pnl: 0,
+      });
+
       // Clean queue
       internalEventDispatcher.reset();
 
@@ -865,6 +875,15 @@ async function runPhase5DTests() {
     // TEST 24: Trading platform continues executing trades while circuit is open
     // -------------------------------------------------------------------------
     {
+      await postgresWalletRepository.upsertWallet({
+        tenant_id: 'vertex-default',
+        user_id: testTrader.user_id,
+        available_balance: 1000000,
+        used_margin: 0,
+        blocked_balance: 0,
+        realized_pnl: 0,
+      });
+
       // Force dispatcher circuit breaker OPEN
       internalEventDispatcher.getCircuitBreaker().forceState('OPEN');
 

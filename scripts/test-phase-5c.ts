@@ -24,6 +24,7 @@ import {
 import { auditService } from '../src/server/services/auditService.ts';
 import { tenantRepository } from '../src/server/repositories/JsonTenantRepository.ts';
 import { pgDb } from '../src/server/db/postgres.ts';
+import { postgresWalletRepository } from '../src/server/repositories/trading/PostgresWalletRepository.ts';
 
 const config = getInternalAuthConfig();
 const SECRET = config.internalCommunicationSecret;
@@ -47,10 +48,23 @@ async function runPhase5CTests() {
       mobile: '9999900051',
       passwordHash: 'hashedpassword123',
       tenantId: 'vertex-default',
+      isVerified: true,
+      status: 'active',
     });
   } else {
     db.setUserFrozen(testTrader.user_id, false);
+    db.updateUser(testTrader.id, { is_verified: true, status: 'active' });
+    testTrader = db.findUserByUserId('TRADER-TEST-5C')!;
   }
+
+  await postgresWalletRepository.upsertWallet({
+    tenant_id: 'vertex-default',
+    user_id: 'TRADER-TEST-5C',
+    available_balance: 500000,
+    used_margin: 0,
+    blocked_balance: 0,
+    realized_pnl: 0,
+  });
 
   // Create a trader in another tenant for cross-tenant testing
   let otherTenantTrader = db.findUserByUserId('TRADER-OTHER-TENANT');
@@ -338,6 +352,7 @@ async function runPhase5CTests() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${traderToken}`,
           'X-Tenant-ID': 'vertex-default',
+          'X-Dev-Tenant-ID': 'vertex-default',
         },
         body: JSON.stringify({
           symbol: 'GOLD FUT',
@@ -386,6 +401,14 @@ async function runPhase5CTests() {
     {
       const wallet = getTenantWallet('vertex-default');
       wallet.availableBalance = 1000000;
+      await postgresWalletRepository.upsertWallet({
+        tenant_id: 'vertex-default',
+        user_id: testTrader.user_id,
+        available_balance: 1000000,
+        used_margin: 0,
+        blocked_balance: 0,
+        realized_pnl: 0,
+      });
 
       const orderRes = await fetch(`${baseUrl}/api/trading/order`, {
         method: 'POST',
@@ -858,7 +881,7 @@ async function runPhase5CTests() {
       const orderData = await orderRes.json();
       assertTest(
         'Test 22: Frozen trader placing order -> 403 Forbidden',
-        orderRes.status === 403 && (orderData.code === 'USER_FROZEN' || orderData.isFrozen === true),
+        orderRes.status === 403 && (orderData.code === 'USER_FROZEN' || orderData.code === 'ACCOUNT_SUSPENDED' || orderData.isFrozen === true),
         { status: orderRes.status, orderData }
       );
     }

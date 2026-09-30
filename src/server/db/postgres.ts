@@ -25,7 +25,38 @@ class PostgresDatabase {
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = (async () => {
+      const isProduction = process.env.NODE_ENV === 'production';
       const databaseUrl = process.env.DATABASE_URL;
+
+      // In production require DATABASE_URL; no PGlite fallback in production
+      if (isProduction) {
+        if (!databaseUrl) {
+          throw new Error('[FATAL DATABASE ERROR] DATABASE_URL is required in production. Embedded PGlite fallback is not permitted in production.');
+        }
+
+        try {
+          const poolConfig: PoolConfig = {
+            connectionString: databaseUrl,
+            connectionTimeoutMillis: parseInt(process.env.PG_CONNECTION_TIMEOUT_MS || '5000', 10),
+            idleTimeoutMillis: parseInt(process.env.PG_IDLE_TIMEOUT_MS || '30000', 10),
+            max: parseInt(process.env.PG_MAX_POOL_SIZE || '20', 10),
+            min: parseInt(process.env.PG_MIN_POOL_SIZE || '2', 10),
+          };
+
+          const testPool = new Pool(poolConfig);
+          // Verify connectivity
+          const client = await testPool.connect();
+          client.release();
+          this.pool = testPool;
+          this.isPgLite = false;
+          console.log('[Postgres] Connected to external PostgreSQL pool');
+        } catch (err: any) {
+          throw new Error(`[FATAL DATABASE ERROR] External PostgreSQL connection failed in production: ${err.message}. PGlite fallback is not permitted in production.`);
+        }
+
+        this.initialized = true;
+        return;
+      }
 
       // Check if external PostgreSQL server is explicitly configured and not default local placeholder
       const hasExplicitPgUrl =
@@ -65,6 +96,9 @@ class PostgresDatabase {
   }
 
   private async initPgLite(): Promise<void> {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('[FATAL DATABASE ERROR] Embedded PGlite fallback is not permitted in production. DATABASE_URL must be configured.');
+    }
     const dataDir = path.join(process.cwd(), '.vertex_pg_data');
     if (!fs.existsSync(dataDir)) {
       try {

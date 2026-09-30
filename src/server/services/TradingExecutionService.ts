@@ -26,11 +26,12 @@ export interface PlaceOrderInput {
   clientOrderId?: string;
   symbol: string;
   side: 'BUY' | 'SELL';
-  orderType?: string; // 'MARKET' | 'LIMIT'
+  orderType?: string; // 'MARKET' | 'LIMIT' | 'SL' | 'SL-M'
   product?: string;   // 'INTRADAY' | 'HOLDING'
   lots: number;
   quantity?: number;
   price?: number;
+  triggerPrice?: number;
   stopLoss?: number;
   target?: number;
   timeInForce?: string;
@@ -117,7 +118,9 @@ export class TradingExecutionService {
       : (inst.intraday || Math.round(inst.lastPrice * lotSize * 0.2));
     const requiredMargin = marginPerLot * lots;
     const qty = input.quantity && input.quantity > 0 ? input.quantity : lots * lotSize;
-    const isLimit = (input.orderType || '').toUpperCase() === 'LIMIT';
+    const rawOrderType = (input.orderType || 'MARKET').toUpperCase();
+    const isPendingOrder = rawOrderType === 'LIMIT' || rawOrderType === 'SL' || rawOrderType === 'SL-M';
+    const effectiveOrderType = rawOrderType === 'SL-M' ? 'SL-M' : rawOrderType === 'SL' ? 'SL' : rawOrderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
     const orderId = `ORD-${Math.floor(10000 + Math.random() * 90000)}`;
 
     // Communicate through Execution Gateway
@@ -128,14 +131,14 @@ export class TradingExecutionService {
       clientOrderId: clientOrderId ? clientOrderId.trim() : undefined,
       symbol: inst.symbol,
       side,
-      orderType: isLimit ? 'LIMIT' : 'MARKET',
+      orderType: isPendingOrder ? effectiveOrderType : 'MARKET',
       quantity: qty,
       price: execPrice,
       timeInForce: input.timeInForce || 'DAY',
     });
 
-    if (isLimit) {
-      const limitResult = await pgDb.transaction(async (client: DbClient) => {
+    if (isPendingOrder) {
+      const pendingResult = await pgDb.transaction(async (client: DbClient) => {
         const wallet = await postgresWalletRepository.lockWalletForUpdate(tenantId, userId, client);
         if (wallet.available_balance < requiredMargin) {
           const err = new Error(
@@ -166,10 +169,10 @@ export class TradingExecutionService {
             client_order_id: clientOrderId ? clientOrderId.trim() : null,
             instrument_id: inst.symbol,
             side,
-            order_type: 'LIMIT',
+            order_type: effectiveOrderType,
             quantity: qty,
             price: execPrice,
-            trigger_price: null,
+            trigger_price: input.triggerPrice != null ? input.triggerPrice : null,
             status: 'PENDING',
             broker_order_id: gatewayResult.brokerOrderId,
             normalized_status: gatewayResult.status,
@@ -187,7 +190,7 @@ export class TradingExecutionService {
             tenant_id: tenantId,
             order_id: newOrder.id,
             event_type: 'ORDER_CREATED',
-            event_payload: { orderId: newOrder.id, userId, status: 'PENDING', price: execPrice, quantity: qty },
+            event_payload: { orderId: newOrder.id, userId, status: 'PENDING', price: execPrice, quantity: qty, triggerPrice: input.triggerPrice },
           },
           client
         );
@@ -195,23 +198,23 @@ export class TradingExecutionService {
         return { newOrder, updatedWallet };
       });
 
-      // Synchronize in-memory fallback store for limit orders
+      // Synchronize in-memory fallback store for pending orders
       try {
         const memWallet = getTenantWallet(tenantId);
-        memWallet.availableBalance = limitResult.updatedWallet.available_balance;
-        memWallet.blockedBalance = limitResult.updatedWallet.blocked_balance;
+        memWallet.availableBalance = pendingResult.updatedWallet.available_balance;
+        memWallet.blockedBalance = pendingResult.updatedWallet.blocked_balance;
 
         const memOrders = getTenantOrders(tenantId);
         memOrders.unshift({
-          id: limitResult.newOrder.id,
-          symbol: limitResult.newOrder.instrument_id,
-          type: limitResult.newOrder.side as 'BUY' | 'SELL',
-          orderType: 'LIMIT',
+          id: pendingResult.newOrder.id,
+          symbol: pendingResult.newOrder.instrument_id,
+          type: pendingResult.newOrder.side as 'BUY' | 'SELL',
+          orderType: effectiveOrderType as any,
           product: (input.product as any) || 'INTRADAY',
           lots,
           qty,
           lotSize: inst.lotSize,
-          price: limitResult.newOrder.price,
+          price: pendingResult.newOrder.price,
           status: 'PENDING',
           time: new Date().toTimeString().split(' ')[0],
           date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
@@ -222,14 +225,16 @@ export class TradingExecutionService {
         // Ignore fallback errors
       }
 
-      tradingWebSocketServer.broadcastToTenant(tenantId, 'order.created', limitResult.newOrder, (ws) => ws.userId === userId || ws.role === 'SUPER_ADMIN');
-      tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', limitResult.updatedWallet, (ws) => ws.userId === userId || ws.role === 'SUPER_ADMIN');
+      const isPrivileged = (role: string) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(role);
+      const userFilter = (ws: any) => ws.userId === userId || isPrivileged(ws.role);
+      tradingWebSocketServer.broadcastToTenant(tenantId, 'order.created', pendingResult.newOrder, userFilter);
+      tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', pendingResult.updatedWallet, userFilter);
 
       return {
         success: true,
-        order: limitResult.newOrder,
-        wallet: limitResult.updatedWallet,
-        message: `Limit order for ${lots} lot(s) of ${inst.symbol} placed in PENDING status.`,
+        order: pendingResult.newOrder,
+        wallet: pendingResult.updatedWallet,
+        message: `${effectiveOrderType} order for ${lots} lot(s) of ${inst.symbol} placed in PENDING status.`,
       };
     }
 
@@ -506,11 +511,15 @@ export class TradingExecutionService {
         exchange: (inst as any).exchange || 'NSE',
         side: newOrder.side,
         quantity: Number(newOrder.quantity),
+        qty: Number(newOrder.quantity),
+        price: Number(newOrder.price),
         executionPrice: Number(newOrder.price),
         executionValue: Number(executionValue),
         totalValue: Number(executionValue),
+        turnover: Number(executionValue),
         fees: Number((executionValue * 0.0003).toFixed(2)),
         commission: Number((inst as any).commission || 0),
+        realizedPnl: Number(newTrade.realized_pnl || 0),
         executedAt: newTrade.executed_at,
       };
 
@@ -532,9 +541,12 @@ export class TradingExecutionService {
         positionId: updatedPosition.id,
         symbol: inst.symbol,
         quantity: Number(updatedPosition.quantity),
+        qty: Number(updatedPosition.quantity),
         averagePrice: Number(updatedPosition.average_price),
+        avgPrice: Number(updatedPosition.average_price),
         buyPrice: Number(updatedPosition.average_price),
         currentPrice: Number(execPrice),
+        ltp: Number(execPrice),
         realizedPnl: Number(updatedPosition.realized_pnl),
         unrealizedPnl: Number(updatedPosition.unrealized_pnl || 0),
         marginUsed: Number(updatedPosition.margin_used),
@@ -557,9 +569,12 @@ export class TradingExecutionService {
         userId,
         clientId: userId,
         tradingUserId: userId,
+        balance: Number((updatedWallet.available_balance + (updatedWallet.blocked_balance || 0)).toFixed(2)),
+        available: Number(updatedWallet.available_balance),
         availableBalance: Number(updatedWallet.available_balance),
-        usedMargin: Number(updatedWallet.used_margin),
+        blocked: Number(updatedWallet.blocked_balance || 0),
         blockedBalance: Number(updatedWallet.blocked_balance || 0),
+        usedMargin: Number(updatedWallet.used_margin),
         realizedPnl: Number(updatedWallet.realized_pnl || 0),
         equity: Number((updatedWallet.available_balance + updatedWallet.used_margin).toFixed(2)),
         updatedAt: new Date().toISOString(),
@@ -668,7 +683,8 @@ export class TradingExecutionService {
 
     // Broadcast Real-time WebSocket events strictly within tenant scope and user-isolation via Redis Pub/Sub
     try {
-      const userFilter = (ws: any) => ws.userId === userId || ws.role === 'SUPER_ADMIN';
+      const isPrivileged = (role: string) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(role);
+      const userFilter = (ws: any) => ws.userId === userId || isPrivileged(ws.role);
       const target = { targetUserId: userId };
       tradingWebSocketServer.broadcastToTenant(tenantId, 'order.created', result.newOrder, userFilter, false, target);
       tradingWebSocketServer.broadcastToTenant(tenantId, 'trade.executed', result.newTrade, userFilter, false, target);
@@ -806,9 +822,10 @@ export class TradingExecutionService {
     });
 
     // Broadcast WebSocket events
+    const isPrivileged = (role: string) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(role);
     const target = { targetUserId: userId };
-    tradingWebSocketServer.broadcastToTenant(tenantId, 'position.updated', { ...result.pos, quantity: 0 }, (ws) => ws.userId === userId || ws.role === 'SUPER_ADMIN', false, target);
-    tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', result.updatedWallet, (ws) => ws.userId === userId || ws.role === 'SUPER_ADMIN', false, target);
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'position.updated', { ...result.pos, quantity: 0 }, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', result.updatedWallet, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
 
     // Dispatch Central Admin events
     internalEventDispatcher.dispatchPositionUpdated(result.closedPositionPayload).catch((e) =>
@@ -909,9 +926,10 @@ export class TradingExecutionService {
       return { order: updated!, updatedWallet };
     });
 
-    tradingWebSocketServer.broadcastToTenant(tenantId, 'order.cancelled', result.order, (ws) => ws.userId === userId || ws.role === 'SUPER_ADMIN');
+    const isPrivileged = (role: string) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(role);
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'order.cancelled', result.order, (ws) => ws.userId === userId || isPrivileged(ws.role));
     if (result.updatedWallet) {
-      tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', result.updatedWallet, (ws) => ws.userId === userId || ws.role === 'SUPER_ADMIN');
+      tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', result.updatedWallet, (ws) => ws.userId === userId || isPrivileged(ws.role));
     }
 
     return {

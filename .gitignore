@@ -6,3 +6,5 @@ coverage/
 *.log
 .env*
 !.env.example
+.vertex_pg_data
+.vertex_db_store.json

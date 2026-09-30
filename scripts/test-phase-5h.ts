@@ -123,6 +123,7 @@ async function runPhase5HTests() {
 
   const tokenA = authService.generateToken({
     id: 'user-5h-alpha',
+    userId: 'user-5h-alpha',
     email: 'alpha@broker-sandbox.com',
     role: 'TRADER',
     tenantId: tenantA,
@@ -130,6 +131,7 @@ async function runPhase5HTests() {
 
   const tokenB = authService.generateToken({
     id: 'user-5h-beta',
+    userId: 'user-5h-beta',
     email: 'beta@mock-broker.com',
     role: 'TRADER',
     tenantId: tenantB,
@@ -905,7 +907,8 @@ async function runPhase5HTests() {
       apiAuthRes.status === 200 &&
         apiAuthData.authenticated === true &&
         apiOrdersRes.status === 200 &&
-        Array.isArray(apiOrdersData.orders)
+        Array.isArray(apiOrdersData.orders),
+      { authStatus: apiAuthRes.status, apiAuthData, ordersStatus: apiOrdersRes.status, apiOrdersData }
     );
 
   } catch (err: any) {

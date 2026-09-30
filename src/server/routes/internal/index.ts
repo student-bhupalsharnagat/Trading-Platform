@@ -1217,6 +1217,146 @@ router.get('/risk/summary', async (req: InternalAuthorizedRequest, res: Response
 });
 
 /**
+ * POST /api/internal/v1/events/client-registered
+ * Receiver endpoint for client.registered event from Trading Platform signup.
+ */
+router.post('/events/client-registered', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const { eventId, eventType, payload } = req.body || {};
+
+    if (req.body?.tenantId && req.body.tenantId.trim() !== tenantId.trim()) {
+      res.status(403).json({
+        success: false,
+        error: `Tenant mismatch: Body tenantId '${req.body.tenantId}' does not match authoritative X-Tenant-ID '${tenantId}'.`,
+        code: 'TENANT_MISMATCH',
+      });
+      return;
+    }
+
+    if (!eventId || typeof eventId !== 'string' || !eventId.trim()) {
+      res.status(400).json({
+        success: false,
+        error: 'Field "eventId" is required.',
+        code: 'MISSING_EVENT_ID',
+      });
+      return;
+    }
+
+    if (eventIdempotencyStore.has(eventId)) {
+      res.status(200).json({
+        success: true,
+        processed: false,
+        alreadyProcessed: true,
+        eventId,
+        message: 'Event already processed (idempotent acknowledgment)',
+      });
+      return;
+    }
+
+    eventIdempotencyStore.record(eventId, eventType || 'client.registered', tenantId);
+
+    // Broadcast to tenant WebSocket connections
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'client.registered', {
+      ...payload,
+      tenantId,
+    });
+
+    auditService.logEmergencyEvent({
+      action: 'CENTRAL_ADMIN_EVENT_RECEIVED',
+      source: 'CENTRAL_ADMIN_RECEIVER',
+      tenantId,
+      reason: `Received client.registered event for user ${payload?.userId || payload?.tradingUserId}`,
+      result: { eventId, eventType, payload },
+    });
+
+    res.status(200).json({
+      success: true,
+      processed: true,
+      alreadyProcessed: false,
+      eventId,
+    });
+  } catch (err: any) {
+    const status = err.statusCode || 500;
+    res.status(status).json({
+      success: false,
+      error: err.message || 'Failed to process client.registered event.',
+      code: err.code || 'EVENT_PROCESSING_ERROR',
+    });
+  }
+});
+
+/**
+ * POST /api/internal/v1/events/client-activated
+ * Receiver endpoint for client.activated event from Trading Platform signup.
+ */
+router.post('/events/client-activated', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const { eventId, eventType, payload } = req.body || {};
+
+    if (req.body?.tenantId && req.body.tenantId.trim() !== tenantId.trim()) {
+      res.status(403).json({
+        success: false,
+        error: `Tenant mismatch: Body tenantId '${req.body.tenantId}' does not match authoritative X-Tenant-ID '${tenantId}'.`,
+        code: 'TENANT_MISMATCH',
+      });
+      return;
+    }
+
+    if (!eventId || typeof eventId !== 'string' || !eventId.trim()) {
+      res.status(400).json({
+        success: false,
+        error: 'Field "eventId" is required.',
+        code: 'MISSING_EVENT_ID',
+      });
+      return;
+    }
+
+    if (eventIdempotencyStore.has(eventId)) {
+      res.status(200).json({
+        success: true,
+        processed: false,
+        alreadyProcessed: true,
+        eventId,
+        message: 'Event already processed (idempotent acknowledgment)',
+      });
+      return;
+    }
+
+    eventIdempotencyStore.record(eventId, eventType || 'client.activated', tenantId);
+
+    // Broadcast to tenant WebSocket connections
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'client.activated', {
+      ...payload,
+      tenantId,
+    });
+
+    auditService.logEmergencyEvent({
+      action: 'CENTRAL_ADMIN_EVENT_RECEIVED',
+      source: 'CENTRAL_ADMIN_RECEIVER',
+      tenantId,
+      reason: `Received client.activated event for user ${payload?.userId || payload?.tradingUserId}`,
+      result: { eventId, eventType, payload },
+    });
+
+    res.status(200).json({
+      success: true,
+      processed: true,
+      alreadyProcessed: false,
+      eventId,
+    });
+  } catch (err: any) {
+    const status = err.statusCode || 500;
+    res.status(status).json({
+      success: false,
+      error: err.message || 'Failed to process client.activated event.',
+      code: err.code || 'EVENT_PROCESSING_ERROR',
+    });
+  }
+});
+
+/**
  * POST /api/internal/v1/events/trade-executed
  * Central Admin receiver endpoint for trade.executed events.
  * Idempotent: acknowledges duplicate deliveries safely without duplicate processing.
@@ -1835,6 +1975,80 @@ router.get('/trading/financial-summary', async (req: InternalAuthorizedRequest, 
     res.status(err.statusCode || 500).json({
       success: false,
       error: err.message || 'Failed to retrieve financial summary',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/clients
+ * HMAC-protected, paged, tenant-scoped, read-only client list for admin backfill.
+ */
+router.get('/trading/clients', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const page = parseInt(req.query.page as string, 10) || 1;
+    const limit = parseInt(req.query.limit as string, 10) || 50;
+    const search = req.query.search as string;
+
+    const result = await authoritativeTradingDataService.getClientsPaged(tenantId, { page, limit, search });
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve clients backfill',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/ledger
+ * HMAC-protected, paged, tenant-scoped, read-only immutable ledger for admin backfill.
+ */
+router.get('/trading/ledger', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const page = parseInt(req.query.page as string, 10) || 1;
+    const limit = parseInt(req.query.limit as string, 10) || 50;
+    const userId = req.query.userId as string;
+
+    const result = await authoritativeTradingDataService.getLedgerPaged(tenantId, { page, limit, userId });
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve ledger backfill',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/funds
+ * HMAC-protected, paged, tenant-scoped, read-only deposit & withdrawal history for admin backfill.
+ */
+router.get('/trading/funds', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const page = parseInt(req.query.page as string, 10) || 1;
+    const limit = parseInt(req.query.limit as string, 10) || 50;
+    const userId = req.query.userId as string;
+    const type = req.query.type as 'DEPOSIT' | 'WITHDRAWAL';
+    const status = req.query.status as string;
+
+    const result = await authoritativeTradingDataService.getFundsPaged(tenantId, {
+      page,
+      limit,
+      userId,
+      type,
+      status,
+    });
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve funds backfill',
       code: err.code,
     });
   }

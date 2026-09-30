@@ -886,6 +886,73 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         </div>
       </header>
 
+      {/* Live Market Indices Ticker Bar (Zerodha Kite & Upstox standard) */}
+      <div className="bg-slate-100 dark:bg-[#070D18] border-b border-slate-200 dark:border-[#141F30] px-3 sm:px-6 py-1.5 overflow-x-auto no-scrollbar flex items-center justify-between text-xs">
+        <div className="flex items-center gap-6 shrink-0 font-mono">
+          {/* NIFTY 50 */}
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-slate-800 dark:text-slate-200 font-sans text-[11px]">NIFTY 50</span>
+            <span className="font-bold text-slate-900 dark:text-white">
+              ₹{(instruments.find((i) => i.id === 'nifty_50' || i.symbol.startsWith('NIFTY 50'))?.lastPrice || 24852.15).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            </span>
+            <span className={`text-[11px] font-semibold flex items-center ${
+              (instruments.find((i) => i.id === 'nifty_50' || i.symbol.startsWith('NIFTY 50'))?.change ?? 142.6) >= 0 ? 'text-emerald-500' : 'text-rose-500'
+            }`}>
+              {(instruments.find((i) => i.id === 'nifty_50' || i.symbol.startsWith('NIFTY 50'))?.change ?? 142.6) >= 0 ? '+' : ''}{(instruments.find((i) => i.id === 'nifty_50' || i.symbol.startsWith('NIFTY 50'))?.change ?? 142.6).toFixed(2)} ({(instruments.find((i) => i.id === 'nifty_50' || i.symbol.startsWith('NIFTY 50'))?.changePercent ?? 0.58) >= 0 ? '+' : ''}{(instruments.find((i) => i.id === 'nifty_50' || i.symbol.startsWith('NIFTY 50'))?.changePercent ?? 0.58).toFixed(2)}%)
+            </span>
+          </div>
+
+          <div className="h-3 w-px bg-slate-300 dark:bg-slate-700 hidden sm:block" />
+
+          {/* SENSEX */}
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-slate-800 dark:text-slate-200 font-sans text-[11px]">SENSEX</span>
+            <span className="font-bold text-slate-900 dark:text-white">
+              ₹{(instruments.find((i) => i.id === 'sensex' || i.symbol.startsWith('SENSEX'))?.lastPrice || 81332.72).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            </span>
+            <span className={`text-[11px] font-semibold flex items-center ${
+              (instruments.find((i) => i.id === 'sensex' || i.symbol.startsWith('SENSEX'))?.change ?? 352.52) >= 0 ? 'text-emerald-500' : 'text-rose-500'
+            }`}>
+              {(instruments.find((i) => i.id === 'sensex' || i.symbol.startsWith('SENSEX'))?.change ?? 352.52) >= 0 ? '+' : ''}{(instruments.find((i) => i.id === 'sensex' || i.symbol.startsWith('SENSEX'))?.change ?? 352.52).toFixed(2)} ({(instruments.find((i) => i.id === 'sensex' || i.symbol.startsWith('SENSEX'))?.changePercent ?? 0.44) >= 0 ? '+' : ''}{(instruments.find((i) => i.id === 'sensex' || i.symbol.startsWith('SENSEX'))?.changePercent ?? 0.44).toFixed(2)}%)
+            </span>
+          </div>
+
+          <div className="h-3 w-px bg-slate-300 dark:bg-slate-700 hidden sm:block" />
+
+          {/* NIFTY BANK */}
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-slate-800 dark:text-slate-200 font-sans text-[11px]">NIFTY BANK</span>
+            <span className="font-bold text-slate-900 dark:text-white">
+              ₹{(instruments.find((i) => i.id === 'bank_nifty_fut' || i.symbol.startsWith('BANKNIFTY'))?.lastPrice || 51383.41).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            </span>
+            <span className={`text-[11px] font-semibold flex items-center ${
+              (instruments.find((i) => i.id === 'bank_nifty_fut' || i.symbol.startsWith('BANKNIFTY'))?.change ?? -380.0) >= 0 ? 'text-emerald-500' : 'text-rose-500'
+            }`}>
+              {(instruments.find((i) => i.id === 'bank_nifty_fut' || i.symbol.startsWith('BANKNIFTY'))?.change ?? -380.0) >= 0 ? '+' : ''}{(instruments.find((i) => i.id === 'bank_nifty_fut' || i.symbol.startsWith('BANKNIFTY'))?.change ?? -380.0).toFixed(2)} ({(instruments.find((i) => i.id === 'bank_nifty_fut' || i.symbol.startsWith('BANKNIFTY'))?.changePercent ?? -0.74) >= 0 ? '+' : ''}{(instruments.find((i) => i.id === 'bank_nifty_fut' || i.symbol.startsWith('BANKNIFTY'))?.changePercent ?? -0.74).toFixed(2)}%)
+            </span>
+          </div>
+
+          <div className="h-3 w-px bg-slate-300 dark:bg-slate-700 hidden md:block" />
+
+          {/* INDIA VIX */}
+          <div className="hidden md:flex items-center gap-2">
+            <span className="font-bold text-slate-800 dark:text-slate-200 font-sans text-[11px]">INDIA VIX</span>
+            <span className="font-bold text-amber-500">12.84</span>
+            <span className="text-[11px] font-semibold text-rose-500">-0.32 (-2.43%)</span>
+          </div>
+        </div>
+
+        {/* Funds Glance in Ticker */}
+        <div className="hidden lg:flex items-center gap-4 font-mono text-[11px]">
+          <span className="text-slate-500 dark:text-slate-400">
+            Available Margin: <span className="font-bold text-slate-900 dark:text-white">₹{(portfolio?.wallet?.availableBalance ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+          </span>
+          <span className="text-slate-500 dark:text-slate-400">
+            Used: <span className="font-bold text-slate-700 dark:text-slate-300">₹{(portfolio?.wallet?.usedMargin ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+          </span>
+        </div>
+      </div>
+
       {/* Wallet Balance Drawer */}
       {isWalletDrawerOpen && (
         <div className="bg-[#0E1726] border-b border-[#1E293B] px-4 py-4 animate-fadeIn shadow-xl">
@@ -2717,6 +2784,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         <OrderWindow
           instrument={orderWindowInstrument}
           initialType={orderWindowInitialType}
+          availableBalance={portfolio?.wallet?.availableBalance ?? 0}
           marketClosedOverride={marketClosedOverride}
           tourStep={tourStep}
           onClose={() => setOrderWindowInstrument(null)}

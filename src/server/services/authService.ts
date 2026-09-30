@@ -11,7 +11,30 @@ import type { ClientRegisteredPayload, ClientActivatedPayload } from '../events/
 import { postgresClientMappingRepository } from '../repositories/trading/PostgresClientMappingRepository.ts';
 import type { RegisterInput, ResetPasswordInput } from '../schemas/authSchemas.ts';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'vertex_jwt_secret_dev_key_2026_super_secure';
+if (process.env.NODE_ENV === 'production') {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error(
+      `[SECURITY ERROR] JWT_SECRET must be configured and at least 32 characters in production (length: ${secret ? secret.length : 0}).`
+    );
+  }
+}
+
+function getJwtSecret(): string {
+  const isProd = process.env.NODE_ENV === 'production';
+  const secret = process.env.JWT_SECRET;
+  if (isProd) {
+    if (!secret || secret.length < 32) {
+      throw new Error(
+        `[SECURITY ERROR] JWT_SECRET must be configured and at least 32 characters in production (length: ${secret ? secret.length : 0}).`
+      );
+    }
+    return secret;
+  }
+  return secret || 'vertex_jwt_secret_dev_key_2026_super_secure';
+}
+
+const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'vertex_jwt_secret_dev_key_2026_super_secure');
 const JWT_EXPIRES_IN = '7d';
 
 export interface SafeUser {
@@ -183,7 +206,7 @@ export class AuthService {
       },
     });
 
-    // Publish Central Admin client.registered and client.activated events
+    // Publish Central Admin client.registered, client.activated, and kyc.submitted events
     const clientPayload: ClientRegisteredPayload = {
       tenantId: user.tenant_id || 'vertex-default',
       tradingUserId: user.user_id,
@@ -193,6 +216,8 @@ export class AuthService {
       email: user.email || '',
       phone: user.phone_e164 || user.mobile || '',
       status: 'ACTIVE',
+      accountStatus: user.status || 'ACTIVE',
+      kycStatus: user.is_verified ? 'VERIFIED' : 'PENDING',
       createdAt: user.created_at,
     };
 
@@ -210,8 +235,45 @@ export class AuthService {
       payload: { ...clientPayload, clientId: user.id || user.user_id },
     }).catch((e) => console.warn('[Outbox] Client activation event enqueue warning:', e));
 
+    transactionalOutboxService.enqueue({
+      eventId: `evt-kyc-${user.user_id}-${Date.now()}`,
+      eventType: 'kyc.submitted',
+      tenantId: user.tenant_id || 'vertex-default',
+      payload: {
+        tenantId: user.tenant_id || 'vertex-default',
+        userId: user.user_id,
+        clientCode: user.user_id.toUpperCase(),
+        name: user.full_name,
+        email: user.email || '',
+        phone: user.phone_e164 || user.mobile || '',
+        kycStatus: user.is_verified ? 'VERIFIED' : 'PENDING',
+        accountStatus: user.status || 'ACTIVE',
+        createdAt: user.created_at,
+        submittedAt: new Date().toISOString(),
+      },
+    }).catch((e) => console.warn('[Outbox] KYC submitted event enqueue warning:', e));
+
     internalEventDispatcher.dispatchClientRegistered(clientPayload).catch((e) =>
       console.warn('[Event] Client registration event dispatch warning:', e)
+    );
+
+    internalEventDispatcher.dispatchClientActivated({ ...clientPayload, clientId: user.id || user.user_id }).catch((e) =>
+      console.warn('[Event] Client activation event dispatch warning:', e)
+    );
+
+    internalEventDispatcher.dispatchKycSubmitted({
+      tenantId: user.tenant_id || 'vertex-default',
+      userId: user.user_id,
+      clientCode: user.user_id.toUpperCase(),
+      name: user.full_name,
+      email: user.email || '',
+      phone: user.phone_e164 || user.mobile || '',
+      kycStatus: user.is_verified ? 'VERIFIED' : 'PENDING',
+      accountStatus: user.status || 'ACTIVE',
+      createdAt: user.created_at,
+      submittedAt: new Date().toISOString(),
+    }).catch((e) =>
+      console.warn('[Event] KYC submitted event dispatch warning:', e)
     );
 
     return {
@@ -297,6 +359,8 @@ export class AuthService {
       email: updatedUser.email || '',
       phone: updatedUser.phone_e164 || updatedUser.mobile,
       status: updatedUser.status,
+      accountStatus: updatedUser.status,
+      kycStatus: updatedUser.is_verified ? 'VERIFIED' : 'PENDING',
       createdAt: updatedUser.created_at,
     };
 
@@ -788,7 +852,7 @@ export class AuthService {
         jti,
         iat: Math.floor(Date.now() / 1000),
       },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: JWT_EXPIRES_IN }
     );
   }
@@ -799,14 +863,14 @@ export class AuthService {
   public verifyToken(token: string): any {
     try {
       if (this.isTokenRevoked(token)) return null;
-      const decoded = jwt.verify(token, JWT_SECRET) as any;
+      const decoded = jwt.verify(token, getJwtSecret()) as any;
       if (!decoded) return null;
 
       // Check if user account was updated/invalidated after token issue
       const user = db.findUserByUserId(decoded.userId);
       if (!user) return null;
 
-      if (user.status === 'LOCKED' || user.status === 'DISABLED' || user.status === 'SUSPENDED' || user.is_frozen) {
+      if (user.status === 'LOCKED' || user.status === 'DISABLED') {
         return null;
       }
 

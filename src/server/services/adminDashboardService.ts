@@ -47,8 +47,30 @@ export class AdminDashboardService {
     };
   }
 
-  public getChartData() {
-    return [];
+  public async getChartData(tenantId: string = 'vertex-default') {
+    const pgTrades = await postgresTradeRepository.getTrades(tenantId);
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const now = new Date();
+    const result = [];
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const dayName = dayNames[d.getDay()];
+
+      const dayTrades = pgTrades.filter((t) => (t.executed_at || '').startsWith(dateStr));
+      const volume = dayTrades.reduce((sum, t) => sum + Number(t.execution_value || 0), 0);
+      const commission = dayTrades.reduce((sum, t) => sum + Number((t as any).fees || (t as any).commission || 0), 0);
+
+      result.push({
+        date: dayName,
+        volume,
+        commission,
+      });
+    }
+
+    return result;
   }
 }
 

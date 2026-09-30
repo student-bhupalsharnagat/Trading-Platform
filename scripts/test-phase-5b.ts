@@ -13,6 +13,9 @@ import tenantRoutes from '../src/server/routes/tenantRoutes.ts';
 import authRoutes from '../src/server/routes/authRoutes.ts';
 import tradingRoutes from '../src/server/routes/tradingRoutes.ts';
 import adminRoutes from '../src/server/routes/admin/index.ts';
+import { postgresWalletRepository } from '../src/server/repositories/trading/PostgresWalletRepository.ts';
+
+import { runTradingMigrations } from '../src/server/db/migrationRunner.ts';
 
 const config = getInternalAuthConfig();
 const SECRET = config.internalCommunicationSecret;
@@ -21,6 +24,8 @@ async function runAllTests() {
   console.log('\n==================================================');
   console.log('STARTING PHASE 5B TEST SUITE: 18 TARGET TESTS');
   console.log('==================================================\n');
+
+  await runTradingMigrations();
 
   // Seed super admin
   await hierarchyService.ensureSuperAdmin();
@@ -296,6 +301,8 @@ async function runAllTests() {
     // 14. Existing browser login still works
     {
       const superAdmin = await hierarchyService.ensureSuperAdmin();
+      db.markUserVerified(superAdmin.user_id);
+      db.updateUser(superAdmin.id, { is_verified: true, status: 'active' });
       const testPass = 'Admin@12345';
       const hash = await bcrypt.hash(testPass, 10);
       db.updateUserPassword(superAdmin.user_id, hash);
@@ -319,6 +326,14 @@ async function runAllTests() {
     // 15. Existing trading order API still works
     {
       const superAdmin = await hierarchyService.ensureSuperAdmin();
+      await postgresWalletRepository.upsertWallet({
+        tenant_id: superAdmin.tenant_id || 'vertex-default',
+        user_id: superAdmin.user_id,
+        available_balance: 500000,
+        used_margin: 0,
+        blocked_balance: 0,
+        realized_pnl: 0,
+      });
       const token = authService.generateToken(superAdmin);
       const orderRes = await fetch(`${baseUrl}/api/trading/order`, {
         method: 'POST',

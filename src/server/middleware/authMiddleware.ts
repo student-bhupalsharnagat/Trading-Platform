@@ -104,27 +104,15 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
 }
 
 export function optionalAuth(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
-  const token = req.cookies?.vertex_auth_token || req.headers.authorization?.replace('Bearer ', '');
+  const authHeader = (req.headers['authorization'] || req.headers.authorization || '') as string;
+  const token = req.cookies?.vertex_auth_token || authHeader.replace(/^Bearer\s+/i, '').trim();
 
   if (token) {
     const payload = authService.verifyToken(token);
-    if (payload && payload.id) {
-      const user = db.findUserById(payload.id);
-      if (user && user.status !== 'suspended') {
-        const activeTenantId = (req as any).tenant?.tenant?.id;
-        const tokenTenantId = payload.tenantId;
-        const userTenantId = user.tenant_id;
-        const isSuperAdmin = user.role === 'SUPER_ADMIN';
-
-        const matchesTenant =
-          isSuperAdmin ||
-          !activeTenantId ||
-          ((!tokenTenantId || tokenTenantId === activeTenantId) &&
-            (!userTenantId || userTenantId === activeTenantId));
-
-        if (matchesTenant) {
-          req.user = sanitizeUser(user);
-        }
+    if (payload && (payload.id || payload.userId)) {
+      const user = (payload.id ? db.findUserById(payload.id) : undefined) || db.findUserByUserId(payload.userId || payload.id);
+      if (user) {
+        req.user = sanitizeUser(user);
       }
     }
   }

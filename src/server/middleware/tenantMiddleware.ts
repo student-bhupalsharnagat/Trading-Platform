@@ -36,7 +36,10 @@ export async function resolveTenantMiddleware(
 
     const devTenantOverride =
       !isProduction && !isInternalRoute
-        ? req.cookies?.vtx_dev_tenant || (req.headers['x-dev-tenant-id'] as string) || undefined
+        ? req.cookies?.vtx_dev_tenant ||
+          (req.headers['x-dev-tenant-id'] as string) ||
+          (req.headers['x-tenant-id'] as string) ||
+          undefined
         : undefined;
 
     const resolutionData = await centralApiService.resolveTenant(cleanHost, devTenantOverride);
@@ -218,8 +221,9 @@ export function requireActiveTrader(
   next: NextFunction
 ): void {
   // If user is authenticated, inspect latest database record
-  if (req.user?.id) {
-    const userRecord = db.findUserById(req.user.id);
+  const userIdOrId = req.user?.id || req.user?.userId;
+  if (userIdOrId) {
+    const userRecord = db.findUserById(userIdOrId) || db.findUserByUserId(userIdOrId);
     if (!userRecord) {
       res.status(401).json({
         success: false,
@@ -229,7 +233,7 @@ export function requireActiveTrader(
     }
 
     const freezeCheck = db.isUserOrHierarchyFrozen(userRecord);
-    if (freezeCheck.frozen) {
+    if (freezeCheck.frozen || userRecord.is_frozen || userRecord.status === 'suspended' || userRecord.status === 'SUSPENDED') {
       res.status(403).json({
         success: false,
         code: 'USER_FROZEN',

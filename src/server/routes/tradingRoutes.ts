@@ -20,8 +20,11 @@ import {
   setTenantNotifications,
   closeSinglePosition,
 } from '../trading/tradingStore.ts';
+import { db } from '../db/database.ts';
 import { tenantConfigCache } from '../cache/TenantConfigCache.ts';
 import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
+import { SupportTicketPayload } from '../events/types.ts';
+import { transactionalOutboxService } from '../services/TransactionalOutboxService.ts';
 import { tradingExecutionService } from '../services/TradingExecutionService.ts';
 import { postgresOrderRepository } from '../repositories/trading/PostgresOrderRepository.ts';
 import { postgresPositionRepository } from '../repositories/trading/PostgresPositionRepository.ts';
@@ -274,17 +277,36 @@ router.post(
 
       const orderUserId = userObj?.userId || userObj?.user_id || userObj?.id || 'demo-trader';
 
+      if (userObj) {
+        const latestUser = db.findUserById(userObj.id || userObj.userId) || db.findUserByUserId(userObj.userId || userObj.id);
+        if (latestUser) {
+          const check = db.isUserOrHierarchyFrozen(latestUser);
+          if (check.frozen || Boolean(latestUser.is_frozen)) {
+            res.status(403).json({
+              success: false,
+              code: 'USER_FROZEN',
+              message: check.reason || 'Your account is currently frozen.',
+            });
+            return;
+          }
+        }
+      }
+
       const {
         symbol,
         type, // BUY or SELL
         side, // alternative for type
-        orderType, // MARKET or LIMIT
+        orderType, // MARKET, LIMIT, SL, SL-M
         product, // INTRADAY or HOLDING
         lots,
+        quantity,
         limitPrice,
+        triggerPrice,
+        trigger_price,
         price,
         stopLoss,
         target,
+        timeInForce,
         clientOrderId,
         client_order_id,
       } = req.body;
@@ -337,9 +359,12 @@ router.post(
         orderType: orderType || 'MARKET',
         product: product || 'INTRADAY',
         lots: orderLots,
+        quantity: quantity ? Number(quantity) : undefined,
         price: execPrice,
+        triggerPrice: (triggerPrice != null || trigger_price != null) ? Number(triggerPrice ?? trigger_price) : undefined,
         stopLoss: stopLoss ? Number(stopLoss) : undefined,
         target: target ? Number(target) : undefined,
+        timeInForce: timeInForce || 'DAY',
       });
 
       if (result.isDuplicate) {
@@ -872,6 +897,32 @@ router.post('/tickets', optionalAuth, (req: TenantRequest, res: Response) => {
     read: false,
   });
 
+  const ticketUserId = req.user?.userId || req.user?.id || 'CLIENT';
+  const ticketClientCode = (req.user?.userId || req.user?.id || 'CLIENT').toUpperCase();
+  const ticketPayload: SupportTicketPayload = {
+    tenantId,
+    ticketId: newTicket.id,
+    userId: ticketUserId,
+    clientCode: ticketClientCode,
+    subject: newTicket.subject,
+    category: newTicket.category,
+    status: newTicket.status,
+    priority: newTicket.priority,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  transactionalOutboxService.enqueue({
+    eventId: `evt-ticket-${newTicket.id}-${Date.now()}`,
+    eventType: 'support.ticket_created',
+    tenantId,
+    payload: ticketPayload,
+  }).catch((e) => console.warn('[Outbox] Support ticket created enqueue warning:', e));
+
+  internalEventDispatcher.dispatchSupportTicketCreated(ticketPayload).catch((e) =>
+    console.warn('[Event] Support ticket created dispatch warning:', e)
+  );
+
   res.json({ success: true, message: 'Support ticket raised successfully.', ticket: newTicket });
 });
 
@@ -912,6 +963,32 @@ router.post('/tickets/:id/reply', optionalAuth, (req: TenantRequest, res: Respon
     ticket.status = 'IN_PROGRESS';
   }
 
+  const replyUserId = req.user?.userId || req.user?.id || 'CLIENT';
+  const replyClientCode = (req.user?.userId || req.user?.id || 'CLIENT').toUpperCase();
+  const updatePayload: SupportTicketPayload = {
+    tenantId,
+    ticketId: ticket.id,
+    userId: replyUserId,
+    clientCode: replyClientCode,
+    subject: ticket.subject,
+    category: ticket.category,
+    status: ticket.status,
+    priority: ticket.priority,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  transactionalOutboxService.enqueue({
+    eventId: `evt-ticket-upd-${ticket.id}-${Date.now()}`,
+    eventType: 'support.ticket_updated',
+    tenantId,
+    payload: updatePayload,
+  }).catch((e) => console.warn('[Outbox] Support ticket updated enqueue warning:', e));
+
+  internalEventDispatcher.dispatchSupportTicketUpdated(updatePayload).catch((e) =>
+    console.warn('[Event] Support ticket updated dispatch warning:', e)
+  );
+
   res.json({ success: true, message: 'Reply sent.', ticket });
 });
 
@@ -931,6 +1008,32 @@ router.post('/tickets/:id/status', optionalAuth, (req: TenantRequest, res: Respo
     const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     const timeStr = now.toTimeString().split(' ')[0].slice(0, 5);
     ticket.updatedAt = `${dateStr}, ${timeStr}`;
+
+    const statusUserId = req.user?.userId || req.user?.id || 'CLIENT';
+    const statusClientCode = (req.user?.userId || req.user?.id || 'CLIENT').toUpperCase();
+    const updatePayload: SupportTicketPayload = {
+      tenantId,
+      ticketId: ticket.id,
+      userId: statusUserId,
+      clientCode: statusClientCode,
+      subject: ticket.subject,
+      category: ticket.category,
+      status: ticket.status,
+      priority: ticket.priority,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    transactionalOutboxService.enqueue({
+      eventId: `evt-ticket-upd-${ticket.id}-${Date.now()}`,
+      eventType: 'support.ticket_updated',
+      tenantId,
+      payload: updatePayload,
+    }).catch((e) => console.warn('[Outbox] Support ticket updated enqueue warning:', e));
+
+    internalEventDispatcher.dispatchSupportTicketUpdated(updatePayload).catch((e) =>
+      console.warn('[Event] Support ticket updated dispatch warning:', e)
+    );
   }
 
   res.json({ success: true, message: `Ticket status updated to ${ticket.status}.`, ticket });

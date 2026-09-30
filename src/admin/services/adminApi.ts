@@ -100,6 +100,21 @@ export const adminApi = {
   getClientById: async (id: string): Promise<HierarchyNode> => {
     return request<HierarchyNode>(`/clients/${id}`);
   },
+  getClientAccount: async (id: string): Promise<any> => {
+    return request<any>(`/clients/${id}/account`);
+  },
+  getClientOrders: async (id: string): Promise<any> => {
+    return request<any>(`/clients/${id}/orders`);
+  },
+  getClientTrades: async (id: string): Promise<any> => {
+    return request<any>(`/clients/${id}/trades`);
+  },
+  getClientPositions: async (id: string): Promise<any> => {
+    return request<any>(`/clients/${id}/positions`);
+  },
+  getClientFunds: async (id: string): Promise<any> => {
+    return request<any>(`/clients/${id}/funds`);
+  },
   updateClientStatus: async (id: string, status: string): Promise<HierarchyNode> => {
     return request<HierarchyNode>(`/clients/${id}/status`, {
       method: 'PATCH',
@@ -110,5 +125,69 @@ export const adminApi = {
   // Audit Logs
   getAuditLogs: async (): Promise<AuditLogEntry[]> => {
     return request<AuditLogEntry[]>('/audit-logs');
+  },
+
+  // Orders & Trades
+  getOrders: async (params?: { userId?: string; status?: string }): Promise<any> => {
+    const query = new URLSearchParams(params as any).toString();
+    return request<any>(`/orders${query ? `?${query}` : ''}`);
+  },
+  getTrades: async (params?: { userId?: string; orderId?: string }): Promise<any> => {
+    const query = new URLSearchParams(params as any).toString();
+    return request<any>(`/orders/trades${query ? `?${query}` : ''}`);
+  },
+
+  // Risk & Limits (RMS)
+  getRiskSummary: async (): Promise<any> => {
+    return request<any>('/risk/summary');
+  },
+  getRiskPositions: async (): Promise<any[]> => {
+    return request<any[]>('/risk/positions');
+  },
+  squareOffPosition: async (userId: string, positionId: string): Promise<any> => {
+    return request<any>('/risk/square-off', {
+      method: 'POST',
+      body: JSON.stringify({ userId, positionId }),
+    });
+  },
+  freezeClient: async (userId: string, freeze: boolean, reason?: string): Promise<any> => {
+    return request<any>('/risk/freeze-client', {
+      method: 'POST',
+      body: JSON.stringify({ userId, freeze, reason }),
+    });
+  },
+
+  // Funds
+  getFunds: async (params?: { status?: string; type?: string }): Promise<any[]> => {
+    const query = new URLSearchParams(params as any).toString();
+    return request<any[]>(`/funds${query ? `?${query}` : ''}`);
+  },
+  processFundTransaction: async (transactionId: string, action: 'APPROVE' | 'REJECT', reason?: string): Promise<any> => {
+    return request<any>('/funds/process', {
+      method: 'POST',
+      body: JSON.stringify({ transactionId, action, reason }),
+    });
+  },
+  requestFundTransaction: async (payload: { userId: string; type: 'DEPOSIT' | 'WITHDRAWAL'; amount: number; paymentMethod?: string; referenceId?: string }): Promise<any> => {
+    return request<any>('/funds/request', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  // Ledger
+  getLedger: async (userId?: string): Promise<any[]> => {
+    return request<any[]>(`/ledger${userId ? `?userId=${userId}` : ''}`);
+  },
+
+  // KYC
+  getKycPipeline: async (): Promise<any[]> => {
+    return request<any[]>('/kyc/pipeline');
+  },
+  verifyKyc: async (userId: string, action: 'APPROVE' | 'REJECT', reason?: string): Promise<any> => {
+    return request<any>('/kyc/verify', {
+      method: 'POST',
+      body: JSON.stringify({ userId, action, reason }),
+    });
   },
 };

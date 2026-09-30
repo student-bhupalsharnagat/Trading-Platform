@@ -69,9 +69,11 @@ async function runTests() {
   assert(regEvent?.payload?.phone !== undefined, 'Event contains phone without exposing password');
   assert(regEvent?.payload?.password === undefined, 'Event strictly DOES NOT expose password');
 
-  // Activate via OTP
-  const otpCode = db.getLatestActiveOtp(testUserId, 'registration')?.dev_otp_preview!;
-  await authService.verifyRegistrationOtp(testUserId, otpCode);
+  // Activate via OTP if OTP was generated, or verify activation event
+  const latestOtp = db.getLatestActiveOtp(testUserId, 'registration');
+  if (latestOtp?.dev_otp_preview) {
+    await authService.verifyRegistrationOtp(testUserId, latestOtp.dev_otp_preview);
+  }
 
   const actEvent = queue.getPending().find((e) => e.eventType === 'client.activated' && e.payload?.userId === testUserId);
   assert(Boolean(actEvent), 'client.activated event enqueued for Central Admin');

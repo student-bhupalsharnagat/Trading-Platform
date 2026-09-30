@@ -23,7 +23,15 @@ import { BrokersList } from './admin/pages/BrokersList.tsx';
 import { BrokerDetails } from './admin/pages/BrokerDetails.tsx';
 import { SubBrokersList } from './admin/pages/SubBrokersList.tsx';
 import { ClientsList } from './admin/pages/ClientsList.tsx';
+import { ClientDetails } from './admin/pages/ClientDetails.tsx';
 import { AuditLogsPage } from './admin/pages/AuditLogsPage.tsx';
+import { AdminOrdersPage } from './admin/pages/AdminOrdersPage.tsx';
+import { AdminFundsPage } from './admin/pages/AdminFundsPage.tsx';
+import { AdminLedgerPage } from './admin/pages/AdminLedgerPage.tsx';
+import { AdminRiskPage } from './admin/pages/AdminRiskPage.tsx';
+import { AdminKycPage } from './admin/pages/AdminKycPage.tsx';
+import { AdminCommissionPage } from './admin/pages/AdminCommissionPage.tsx';
+import { AdminReportsPage } from './admin/pages/AdminReportsPage.tsx';
 
 function AppContent() {
   const { user, loading, toasts, dismissToast } = useAuth();
@@ -201,6 +209,118 @@ function AppContent() {
           </AdminProtectedRoute>
         );
 
+      case '/admin/orders':
+        return (
+          <AdminProtectedRoute
+            allowedRoles={['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER']}
+            onBackToTrading={() => navigate('/dashboard')}
+          >
+            <AdminLayout
+              currentPath={currentRoute}
+              onNavigate={navigate}
+              title="Orders & Executed Trades Desk"
+            >
+              <AdminOrdersPage onNavigate={navigate} />
+            </AdminLayout>
+          </AdminProtectedRoute>
+        );
+
+      case '/admin/funds':
+        return (
+          <AdminProtectedRoute
+            allowedRoles={['SUPER_ADMIN', 'MASTER', 'BROKER']}
+            onBackToTrading={() => navigate('/dashboard')}
+          >
+            <AdminLayout
+              currentPath={currentRoute}
+              onNavigate={navigate}
+              title="Client Funds & Approvals"
+            >
+              <AdminFundsPage onNavigate={navigate} />
+            </AdminLayout>
+          </AdminProtectedRoute>
+        );
+
+      case '/admin/ledger':
+        return (
+          <AdminProtectedRoute
+            allowedRoles={['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER']}
+            onBackToTrading={() => navigate('/dashboard')}
+          >
+            <AdminLayout
+              currentPath={currentRoute}
+              onNavigate={navigate}
+              title="Financial Clearing Ledger"
+            >
+              <AdminLedgerPage onNavigate={navigate} />
+            </AdminLayout>
+          </AdminProtectedRoute>
+        );
+
+      case '/admin/risk':
+        return (
+          <AdminProtectedRoute
+            allowedRoles={['SUPER_ADMIN', 'MASTER', 'BROKER']}
+            onBackToTrading={() => navigate('/dashboard')}
+          >
+            <AdminLayout
+              currentPath={currentRoute}
+              onNavigate={navigate}
+              title="Real-Time RMS & Risk Management"
+            >
+              <AdminRiskPage onNavigate={navigate} />
+            </AdminLayout>
+          </AdminProtectedRoute>
+        );
+
+      case '/admin/kyc':
+        return (
+          <AdminProtectedRoute
+            allowedRoles={['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER']}
+            onBackToTrading={() => navigate('/dashboard')}
+          >
+            <AdminLayout
+              currentPath={currentRoute}
+              onNavigate={navigate}
+              title="Client KYC Pipeline"
+            >
+              <AdminKycPage onNavigate={navigate} />
+            </AdminLayout>
+          </AdminProtectedRoute>
+        );
+
+      case '/admin/commission':
+        return (
+          <AdminProtectedRoute
+            allowedRoles={['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER']}
+            onBackToTrading={() => navigate('/dashboard')}
+          >
+            <AdminLayout
+              currentPath={currentRoute}
+              onNavigate={navigate}
+              title="Commission & Brokerage Matrix"
+            >
+              <AdminCommissionPage onNavigate={navigate} />
+            </AdminLayout>
+          </AdminProtectedRoute>
+        );
+
+      case '/admin/reports':
+        return (
+          <AdminProtectedRoute
+            allowedRoles={['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER']}
+            onBackToTrading={() => navigate('/dashboard')}
+          >
+            <AdminLayout
+              currentPath={currentRoute}
+              onNavigate={navigate}
+              title="Reports & P&L Statements"
+            >
+              <AdminReportsPage onNavigate={navigate} />
+            </AdminLayout>
+          </AdminProtectedRoute>
+        );
+
       case '/admin/audit-logs':
         return (
           <AdminProtectedRoute
@@ -256,6 +376,28 @@ function AppContent() {
                 <BrokerDetails
                   id={brokerId}
                   onBack={() => navigate('/admin/brokers')}
+                  onNavigate={navigate}
+                />
+              </AdminLayout>
+            </AdminProtectedRoute>
+          );
+        }
+
+        if (currentRoute.startsWith('/admin/clients/')) {
+          const clientId = currentRoute.replace('/admin/clients/', '');
+          return (
+            <AdminProtectedRoute
+              allowedRoles={['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER']}
+              onBackToTrading={() => navigate('/dashboard')}
+            >
+              <AdminLayout
+                currentPath="/admin/clients"
+                onNavigate={navigate}
+                title="Client Account & Trading Details"
+              >
+                <ClientDetails
+                  id={clientId}
+                  onBack={() => navigate('/admin/clients')}
                   onNavigate={navigate}
                 />
               </AdminLayout>

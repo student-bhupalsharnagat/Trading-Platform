@@ -146,7 +146,9 @@ class DatabaseService {
 
   // --- Users Operations ---
   public findUserById(id: string): UserRecord | undefined {
-    return this.state.users.find((u) => u.id === id);
+    if (!id) return undefined;
+    const normalized = id.trim().toLowerCase();
+    return this.state.users.find((u) => u.id === id || (u.user_id && u.user_id.toLowerCase() === normalized));
   }
 
   public findUserByUserId(userId: string): UserRecord | undefined {
@@ -288,6 +290,8 @@ class DatabaseService {
     const user = this.findUserById(userId) || this.findUserByUserId(userId);
     if (!user) return null;
     user.is_frozen = isFrozen;
+    (user as any).isFrozen = isFrozen;
+    user.status = isFrozen ? 'suspended' : 'active';
     user.updated_at = new Date().toISOString();
     this.save();
     return user;
@@ -295,7 +299,7 @@ class DatabaseService {
 
   public isUserOrHierarchyFrozen(user: UserRecord): { frozen: boolean; reason?: string } {
     // 1. Direct individual user freeze / suspension
-    if (user.status === 'suspended' || user.status === 'SUSPENDED' || user.is_frozen === true) {
+    if (user.status === 'suspended' || user.status === 'SUSPENDED' || Boolean(user.is_frozen) || Boolean((user as any).isFrozen)) {
       return {
         frozen: true,
         reason: 'Your trading account is currently frozen. Please contact customer support.',
@@ -337,7 +341,9 @@ class DatabaseService {
   }
 
   public updateUser(id: string, updates: Partial<UserRecord>): UserRecord | undefined {
-    const userIndex = this.state.users.findIndex((u) => u.id === id);
+    if (!id) return undefined;
+    const normId = id.trim().toLowerCase();
+    const userIndex = this.state.users.findIndex((u) => u.id === id || (u.user_id && u.user_id.toLowerCase() === normId));
     if (userIndex === -1) return undefined;
 
     this.state.users[userIndex] = {

@@ -13,12 +13,14 @@ import {
   Eye,
   ArrowUpRight,
   ArrowRight,
+  RefreshCw,
 } from 'lucide-react';
 import { adminApi } from '../services/adminApi';
 import { AdminDashboardKPIs, ChartDataPoint, HierarchyNode } from '../types/adminTypes';
 import { StatCard } from '../components/StatCard';
 import { HierarchyBadge } from '../components/HierarchyBadge';
 import { useAuth } from '../../context/AuthContext';
+import { useAdminRealtime } from '../context/AdminRealtimeContext';
 
 interface AdminDashboardProps {
   onNavigate: (path: string) => void;
@@ -26,6 +28,7 @@ interface AdminDashboardProps {
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) => {
   const { user } = useAuth();
+  const { isConnected, subscribe } = useAdminRealtime();
   const [kpis, setKpis] = useState<AdminDashboardKPIs | null>(null);
   const [charts, setCharts] = useState<ChartDataPoint[]>([]);
   const [recentClients, setRecentClients] = useState<HierarchyNode[]>([]);
@@ -53,6 +56,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     fetchDashboardData();
   }, []);
 
+  // Real-time synchronization
+  useEffect(() => {
+    const unsubOrder = subscribe('order.created', () => fetchDashboardData());
+    const unsubTrade = subscribe('trade.executed', () => fetchDashboardData());
+    const unsubWallet = subscribe('wallet.updated', () => fetchDashboardData());
+    const unsubPos = subscribe('position.updated', () => fetchDashboardData());
+    const unsubClient = subscribe('client.created', () => fetchDashboardData());
+    const unsubFund = subscribe('fund.requested', () => fetchDashboardData());
+    const unsubFundProc = subscribe('fund.processed', () => fetchDashboardData());
+
+    return () => {
+      unsubOrder();
+      unsubTrade();
+      unsubWallet();
+      unsubPos();
+      unsubClient();
+      unsubFund();
+      unsubFundProc();
+    };
+  }, [subscribe]);
+
   const formatCurrency = (val?: number) => {
     if (val === undefined || val === null) return '₹0';
     return new Intl.NumberFormat('en-IN', {
@@ -71,6 +95,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">
               COMMERCIAL OVERVIEW
             </span>
+            {isConnected && (
+              <span className="text-[10px] flex items-center gap-1 text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-800/40">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Live Stream Active
+              </span>
+            )}
             <span className="text-xs text-slate-400">Hierarchy Node: {user?.hierarchyPath || 'root'}</span>
           </div>
           <h2 className="text-xl font-bold text-slate-100">
@@ -83,6 +113,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
         {/* Quick Actions */}
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={fetchDashboardData}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+            title="Refresh Real-time KPIs"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
+
           {user?.role === 'SUPER_ADMIN' && (
             <button
               onClick={() => onNavigate('/admin/masters')}
@@ -193,24 +233,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
           </div>
 
           <div className="h-56 flex items-end justify-between gap-2 pt-4 px-2">
-            {charts.map((point, idx) => {
-              const maxVol = 4000000;
-              const heightPct = Math.round((point.volume / maxVol) * 100);
-              return (
-                <div key={idx} className="flex-1 flex flex-col items-center gap-2 group">
-                  <div className="text-[10px] text-slate-400 font-mono opacity-0 group-hover:opacity-100 transition-opacity">
-                    ₹{(point.volume / 100000).toFixed(1)}L
+            {charts.length === 0 ? (
+              <div className="w-full h-full flex items-center justify-center text-xs text-slate-500">
+                Awaiting trading activity for volume generation...
+              </div>
+            ) : (
+              charts.map((point, idx) => {
+                const maxVol = Math.max(1000, ...charts.map((p) => p.volume));
+                const heightPct = point.volume > 0 ? Math.max(8, Math.min(100, Math.round((point.volume / maxVol) * 100))) : 4;
+                return (
+                  <div key={idx} className="flex-1 flex flex-col items-center gap-2 group">
+                    <div className="text-[10px] text-slate-400 font-mono opacity-0 group-hover:opacity-100 transition-opacity">
+                      ₹{point.volume >= 100000 ? `${(point.volume / 100000).toFixed(1)}L` : point.volume.toLocaleString('en-IN')}
+                    </div>
+                    <div className="w-full max-w-[36px] bg-slate-800 rounded-t-sm flex flex-col justify-end overflow-hidden h-40">
+                      <div
+                        style={{ height: `${heightPct}%` }}
+                        className="w-full bg-gradient-to-t from-blue-700 to-cyan-500 rounded-t-sm transition-all duration-500"
+                      />
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-medium">{point.date}</span>
                   </div>
-                  <div className="w-full max-w-[36px] bg-slate-800 rounded-t-sm flex flex-col justify-end overflow-hidden h-40">
-                    <div
-                      style={{ height: `${heightPct}%` }}
-                      className="w-full bg-gradient-to-t from-blue-700 to-cyan-500 rounded-t-sm transition-all duration-500"
-                    />
-                  </div>
-                  <span className="text-[10px] text-slate-400 font-medium">{point.date}</span>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -228,31 +274,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             </p>
 
             <div className="space-y-3">
-              <div className="p-3 rounded-lg bg-[#0b1120] border border-slate-800 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-slate-200">Rajesh Sharma</p>
-                  <p className="text-[10px] text-slate-400">PAN: ABCPS1234F • AADHAAR</p>
+              {recentClients.filter((c) => !c.is_verified || c.status !== 'active').length === 0 ? (
+                <div className="p-4 rounded-lg bg-[#0b1120] border border-slate-800 text-center text-xs text-slate-400">
+                  All registered downstream clients have been verified.
                 </div>
-                <button
-                  onClick={() => onNavigate('/admin/kyc')}
-                  className="px-2.5 py-1 text-xs rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 font-medium"
-                >
-                  Review
-                </button>
-              </div>
-
-              <div className="p-3 rounded-lg bg-[#0b1120] border border-slate-800 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-slate-200">Meera Patel</p>
-                  <p className="text-[10px] text-slate-400">PAN: BKLPM8921K • BANK SLIP</p>
-                </div>
-                <button
-                  onClick={() => onNavigate('/admin/kyc')}
-                  className="px-2.5 py-1 text-xs rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 font-medium"
-                >
-                  Review
-                </button>
-              </div>
+              ) : (
+                recentClients
+                  .filter((c) => !c.is_verified || c.status !== 'active')
+                  .slice(0, 3)
+                  .map((client) => (
+                    <div key={client.id} className="p-3 rounded-lg bg-[#0b1120] border border-slate-800 flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-semibold text-slate-200">{client.fullName || 'Trader Account'}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">ID: {client.userId} • {client.role}</p>
+                      </div>
+                      <button
+                        onClick={() => onNavigate('/admin/kyc')}
+                        className="px-2.5 py-1 text-xs rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 font-medium cursor-pointer"
+                      >
+                        Review
+                      </button>
+                    </div>
+                  ))
+              )}
             </div>
           </div>
 
