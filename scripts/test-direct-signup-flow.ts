@@ -115,6 +115,7 @@ async function runDirectSignupTests() {
   console.log('\n================================================================');
   console.log('   ALL DIRECT SIGNUP FLOW TESTS PASSED!');
   console.log('================================================================');
+  process.exit(0);
 }
 
 runDirectSignupTests().catch((err) => {

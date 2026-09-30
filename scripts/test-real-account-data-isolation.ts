@@ -94,6 +94,7 @@ async function runRealAccountIsolationTests() {
   console.log('\n================================================================');
   console.log('   ALL REAL ACCOUNT DATA & ISOLATION TESTS PASSED!');
   console.log('================================================================');
+  process.exit(0);
 }
 
 runRealAccountIsolationTests().catch((err) => {

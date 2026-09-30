@@ -65,18 +65,8 @@ async function run() {
   );
   assert(regResult.user.userId === userId, 'Client registered in database');
 
-  // Obtain OTP
-  const otpRecord = db.getLatestActiveOtp(userId, 'registration');
-  const otp = otpRecord?.dev_otp_preview;
-  assert(Boolean(otp), 'Active registration OTP obtained');
-
-  // Clear dispatcher queue to focus on activation
-  internalEventDispatcher.getQueue().clear();
-
-  // Verify OTP -> triggers activation
-  const verifyResult = await authService.verifyRegistrationOtp(userId, otp!);
-  assert(verifyResult.success === true, 'OTP verification succeeded');
-  assert(verifyResult.user.status === 'ACTIVE', 'User status transitioned to ACTIVE');
+  assert(regResult.user.status === 'ACTIVE', 'Direct signup activates the account');
+  assert(Boolean(regResult.token), 'Direct signup issues a session token');
 
   // Verify client.activated event was published to the queue
   const pendingEvents = internalEventDispatcher.getQueue().getPending();
@@ -103,7 +93,7 @@ async function run() {
   // Verify zero exposure of sensitive secrets
   const serialized = JSON.stringify(activationEvent);
   assert(!serialized.includes(password), 'Event DOES NOT expose password');
-  assert(!serialized.includes(otp!), 'Event DOES NOT expose OTP code');
+  assert(!serialized.toLowerCase().includes('otp'), 'Event DOES NOT expose OTP code');
   assert(!serialized.includes('password_hash'), 'Event DOES NOT expose password_hash');
   assert(!serialized.includes('dev_otp_preview'), 'Event DOES NOT expose OTP preview');
   assert(p.token === undefined, 'Event payload DOES NOT expose JWT token');
@@ -256,6 +246,7 @@ async function run() {
   console.log('\n================================================================');
   console.log('ALL FOCUSED TESTS PASSED SUCCESSFULLY!');
   console.log('================================================================');
+  process.exit(0);
 }
 
 run().catch((err) => {

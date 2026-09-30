@@ -60,7 +60,8 @@ async function runTests() {
     confirmPassword: 'SecurePassword@2026',
   }, tenantId);
 
-  assert(signupResult.user.userId === testUserId, 'CLIENT registered in PENDING status');
+  assert(signupResult.user.userId === testUserId, 'CLIENT registered and activated');
+  assert(signupResult.user.status === 'ACTIVE', 'Direct signup account is ACTIVE');
 
   const pendingEvents = queue.getPending();
   const regEvent = pendingEvents.find((e) => e.eventType === 'client.registered' && e.payload?.userId === testUserId);
@@ -68,10 +69,6 @@ async function runTests() {
   assert(regEvent?.payload?.tradingUserId === testUserId, 'Event contains canonical tradingUserId');
   assert(regEvent?.payload?.phone !== undefined, 'Event contains phone without exposing password');
   assert(regEvent?.payload?.password === undefined, 'Event strictly DOES NOT expose password');
-
-  // Activate via OTP
-  const otpCode = db.getLatestActiveOtp(testUserId, 'registration')?.dev_otp_preview!;
-  await authService.verifyRegistrationOtp(testUserId, otpCode);
 
   const actEvent = queue.getPending().find((e) => e.eventType === 'client.activated' && e.payload?.userId === testUserId);
   assert(Boolean(actEvent), 'client.activated event enqueued for Central Admin');

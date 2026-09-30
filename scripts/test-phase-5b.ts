@@ -13,6 +13,8 @@ import tenantRoutes from '../src/server/routes/tenantRoutes.ts';
 import authRoutes from '../src/server/routes/authRoutes.ts';
 import tradingRoutes from '../src/server/routes/tradingRoutes.ts';
 import adminRoutes from '../src/server/routes/admin/index.ts';
+import { postgresWalletRepository } from '../src/server/repositories/trading/PostgresWalletRepository.ts';
+import { runMigrations } from '../src/server/db/migrationRunner.ts';
 
 const config = getInternalAuthConfig();
 const SECRET = config.internalCommunicationSecret;
@@ -24,6 +26,7 @@ async function runAllTests() {
 
   // Seed super admin
   await hierarchyService.ensureSuperAdmin();
+  await runMigrations();
 
   // Create Express App replicating server.ts configuration
   const app = express();
@@ -319,6 +322,14 @@ async function runAllTests() {
     // 15. Existing trading order API still works
     {
       const superAdmin = await hierarchyService.ensureSuperAdmin();
+      await postgresWalletRepository.upsertWallet({
+        tenant_id: superAdmin.tenant_id || 'vertex-default',
+        user_id: superAdmin.user_id,
+        available_balance: 5000000,
+        used_margin: 0,
+        blocked_balance: 0,
+        realized_pnl: 0,
+      });
       const token = authService.generateToken(superAdmin);
       const orderRes = await fetch(`${baseUrl}/api/trading/order`, {
         method: 'POST',

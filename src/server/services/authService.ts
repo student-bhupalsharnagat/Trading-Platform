@@ -9,6 +9,7 @@ import { transactionalOutboxService } from './TransactionalOutboxService.ts';
 import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
 import type { ClientRegisteredPayload, ClientActivatedPayload } from '../events/types.ts';
 import { postgresClientMappingRepository } from '../repositories/trading/PostgresClientMappingRepository.ts';
+import { postgresWalletRepository } from '../repositories/trading/PostgresWalletRepository.ts';
 import type { RegisterInput, ResetPasswordInput } from '../schemas/authSchemas.ts';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'vertex_jwt_secret_dev_key_2026_super_secure';
@@ -196,22 +197,32 @@ export class AuthService {
       createdAt: user.created_at,
     };
 
-    transactionalOutboxService.enqueue({
-      eventId: `evt-reg-${user.user_id}-${Date.now()}`,
+    const registeredEventId = `evt-reg-${user.user_id}-${Date.now()}`;
+    const activatedEventId = `evt-act-${user.user_id}-${Date.now()}`;
+    const activationPayload: ClientActivatedPayload = {
+      ...clientPayload,
+      clientId: user.id || user.user_id,
+    };
+
+    await transactionalOutboxService.enqueue({
+      eventId: registeredEventId,
       eventType: 'client.registered',
       tenantId: user.tenant_id || 'vertex-default',
       payload: clientPayload,
     }).catch((e) => console.warn('[Outbox] Client registration event enqueue warning:', e));
 
-    transactionalOutboxService.enqueue({
-      eventId: `evt-act-${user.user_id}-${Date.now()}`,
+    await transactionalOutboxService.enqueue({
+      eventId: activatedEventId,
       eventType: 'client.activated',
       tenantId: user.tenant_id || 'vertex-default',
-      payload: { ...clientPayload, clientId: user.id || user.user_id },
+      payload: activationPayload,
     }).catch((e) => console.warn('[Outbox] Client activation event enqueue warning:', e));
 
-    internalEventDispatcher.dispatchClientRegistered(clientPayload).catch((e) =>
+    await internalEventDispatcher.dispatchClientRegistered(clientPayload).catch((e) =>
       console.warn('[Event] Client registration event dispatch warning:', e)
+    );
+    await internalEventDispatcher.dispatchClientActivated(activationPayload, activatedEventId).catch((e) =>
+      console.warn('[Event] Client activation event dispatch warning:', e)
     );
 
     return {
@@ -476,11 +487,12 @@ export class AuthService {
     }
 
     // 3. Check Account Statuses
+    // Direct signup marks accounts ACTIVE and verified. Seeded staff accounts
+    // are verified without a separate email_verified_at timestamp.
     if (
       user.status === 'PENDING_EMAIL_VERIFICATION' ||
       user.status === 'PENDING_PHONE_VERIFICATION' ||
-      !user.is_verified ||
-      (!user.email_verified_at && user.user_id !== 'vtx123')
+      !user.is_verified
     ) {
       auditService.log({
         actorId: user.user_id,
@@ -568,6 +580,21 @@ export class AuthService {
     message: string;
   }> {
     const demoUser = db.getOrCreateDemoUser();
+    const demoTenantId = demoUser.tenant_id || 'vertex-default';
+    const demoWallet = await postgresWalletRepository.getOrCreateWallet(
+      demoTenantId,
+      demoUser.user_id,
+      1000000
+    );
+    if (
+      demoWallet.available_balance <= 0 &&
+      demoWallet.used_margin === 0 &&
+      demoWallet.blocked_balance === 0
+    ) {
+      await postgresWalletRepository.updateWallet(demoTenantId, demoUser.user_id, {
+        available_balance: 1000000,
+      });
+    }
     db.recordLoginSuccess(demoUser.user_id, ipAddress);
     const token = this.generateToken(demoUser);
 
@@ -633,7 +660,11 @@ export class AuthService {
 
     const maskedPhone = user.phone_e164
       ? PhoneUtils.normalize(user.phone_e164)?.masked || user.phone_e164
-      : `${user.country_code} ••••• •${user.mobile.slice(-4)}`;
+      : user.mobile
+        ? `${user.country_code || ''} ••••• ${user.mobile.slice(-4)}`
+        : user.email
+          ? user.email.replace(/(.{2}).+(@.+)/, '$1•••$2')
+          : 'your registered contact';
 
     auditService.log({
       actorId: user.user_id,
@@ -802,12 +833,16 @@ export class AuthService {
       const decoded = jwt.verify(token, JWT_SECRET) as any;
       if (!decoded) return null;
 
-      // Check if user account was updated/invalidated after token issue
-      const user = db.findUserByUserId(decoded.userId);
-      if (!user) return null;
+      // Tokens minted without a user id are signature-checked only.
+      // Frozen accounts stay authenticated so trading middleware can return USER_FROZEN.
+      const lookupId = decoded.userId || decoded.user_id;
+      if (lookupId) {
+        const user = db.findUserByUserId(String(lookupId));
+        if (!user) return null;
 
-      if (user.status === 'LOCKED' || user.status === 'DISABLED' || user.status === 'SUSPENDED' || user.is_frozen) {
-        return null;
+        if (user.status === 'LOCKED' || user.status === 'DISABLED' || user.status === 'SUSPENDED') {
+          return null;
+        }
       }
 
       return decoded;

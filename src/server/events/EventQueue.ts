@@ -126,7 +126,24 @@ export class MemoryEventQueue implements IEventQueue {
   ): { deadLetter: boolean; event: QueuedEvent } {
     const item = this.queue.get(eventId);
     if (!item) {
-      throw new Error(`Event '${eventId}' not found in queue.`);
+      // Delivery can race with completion or queue reset. Missing events are already settled.
+      return {
+        deadLetter: false,
+        event: {
+          eventId,
+          tenantId: '',
+          eventType: 'unknown',
+          payload: null,
+          version: 1,
+          timestamp: new Date().toISOString(),
+          attempts: 0,
+          maxAttempts: 0,
+          nextAttemptAt: Date.now(),
+          createdAt: new Date().toISOString(),
+          lastError: error,
+          status: 'COMPLETED',
+        },
+      };
     }
 
     item.attempts += 1;

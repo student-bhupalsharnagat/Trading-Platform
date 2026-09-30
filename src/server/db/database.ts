@@ -156,7 +156,7 @@ class DatabaseService {
 
   public findUserByMobile(mobile: string): UserRecord | undefined {
     const cleanMobile = mobile.replace(/\D/g, '');
-    return this.state.users.find((u) => u.mobile.replace(/\D/g, '') === cleanMobile);
+    return this.state.users.find((u) => u.mobile && u.mobile.replace(/\D/g, '') === cleanMobile);
   }
 
   public findUserByPhoneE164(phoneE164: string): UserRecord | undefined {
@@ -545,22 +545,26 @@ class DatabaseService {
 
   // --- Demo Account Helper ---
   public getOrCreateDemoUser(): UserRecord {
-    const demoUserId = 'vtx_demo';
+    const demoUserId = 'vtx123';
     let demoUser = this.findUserByUserId(demoUserId);
     if (!demoUser) {
+      const now = new Date().toISOString();
       demoUser = {
         id: 'demo-user-uuid-0000-000000000001',
+        tenant_id: 'vertex-default',
         full_name: 'Demo Trader',
-        user_id: 'vtx123',
+        user_id: demoUserId,
         country_code: '+91',
         mobile: '9876543210',
         phone_e164: '+919876543210',
-        phone_verified_at: new Date().toISOString(),
+        phone_verified_at: now,
+        email_verified_at: now,
         password_hash: '$argon2id$v=19$m=19456,t=2,p=1$DEMO_ACCOUNT_NOT_PASSWORD_ACCESSIBLE_DIRECTLY',
+        role: 'CLIENT',
         is_verified: true,
         status: 'ACTIVE',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        created_at: now,
+        updated_at: now,
         demo_balance: 1000000.0,
       };
       this.state.users.push(demoUser);

@@ -10,6 +10,7 @@ const isProd = process.env.NODE_ENV === 'production';
 export function securityHeadersMiddleware(req: Request, res: Response, next: NextFunction): void {
   // Baseline Security Headers
   res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'geolocation=(), camera=(), microphone=()');
