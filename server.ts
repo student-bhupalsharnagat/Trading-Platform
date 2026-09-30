@@ -30,7 +30,18 @@ import { pgDb } from './src/server/db/postgres.ts';
 
 dotenv.config();
 
-const PORT = 3000;
+function resolvePort(): number {
+  const raw = process.env.PORT;
+  if (raw == null || raw.trim() === '') return 3000;
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    console.error(`[VERTEX] Invalid PORT "${raw}". Use an integer from 1 to 65535.`);
+    process.exit(1);
+  }
+  return port;
+}
+
+const PORT = resolvePort();
 const isProd = process.env.NODE_ENV === 'production';
 
 async function startServer() {
@@ -124,10 +135,17 @@ async function startServer() {
   // Central Error Handler for API routes
   app.use(errorHandler);
 
-  // Frontend Serving (Vite middleware in dev, static files in prod)
+  const httpServer = http.createServer(app);
+
+  // Frontend Serving (Vite middleware in dev, static files in prod).
+  // Attach Vite HMR to this HTTP server so it does not open a second port (24678).
   if (!isProd) {
+    const hmrDisabled = process.env.DISABLE_HMR === 'true';
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: hmrDisabled ? false : { server: httpServer },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -142,10 +160,19 @@ async function startServer() {
   // Global fallback error handler
   app.use(errorHandler);
 
-  const httpServer = http.createServer(app);
-
   // Initialize Real-time WebSocket Server on /ws
   tradingWebSocketServer.initialize(httpServer);
+
+  httpServer.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(
+        `[VERTEX] Port ${PORT} is already in use. Stop the other process or set PORT to a free port.`
+      );
+    } else {
+      console.error('[VERTEX] HTTP server failed to start:', err);
+    }
+    process.exit(1);
+  });
 
   httpServer.listen(PORT, '0.0.0.0', async () => {
     try {
