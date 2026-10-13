@@ -18,8 +18,6 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
   const [formData, setFormData] = useState({
     fullName: '',
     userId: '',
-    countryCode: '+91',
-    mobile: '',
     password: '',
     confirmPassword: '',
     referralCode: '',
@@ -49,15 +47,7 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
       errs.userId = 'User ID can only contain letters, numbers, and underscores.';
     }
 
-    // 3. Mobile Number
-    const cleanMobile = formData.mobile.replace(/\D/g, '');
-    if (!cleanMobile) {
-      errs.mobile = 'Mobile number is required.';
-    } else if (cleanMobile.length !== 10 || !/^[6-9]\d{9}$/.test(cleanMobile)) {
-      errs.mobile = 'Please enter a valid 10-digit Indian mobile number.';
-    }
-
-    // 4. Password
+    // 3. Password
     if (!formData.password) {
       errs.password = 'Password is required.';
     } else if (formData.password.length < 8) {
@@ -72,7 +62,7 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
       errs.password = 'Password must contain at least one special character.';
     }
 
-    // 5. Confirm Password
+    // 4. Confirm Password
     if (!formData.confirmPassword) {
       errs.confirmPassword = 'Please confirm your password.';
     } else if (formData.password !== formData.confirmPassword) {
@@ -91,13 +81,8 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
     setErrors({});
 
     try {
-      const res = await register(formData);
-      // Navigate to OTP Verification page with user state
-      onNavigate('/verify-otp', {
-        userId: res.userId || formData.userId.toLowerCase().trim(),
-        mobile: formData.mobile,
-        countryCode: formData.countryCode,
-      });
+      await register(formData);
+      onNavigate('/dashboard');
     } catch (err: any) {
       console.error('Registration failed:', err);
       if (err.errors) {
@@ -213,27 +198,7 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
           autoComplete="username"
         />
 
-        {/* 3. Mobile Number */}
-        <AuthInput
-          id="register-mobile"
-          label="Mobile No."
-          placeholder="e.g. 9876543210"
-          helperText="We'll send an OTP to verify this number"
-          isMobileField
-          countryCode={formData.countryCode}
-          value={formData.mobile}
-          onChange={(e) => {
-            const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
-            setFormData({ ...formData, mobile: digits });
-            if (errors.mobile) setErrors({ ...errors, mobile: '' });
-          }}
-          error={errors.mobile}
-          disabled={loading || demoLoading}
-          autoComplete="tel"
-          maxLength={10}
-        />
-
-        {/* 4. Password */}
+        {/* 3. Password */}
         <PasswordInput
           id="register-password"
           label="Password"

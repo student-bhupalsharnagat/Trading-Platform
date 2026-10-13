@@ -5,6 +5,8 @@ import { postgresPositionRepository } from '../repositories/trading/PostgresPosi
 import { postgresWalletRepository } from '../repositories/trading/PostgresWalletRepository.ts';
 import { postgresOrderEventRepository } from '../repositories/trading/PostgresOrderEventRepository.ts';
 import { postgresMarginRepository } from '../repositories/trading/PostgresMarginRepository.ts';
+import { postgresClientMappingRepository } from '../repositories/trading/PostgresClientMappingRepository.ts';
+import { db } from '../db/database.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
 import { transactionalOutboxService } from './TransactionalOutboxService.ts';
 import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
@@ -24,10 +26,12 @@ export interface PlaceOrderInput {
   clientOrderId?: string;
   symbol: string;
   side: 'BUY' | 'SELL';
-  orderType?: string; // 'MARKET' | 'LIMIT'
+  orderType?: string; // 'MARKET' | 'LIMIT' | 'SL' | 'SL-M'
   product?: string;   // 'INTRADAY' | 'HOLDING'
   lots: number;
+  quantity?: number;
   price?: number;
+  triggerPrice?: number;
   stopLoss?: number;
   target?: number;
   timeInForce?: string;
@@ -108,9 +112,15 @@ export class TradingExecutionService {
     }
 
     const execPrice = input.price && input.price > 0 ? input.price : inst.lastPrice;
-    const requiredMargin = (inst.intraday || 30000) * lots;
-    const qty = lots * inst.lotSize;
-    const isLimit = (input.orderType || '').toUpperCase() === 'LIMIT';
+    const lotSize = inst.lotSize || 1;
+    const marginPerLot = (input.product || '').toUpperCase() === 'HOLDING'
+      ? (inst.holding || (inst.lastPrice * lotSize))
+      : (inst.intraday || Math.round(inst.lastPrice * lotSize * 0.2));
+    const requiredMargin = marginPerLot * lots;
+    const qty = input.quantity && input.quantity > 0 ? input.quantity : lots * lotSize;
+    const rawOrderType = (input.orderType || 'MARKET').toUpperCase();
+    const isPendingOrder = rawOrderType === 'LIMIT' || rawOrderType === 'SL' || rawOrderType === 'SL-M';
+    const effectiveOrderType = rawOrderType === 'SL-M' ? 'SL-M' : rawOrderType === 'SL' ? 'SL' : rawOrderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
     const orderId = `ORD-${Math.floor(10000 + Math.random() * 90000)}`;
 
     // Communicate through Execution Gateway
@@ -121,14 +131,14 @@ export class TradingExecutionService {
       clientOrderId: clientOrderId ? clientOrderId.trim() : undefined,
       symbol: inst.symbol,
       side,
-      orderType: isLimit ? 'LIMIT' : 'MARKET',
+      orderType: isPendingOrder ? effectiveOrderType : 'MARKET',
       quantity: qty,
       price: execPrice,
       timeInForce: input.timeInForce || 'DAY',
     });
 
-    if (isLimit) {
-      const limitResult = await pgDb.transaction(async (client: DbClient) => {
+    if (isPendingOrder) {
+      const pendingResult = await pgDb.transaction(async (client: DbClient) => {
         const wallet = await postgresWalletRepository.lockWalletForUpdate(tenantId, userId, client);
         if (wallet.available_balance < requiredMargin) {
           const err = new Error(
@@ -159,10 +169,10 @@ export class TradingExecutionService {
             client_order_id: clientOrderId ? clientOrderId.trim() : null,
             instrument_id: inst.symbol,
             side,
-            order_type: 'LIMIT',
+            order_type: effectiveOrderType,
             quantity: qty,
             price: execPrice,
-            trigger_price: null,
+            trigger_price: input.triggerPrice != null ? input.triggerPrice : null,
             status: 'PENDING',
             broker_order_id: gatewayResult.brokerOrderId,
             normalized_status: gatewayResult.status,
@@ -180,7 +190,7 @@ export class TradingExecutionService {
             tenant_id: tenantId,
             order_id: newOrder.id,
             event_type: 'ORDER_CREATED',
-            event_payload: { orderId: newOrder.id, userId, status: 'PENDING', price: execPrice, quantity: qty },
+            event_payload: { orderId: newOrder.id, userId, status: 'PENDING', price: execPrice, quantity: qty, triggerPrice: input.triggerPrice },
           },
           client
         );
@@ -188,23 +198,23 @@ export class TradingExecutionService {
         return { newOrder, updatedWallet };
       });
 
-      // Synchronize in-memory fallback store for limit orders
+      // Synchronize in-memory fallback store for pending orders
       try {
         const memWallet = getTenantWallet(tenantId);
-        memWallet.availableBalance = limitResult.updatedWallet.available_balance;
-        memWallet.blockedBalance = limitResult.updatedWallet.blocked_balance;
+        memWallet.availableBalance = pendingResult.updatedWallet.available_balance;
+        memWallet.blockedBalance = pendingResult.updatedWallet.blocked_balance;
 
         const memOrders = getTenantOrders(tenantId);
         memOrders.unshift({
-          id: limitResult.newOrder.id,
-          symbol: limitResult.newOrder.instrument_id,
-          type: limitResult.newOrder.side as 'BUY' | 'SELL',
-          orderType: 'LIMIT',
+          id: pendingResult.newOrder.id,
+          symbol: pendingResult.newOrder.instrument_id,
+          type: pendingResult.newOrder.side as 'BUY' | 'SELL',
+          orderType: effectiveOrderType as any,
           product: (input.product as any) || 'INTRADAY',
           lots,
           qty,
           lotSize: inst.lotSize,
-          price: limitResult.newOrder.price,
+          price: pendingResult.newOrder.price,
           status: 'PENDING',
           time: new Date().toTimeString().split(' ')[0],
           date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
@@ -215,14 +225,16 @@ export class TradingExecutionService {
         // Ignore fallback errors
       }
 
-      tradingWebSocketServer.broadcastToTenant(tenantId, 'order.created', limitResult.newOrder, (ws) => ws.userId === userId || ws.role === 'SUPER_ADMIN');
-      tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', limitResult.updatedWallet, (ws) => ws.userId === userId || ws.role === 'SUPER_ADMIN');
+      const isPrivileged = (role: string) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(role);
+      const userFilter = (ws: any) => ws.userId === userId || isPrivileged(ws.role);
+      tradingWebSocketServer.broadcastToTenant(tenantId, 'order.created', pendingResult.newOrder, userFilter);
+      tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', pendingResult.updatedWallet, userFilter);
 
       return {
         success: true,
-        order: limitResult.newOrder,
-        wallet: limitResult.updatedWallet,
-        message: `Limit order for ${lots} lot(s) of ${inst.symbol} placed in PENDING status.`,
+        order: pendingResult.newOrder,
+        wallet: pendingResult.updatedWallet,
+        message: `${effectiveOrderType} order for ${lots} lot(s) of ${inst.symbol} placed in PENDING status.`,
       };
     }
 
@@ -481,21 +493,99 @@ export class TradingExecutionService {
       );
 
       // 8. Transactional Outbox: Persist outbound event atomically in the same ACID transaction
+      const clientMapping = await postgresClientMappingRepository.findByTradingUserId(tenantId, userId, client);
+      const userRecord = db.findUserByUserId(userId);
+      const clientCode = clientMapping?.external_client_code || userRecord?.user_id.toUpperCase() || userId.toUpperCase();
+      const clientName = userRecord?.full_name || userId;
+
+      const tradePayload = {
+        tenantId,
+        userId,
+        clientId: userId,
+        tradingUserId: userId,
+        clientCode,
+        clientName,
+        orderId: newOrder.id,
+        tradeId: newTrade.id,
+        symbol: inst.symbol,
+        exchange: (inst as any).exchange || 'NSE',
+        side: newOrder.side,
+        quantity: Number(newOrder.quantity),
+        qty: Number(newOrder.quantity),
+        price: Number(newOrder.price),
+        executionPrice: Number(newOrder.price),
+        executionValue: Number(executionValue),
+        totalValue: Number(executionValue),
+        turnover: Number(executionValue),
+        fees: Number((executionValue * 0.0003).toFixed(2)),
+        commission: Number((inst as any).commission || 0),
+        realizedPnl: Number(newTrade.realized_pnl || 0),
+        executedAt: newTrade.executed_at,
+      };
+
       await transactionalOutboxService.enqueue(
         {
           eventId: `evt-trade-${newTrade.id}`,
           tenantId,
           eventType: 'trade.executed',
-          payload: {
-            orderId: newOrder.id,
-            tradeId: newTrade.id,
-            userId,
-            symbol: inst.symbol,
-            side: newOrder.side,
-            quantity: newOrder.quantity,
-            executionPrice: newOrder.price,
-            executedAt: newTrade.executed_at,
-          },
+          payload: tradePayload,
+        },
+        client
+      );
+
+      const positionPayload = {
+        tenantId,
+        userId,
+        clientId: userId,
+        tradingUserId: userId,
+        positionId: updatedPosition.id,
+        symbol: inst.symbol,
+        quantity: Number(updatedPosition.quantity),
+        qty: Number(updatedPosition.quantity),
+        averagePrice: Number(updatedPosition.average_price),
+        avgPrice: Number(updatedPosition.average_price),
+        buyPrice: Number(updatedPosition.average_price),
+        currentPrice: Number(execPrice),
+        ltp: Number(execPrice),
+        realizedPnl: Number(updatedPosition.realized_pnl),
+        unrealizedPnl: Number(updatedPosition.unrealized_pnl || 0),
+        marginUsed: Number(updatedPosition.margin_used),
+        status: updatedPosition.quantity === 0 ? ('CLOSED' as const) : ('OPEN' as const),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await transactionalOutboxService.enqueue(
+        {
+          eventId: `evt-pos-${updatedPosition.id}-${Date.now()}`,
+          tenantId,
+          eventType: 'position.updated',
+          payload: positionPayload,
+        },
+        client
+      );
+
+      const walletPayload = {
+        tenantId,
+        userId,
+        clientId: userId,
+        tradingUserId: userId,
+        balance: Number((updatedWallet.available_balance + (updatedWallet.blocked_balance || 0)).toFixed(2)),
+        available: Number(updatedWallet.available_balance),
+        availableBalance: Number(updatedWallet.available_balance),
+        blocked: Number(updatedWallet.blocked_balance || 0),
+        blockedBalance: Number(updatedWallet.blocked_balance || 0),
+        usedMargin: Number(updatedWallet.used_margin),
+        realizedPnl: Number(updatedWallet.realized_pnl || 0),
+        equity: Number((updatedWallet.available_balance + updatedWallet.used_margin).toFixed(2)),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await transactionalOutboxService.enqueue(
+        {
+          eventId: `evt-wallet-${userId}-${Date.now()}`,
+          tenantId,
+          eventType: 'wallet.updated',
+          payload: walletPayload,
         },
         client
       );
@@ -505,6 +595,9 @@ export class TradingExecutionService {
         newTrade,
         updatedPosition,
         updatedWallet,
+        tradePayload,
+        positionPayload,
+        walletPayload,
       };
     });
 
@@ -546,15 +639,17 @@ export class TradingExecutionService {
             memPositions.splice(existingPosIdx, 1);
           }
         } else {
-          const posType: 'BUY' | 'SELL' = result.updatedPosition.quantity > 0 ? 'BUY' : 'SELL';
+          const posType: 'BUY' | 'SELL' = result.updatedPosition.quantity >= 0 ? 'BUY' : 'SELL';
           const posQty = Math.abs(result.updatedPosition.quantity);
-          const posLots = Math.max(1, Math.round(posQty / inst.lotSize));
+          const lotSize = inst.lotSize || 1;
+          const posLots = Math.max(1, Math.round(posQty / lotSize));
+          const avgPrice = Number(result.updatedPosition.average_price);
           const ltp = inst.lastPrice;
           const pnl = posType === 'BUY'
-            ? (ltp - result.updatedPosition.average_price) * posQty
-            : (result.updatedPosition.average_price - ltp) * posQty;
-          const pnlPercent = (result.updatedPosition.average_price * posQty) > 0
-            ? Number(((pnl / (result.updatedPosition.average_price * posQty)) * 100).toFixed(2))
+            ? (ltp - avgPrice) * posQty
+            : (avgPrice - ltp) * posQty;
+          const pnlPercent = (avgPrice * posQty) > 0
+            ? Number(((pnl / (avgPrice * posQty)) * 100).toFixed(2))
             : 0;
 
           const updatedPosItem = {
@@ -565,8 +660,8 @@ export class TradingExecutionService {
             product: (input.product as any) || 'INTRADAY',
             qty: posQty,
             lots: posLots,
-            lotSize: inst.lotSize,
-            avgPrice: result.updatedPosition.average_price,
+            lotSize,
+            avgPrice,
             ltp,
             pnl: Number(pnl.toFixed(2)),
             pnlPercent,
@@ -588,7 +683,8 @@ export class TradingExecutionService {
 
     // Broadcast Real-time WebSocket events strictly within tenant scope and user-isolation via Redis Pub/Sub
     try {
-      const userFilter = (ws: any) => ws.userId === userId || ws.role === 'SUPER_ADMIN';
+      const isPrivileged = (role: string) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(role);
+      const userFilter = (ws: any) => ws.userId === userId || isPrivileged(ws.role);
       const target = { targetUserId: userId };
       tradingWebSocketServer.broadcastToTenant(tenantId, 'order.created', result.newOrder, userFilter, false, target);
       tradingWebSocketServer.broadcastToTenant(tenantId, 'trade.executed', result.newTrade, userFilter, false, target);
@@ -598,16 +694,18 @@ export class TradingExecutionService {
       console.error('[WebSocket] Broadcast error:', wsErr);
     }
 
-    // Dispatch Phase 5D trade.executed event to Central Admin asynchronously (non-blocking)
-    internalEventDispatcher.dispatchTradeExecuted({
-      tenantId,
-      orderId: result.newOrder.id,
-      userId,
-      symbol: result.newOrder.instrument_id,
-      side: result.newOrder.side as 'BUY' | 'SELL',
-      quantity: result.newOrder.quantity,
-      executionPrice: result.newOrder.price,
-    }).catch((e) => console.error('[Event] trade.executed dispatch error:', e));
+    // Dispatch events to Central Admin asynchronously (non-blocking)
+    internalEventDispatcher.dispatchTradeExecuted(result.tradePayload).catch((e) =>
+      console.error('[Event] trade.executed dispatch error:', e)
+    );
+
+    internalEventDispatcher.dispatchPositionUpdated(result.positionPayload).catch((e) =>
+      console.error('[Event] position.updated dispatch error:', e)
+    );
+
+    internalEventDispatcher.dispatchWalletUpdated(result.walletPayload).catch((e) =>
+      console.error('[Event] wallet.updated dispatch error:', e)
+    );
 
     return {
       success: true,
@@ -664,16 +762,79 @@ export class TradingExecutionService {
       // Delete position
       await postgresPositionRepository.deletePosition(tenantId, pos.id, client);
 
+      const closedPositionPayload = {
+        tenantId,
+        userId,
+        clientId: userId,
+        tradingUserId: userId,
+        positionId: pos.id,
+        symbol: pos.instrument_id,
+        quantity: 0,
+        averagePrice: Number(pos.average_price),
+        buyPrice: Number(pos.average_price),
+        currentPrice: Number(inst?.lastPrice || pos.average_price),
+        realizedPnl: Number(newRealized),
+        unrealizedPnl: 0,
+        marginUsed: 0,
+        status: 'CLOSED' as const,
+        updatedAt: new Date().toISOString(),
+      };
+
+      await transactionalOutboxService.enqueue(
+        {
+          eventId: `evt-pos-close-${pos.id}-${Date.now()}`,
+          tenantId,
+          eventType: 'position.updated',
+          payload: closedPositionPayload,
+        },
+        client
+      );
+
+      const walletPayload = {
+        tenantId,
+        userId,
+        clientId: userId,
+        tradingUserId: userId,
+        availableBalance: Number(updatedWallet.available_balance),
+        usedMargin: Number(updatedWallet.used_margin),
+        blockedBalance: Number(updatedWallet.blocked_balance || 0),
+        realizedPnl: Number(updatedWallet.realized_pnl || 0),
+        equity: Number((updatedWallet.available_balance + updatedWallet.used_margin).toFixed(2)),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await transactionalOutboxService.enqueue(
+        {
+          eventId: `evt-wallet-close-${userId}-${Date.now()}`,
+          tenantId,
+          eventType: 'wallet.updated',
+          payload: walletPayload,
+        },
+        client
+      );
+
       return {
         pos,
         updatedWallet,
+        closedPositionPayload,
+        walletPayload,
       };
     });
 
     // Broadcast WebSocket events
+    const isPrivileged = (role: string) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(role);
     const target = { targetUserId: userId };
-    tradingWebSocketServer.broadcastToTenant(tenantId, 'position.updated', { ...result.pos, quantity: 0 }, (ws) => ws.userId === userId || ws.role === 'SUPER_ADMIN', false, target);
-    tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', result.updatedWallet, (ws) => ws.userId === userId || ws.role === 'SUPER_ADMIN', false, target);
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'position.updated', { ...result.pos, quantity: 0 }, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', result.updatedWallet, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
+
+    // Dispatch Central Admin events
+    internalEventDispatcher.dispatchPositionUpdated(result.closedPositionPayload).catch((e) =>
+      console.error('[Event] position.updated dispatch error on close:', e)
+    );
+
+    internalEventDispatcher.dispatchWalletUpdated(result.walletPayload).catch((e) =>
+      console.error('[Event] wallet.updated dispatch error on close:', e)
+    );
 
     return {
       success: true,
@@ -765,9 +926,10 @@ export class TradingExecutionService {
       return { order: updated!, updatedWallet };
     });
 
-    tradingWebSocketServer.broadcastToTenant(tenantId, 'order.cancelled', result.order, (ws) => ws.userId === userId || ws.role === 'SUPER_ADMIN');
+    const isPrivileged = (role: string) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(role);
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'order.cancelled', result.order, (ws) => ws.userId === userId || isPrivileged(ws.role));
     if (result.updatedWallet) {
-      tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', result.updatedWallet, (ws) => ws.userId === userId || ws.role === 'SUPER_ADMIN');
+      tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', result.updatedWallet, (ws) => ws.userId === userId || isPrivileged(ws.role));
     }
 
     return {

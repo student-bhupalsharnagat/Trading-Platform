@@ -19,14 +19,22 @@ export async function runTradingMigrations(): Promise<void> {
     const filePath = path.join(migrationsDir, file);
     const sql = fs.readFileSync(filePath, 'utf8');
 
-    await pgDb.transaction(async (client) => {
-      const statements = sql
-        .split(/;\s*$/m)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
+    // Remove SQL single-line comments before splitting by semicolon
+    const cleanedSql = sql
+      .split('\n')
+      .map((line) => {
+        const commentIdx = line.indexOf('--');
+        return commentIdx >= 0 ? line.substring(0, commentIdx) : line;
+      })
+      .join('\n');
 
+    const statements = cleanedSql
+      .split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+
+    await pgDb.transaction(async (client) => {
       for (const stmt of statements) {
-        if (stmt.startsWith('--') && !stmt.includes('\n')) continue;
         await client.query(stmt);
       }
     });

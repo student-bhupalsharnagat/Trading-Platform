@@ -84,10 +84,14 @@ export class ProductionValidator {
       }
     }
 
-    // 3. Database URL validation (if external postgres specified)
+    // 3. Database URL validation (In production require DATABASE_URL; no PGlite fallback)
     const databaseUrl = env.DATABASE_URL;
-    if (isProd && databaseUrl && databaseUrl.includes('localhost')) {
-      warnings.push('DATABASE_URL points to localhost in production mode.');
+    if (isProd) {
+      if (!databaseUrl) {
+        errors.push('DATABASE_URL is required in production. Embedded PGlite fallback is not permitted in production.');
+      } else if (databaseUrl.includes('localhost') || databaseUrl.includes('127.0.0.1')) {
+        warnings.push('DATABASE_URL points to localhost in production mode.');
+      }
     }
 
     // 4. Redis URL validation
@@ -102,10 +106,16 @@ export class ProductionValidator {
       warnings.push('BROKER_SANDBOX_API_SECRET uses an insecure placeholder.');
     }
 
-    // 6. S2S Base URLs check
+    // 6. S2S Base URLs check (CentralAdminEventClient base URL = CENTRAL_ADMIN_BASE_URL only)
     const centralAdminBaseUrl = env.CENTRAL_ADMIN_BASE_URL;
-    if (isProd && !centralAdminBaseUrl) {
-      warnings.push('CENTRAL_ADMIN_BASE_URL is unset in production. Defaulting to internal service discovery.');
+    if (isProd) {
+      if (!centralAdminBaseUrl) {
+        errors.push('CENTRAL_ADMIN_BASE_URL is required in production.');
+      } else if (centralAdminBaseUrl.includes('localhost') || centralAdminBaseUrl.includes('127.0.0.1')) {
+        errors.push('CENTRAL_ADMIN_BASE_URL cannot point to localhost in production.');
+      } else if (env.TRADING_PLATFORM_BASE_URL && centralAdminBaseUrl === env.TRADING_PLATFORM_BASE_URL) {
+        errors.push('CENTRAL_ADMIN_BASE_URL cannot match TRADING_PLATFORM_BASE_URL in production.');
+      }
     }
     const tradingPlatformBaseUrl = env.TRADING_PLATFORM_BASE_URL;
     if (isProd && !tradingPlatformBaseUrl) {

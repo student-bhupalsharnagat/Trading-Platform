@@ -52,7 +52,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
   const [processing, setProcessing] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Local simulated ledger history
+  // Local ledger transaction history
   const [history, setHistory] = useState<
     Array<{
       id: string;
@@ -63,44 +63,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
       time: string;
       refId: string;
     }>
-  >([
-    {
-      id: 'TX-901',
-      type: 'DEPOSIT',
-      amount: 50000,
-      method: 'UPI Instant (GPay)',
-      status: 'SUCCESS',
-      time: 'Today, 10:45 AM',
-      refId: 'UPI/2026/892183',
-    },
-    {
-      id: 'TX-902',
-      type: 'MARGIN_CREDIT',
-      amount: 14200,
-      method: 'Position Exit Realized P&L',
-      status: 'SUCCESS',
-      time: 'Today, 02:15 PM',
-      refId: 'TRD/2026/091244',
-    },
-    {
-      id: 'TX-903',
-      type: 'DEPOSIT',
-      amount: 100000,
-      method: 'Net Banking (HDFC)',
-      status: 'SUCCESS',
-      time: 'Yesterday, 09:12 AM',
-      refId: 'NB/2026/410291',
-    },
-    {
-      id: 'TX-904',
-      type: 'WITHDRAWAL',
-      amount: 25000,
-      method: 'IMPS to HDFC Bank (8912)',
-      status: 'SUCCESS',
-      time: '28 Aug, 04:30 PM',
-      refId: 'WDR/2026/184910',
-    },
-  ]);
+  >([]);
 
   if (!isOpen) return null;
 

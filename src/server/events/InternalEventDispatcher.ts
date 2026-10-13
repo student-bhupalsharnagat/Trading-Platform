@@ -15,10 +15,17 @@ import {
   InternalEvent,
   InternalEventType,
   TradeExecutedPayload,
+  ClientRegisteredPayload,
+  ClientActivatedPayload,
+  PositionUpdatedPayload,
+  WalletUpdatedPayload,
+  FundTransactionPayload,
   MarginBreachPayload,
   ExecutionFailurePayload,
   EmergencyControlPayload,
   ReconciliationMismatchPayload,
+  KycSubmittedPayload,
+  SupportTicketPayload,
 } from './types.ts';
 import { IEventQueue, eventQueue as defaultEventQueue, QueuedEvent } from './EventQueue.ts';
 import { CircuitBreaker } from './CircuitBreaker.ts';
@@ -27,6 +34,7 @@ import {
   centralAdminEventClient as defaultClient,
 } from './CentralAdminEventClient.ts';
 import { auditService } from '../services/auditService.ts';
+import { transactionalOutboxService } from '../services/TransactionalOutboxService.ts';
 
 export interface DispatcherHealthMetrics {
   queueSize: number;
@@ -86,7 +94,19 @@ export class InternalEventDispatcher {
     // 1. Enqueue locally first
     this.queue.enqueue(event);
 
-    // 2. Attempt delivery asynchronously (non-blocking)
+    // 2. Persist to transactional outbox (PostgreSQL) asynchronously
+    transactionalOutboxService
+      .enqueue({
+        eventId: event.eventId,
+        tenantId: event.tenantId,
+        eventType: event.eventType,
+        payload: event.payload,
+      })
+      .catch((err) => {
+        console.warn('[InternalEventDispatcher] Outbox persistence warning:', err);
+      });
+
+    // 3. Attempt delivery asynchronously (non-blocking)
     // Run attempt in next tick so caller function returns immediately
     setImmediate(() => {
       this.attemptDelivery(event.eventId).catch((err) => {
@@ -193,33 +213,48 @@ export class InternalEventDispatcher {
 
   /**
    * Helper: Dispatches a Trade Executed event.
-   * Only required operational details are included; no secrets or tokens.
+   * Only authoritative operational details are included; no secrets or tokens.
    */
-  public async dispatchTradeExecuted(params: {
-    tenantId: string;
-    orderId: string;
-    userId: string;
-    symbol: string;
-    side: 'BUY' | 'SELL';
-    quantity: number;
-    executionPrice: number;
-    executedAt?: string;
-  }): Promise<InternalEvent<TradeExecutedPayload>> {
+  public async dispatchTradeExecuted(
+    params: TradeExecutedPayload & { tenantId: string }
+  ): Promise<InternalEvent<TradeExecutedPayload>> {
+    const tradeId = params.tradeId || `TRD-${Date.now()}`;
+    const qty = Number(params.quantity);
+    const price = Number(params.executionPrice);
+    const val = Number(params.executionValue ?? params.totalValue ?? (qty * price));
+
+    const payload: TradeExecutedPayload = {
+      tenantId: params.tenantId,
+      userId: params.userId,
+      clientId: params.clientId || params.tradingUserId || params.userId,
+      tradingUserId: params.tradingUserId || params.clientId || params.userId,
+      clientCode: params.clientCode || (params.userId ? params.userId.toUpperCase() : 'CLIENT'),
+      clientName: params.clientName || params.userId || 'Client',
+      orderId: params.orderId,
+      tradeId,
+      symbol: params.symbol,
+      exchange: params.exchange || 'NSE',
+      side: params.side,
+      quantity: qty,
+      qty,
+      price,
+      executionPrice: price,
+      executionValue: val,
+      totalValue: val,
+      turnover: val,
+      fees: Number(params.fees ?? 0),
+      commission: Number(params.commission ?? 0),
+      realizedPnl: Number(params.realizedPnl ?? 0),
+      executedAt: params.executedAt || new Date().toISOString(),
+    };
+
     const event: InternalEvent<TradeExecutedPayload> = {
-      eventId: `evt-trade-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+      eventId: `evt-trade-${tradeId}`,
       eventType: 'trade.executed',
       tenantId: params.tenantId,
       timestamp: new Date().toISOString(),
       version: 1,
-      payload: {
-        orderId: params.orderId,
-        userId: params.userId,
-        symbol: params.symbol,
-        side: params.side,
-        quantity: params.quantity,
-        executionPrice: params.executionPrice,
-        executedAt: params.executedAt || new Date().toISOString(),
-      },
+      payload,
     };
 
     await this.dispatch(event);
@@ -371,6 +406,180 @@ export class InternalEventDispatcher {
         discrepancyDetails: params.discrepancyDetails,
         detectedAt: params.detectedAt || new Date().toISOString(),
       },
+    };
+
+    await this.dispatch(event);
+    return event;
+  }
+
+  /**
+   * Publishes a client.registered event upon B2C customer registration.
+   */
+  public async dispatchClientRegistered(
+    payload: ClientRegisteredPayload
+  ): Promise<InternalEvent<ClientRegisteredPayload>> {
+    const event: InternalEvent<ClientRegisteredPayload> = {
+      eventId: `evt-client-${payload.userId}-${Date.now()}`,
+      eventType: 'client.registered',
+      tenantId: payload.tenantId,
+      timestamp: new Date().toISOString(),
+      version: 1,
+      payload,
+    };
+
+    await this.dispatch(event);
+    return event;
+  }
+
+  /**
+   * Publishes a client.activated event upon OTP verification and account activation.
+   */
+  public async dispatchClientActivated(
+    payload: ClientActivatedPayload,
+    customEventId?: string
+  ): Promise<InternalEvent<ClientActivatedPayload>> {
+    const event: InternalEvent<ClientActivatedPayload> = {
+      eventId: customEventId || `evt-act-${payload.tradingUserId || payload.userId}-${Date.now()}`,
+      eventType: 'client.activated',
+      tenantId: payload.tenantId,
+      timestamp: new Date().toISOString(),
+      version: 1,
+      payload,
+    };
+
+    await this.dispatch(event);
+    return event;
+  }
+
+  /**
+   * Publishes a position.updated event when positions change.
+   */
+  public async dispatchPositionUpdated(
+    payload: PositionUpdatedPayload
+  ): Promise<InternalEvent<PositionUpdatedPayload>> {
+    const enrichedPayload: PositionUpdatedPayload = {
+      ...payload,
+      qty: payload.qty ?? Number(payload.quantity),
+      avgPrice: payload.avgPrice ?? Number(payload.averagePrice),
+      ltp: payload.ltp ?? Number(payload.currentPrice),
+    };
+    const event: InternalEvent<PositionUpdatedPayload> = {
+      eventId: `evt-pos-${payload.positionId}-${Date.now()}`,
+      eventType: 'position.updated',
+      tenantId: payload.tenantId,
+      timestamp: new Date().toISOString(),
+      version: 1,
+      payload: enrichedPayload,
+    };
+
+    await this.dispatch(event);
+    return event;
+  }
+
+  /**
+   * Publishes a wallet.updated event when balances/margins change.
+   */
+  public async dispatchWalletUpdated(
+    payload: WalletUpdatedPayload
+  ): Promise<InternalEvent<WalletUpdatedPayload>> {
+    const enrichedPayload: WalletUpdatedPayload = {
+      ...payload,
+      balance: payload.balance ?? Number((payload.availableBalance + payload.blockedBalance).toFixed(2)),
+      available: payload.available ?? Number(payload.availableBalance),
+      blocked: payload.blocked ?? Number(payload.blockedBalance),
+    };
+    const event: InternalEvent<WalletUpdatedPayload> = {
+      eventId: `evt-wallet-${payload.userId}-${Date.now()}`,
+      eventType: 'wallet.updated',
+      tenantId: payload.tenantId,
+      timestamp: new Date().toISOString(),
+      version: 1,
+      payload: enrichedPayload,
+    };
+
+    await this.dispatch(event);
+    return event;
+  }
+
+  /**
+   * Publishes a deposit or withdrawal fund event.
+   */
+  public async dispatchFundTransaction(
+    eventType: InternalEventType,
+    payload: FundTransactionPayload
+  ): Promise<InternalEvent<FundTransactionPayload>> {
+    const enrichedPayload: FundTransactionPayload = {
+      ...payload,
+      id: payload.id || payload.transactionId,
+      clientCode: payload.clientCode || payload.userId?.toUpperCase(),
+      method: payload.method || payload.paymentMethod || 'BANK_TRANSFER',
+      reference: payload.reference || payload.referenceId || payload.transactionId,
+      createdAt: payload.createdAt || payload.timestamp,
+    };
+    const event: InternalEvent<FundTransactionPayload> = {
+      eventId: `evt-fund-${payload.transactionId}-${Date.now()}`,
+      eventType,
+      tenantId: payload.tenantId,
+      timestamp: new Date().toISOString(),
+      version: 1,
+      payload: enrichedPayload,
+    };
+
+    await this.dispatch(event);
+    return event;
+  }
+
+  /**
+   * Publishes a kyc.submitted event upon client KYC verification submission.
+   */
+  public async dispatchKycSubmitted(
+    payload: KycSubmittedPayload
+  ): Promise<InternalEvent<KycSubmittedPayload>> {
+    const event: InternalEvent<KycSubmittedPayload> = {
+      eventId: `evt-kyc-${payload.userId}-${Date.now()}`,
+      eventType: 'kyc.submitted',
+      tenantId: payload.tenantId,
+      timestamp: new Date().toISOString(),
+      version: 1,
+      payload,
+    };
+
+    await this.dispatch(event);
+    return event;
+  }
+
+  /**
+   * Publishes a support.ticket_created event.
+   */
+  public async dispatchSupportTicketCreated(
+    payload: SupportTicketPayload
+  ): Promise<InternalEvent<SupportTicketPayload>> {
+    const event: InternalEvent<SupportTicketPayload> = {
+      eventId: `evt-ticket-${payload.ticketId}-${Date.now()}`,
+      eventType: 'support.ticket_created',
+      tenantId: payload.tenantId,
+      timestamp: new Date().toISOString(),
+      version: 1,
+      payload,
+    };
+
+    await this.dispatch(event);
+    return event;
+  }
+
+  /**
+   * Publishes a support.ticket_updated event.
+   */
+  public async dispatchSupportTicketUpdated(
+    payload: SupportTicketPayload
+  ): Promise<InternalEvent<SupportTicketPayload>> {
+    const event: InternalEvent<SupportTicketPayload> = {
+      eventId: `evt-ticket-upd-${payload.ticketId}-${Date.now()}`,
+      eventType: 'support.ticket_updated',
+      tenantId: payload.tenantId,
+      timestamp: new Date().toISOString(),
+      version: 1,
+      payload,
     };
 
     await this.dispatch(event);

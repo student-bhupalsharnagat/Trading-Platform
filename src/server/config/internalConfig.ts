@@ -7,6 +7,15 @@
  * - Insecure hardcoded fallbacks are strictly prohibited in production.
  */
 
+if (process.env.NODE_ENV === 'production') {
+  const secret = process.env.INTERNAL_COMMUNICATION_SECRET || process.env.CENTRAL_ADMIN_INTERNAL_SECRET || '';
+  if (!secret || secret.length < 32) {
+    throw new Error(
+      `[SECURITY ERROR] INTERNAL_COMMUNICATION_SECRET must be configured and at least 32 characters in production (length: ${secret.length}).`
+    );
+  }
+}
+
 export interface InternalAuthConfig {
   tradingPlatformBaseUrl: string;
   internalCommunicationSecret: string;
@@ -18,13 +27,19 @@ export function getInternalAuthConfig(): InternalAuthConfig {
   const isProduction = process.env.NODE_ENV === 'production';
   const secret = process.env.INTERNAL_COMMUNICATION_SECRET || process.env.CENTRAL_ADMIN_INTERNAL_SECRET || '';
 
-  if (!secret) {
+  if (isProduction) {
+    if (!secret || secret.length < 32) {
+      throw new Error(
+        `[SECURITY ERROR] INTERNAL_COMMUNICATION_SECRET must be configured and at least 32 characters in production (length: ${secret ? secret.length : 0}).`
+      );
+    }
+  } else if (!secret) {
     console.warn(
       '[SECURITY WARNING] INTERNAL_COMMUNICATION_SECRET is not configured. Using internal fallback secret. Set INTERNAL_COMMUNICATION_SECRET in environment for production.'
     );
   }
 
-  const effectiveSecret = secret || 'vtx_dev_internal_shared_secret_do_not_use_in_prod';
+  const effectiveSecret = isProduction ? secret : (secret || 'vtx_dev_internal_shared_secret_do_not_use_in_prod');
   const baseUrl = process.env.TRADING_PLATFORM_BASE_URL || process.env.CLIENT_URL || 'http://localhost:3000';
   const maxAgeMs = parseInt(process.env.INTERNAL_REQUEST_MAX_AGE_MS || '30000', 10) || 30000;
 

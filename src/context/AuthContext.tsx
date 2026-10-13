@@ -70,23 +70,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const register = async (data: any) => {
     const res = await authApi.register(data);
-    if (res.devOtp) {
-      setLatestDevOtp(res.devOtp);
-      showToast({
-        type: 'otp',
-        title: 'VERTEX Verification Code',
-        description: `OTP sent to ${data.countryCode || '+91'} ${data.mobile}. (Dev code provided below)`,
-        otpCode: res.devOtp,
-        duration: 30000,
-      });
-    } else {
-      showToast({
-        type: 'success',
-        title: 'Account Created',
-        description: res.message || 'Please check your mobile for the verification code.',
-      });
+    if (res.user) {
+      setUser(res.user);
     }
-    setPendingVerificationUserId(res.userId || data.userId);
+    showToast({
+      type: 'success',
+      title: 'Account Created',
+      description: res.message || 'Account created successfully!',
+    });
+    setPendingVerificationUserId(null);
     return res;
   };
 
@@ -99,7 +91,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       showToast({
         type: 'success',
         title: 'Verification Successful',
-        description: 'Your mobile number is verified. Welcome to VERTEX!',
+        description: 'Your email address is verified. Welcome to VERTEX!',
       });
     }
     return res;

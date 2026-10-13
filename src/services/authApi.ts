@@ -35,8 +35,9 @@ export const authApi = {
   async register(body: {
     fullName: string;
     userId: string;
-    countryCode: string;
-    mobile: string;
+    email?: string;
+    countryCode?: string;
+    mobile?: string;
     password: string;
     confirmPassword: string;
     referralCode?: string;
@@ -141,12 +142,16 @@ export const authApi = {
   async placeOrder(orderData: {
     symbol: string;
     type: 'BUY' | 'SELL';
-    orderType: 'MARKET' | 'LIMIT';
-    product: 'INTRADAY' | 'HOLDING';
+    orderType: 'MARKET' | 'LIMIT' | 'SL' | 'SL-M' | string;
+    product: 'INTRADAY' | 'HOLDING' | string;
     lots: number;
+    quantity?: number;
+    price?: number;
     limitPrice?: number;
+    triggerPrice?: number;
     stopLoss?: number;
     target?: number;
+    timeInForce?: string;
   }): Promise<{ success: boolean; message: string; order: Order; wallet: any; positions: Position[] }> {
     return fetchJson('/api/trading/order', {
       method: 'POST',

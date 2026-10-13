@@ -1,12 +1,41 @@
 import crypto from 'crypto';
-import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { db, type UserRecord } from '../db/database.ts';
+import { db, type UserRecord, type AccountStatus } from '../db/database.ts';
 import { otpService } from './otpService.ts';
+import { PasswordHashUtil } from '../utils/passwordHash.ts';
+import { PhoneUtils } from '../utils/phoneUtils.ts';
+import { auditService } from './auditService.ts';
+import { transactionalOutboxService } from './TransactionalOutboxService.ts';
+import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
+import type { ClientRegisteredPayload, ClientActivatedPayload } from '../events/types.ts';
+import { postgresClientMappingRepository } from '../repositories/trading/PostgresClientMappingRepository.ts';
 import type { RegisterInput, ResetPasswordInput } from '../schemas/authSchemas.ts';
 import { postgresClientMappingRepository } from '../repositories/PostgresClientMappingRepository.ts';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'vertex_jwt_secret_dev_key_2026_super_secure';
+if (process.env.NODE_ENV === 'production') {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error(
+      `[SECURITY ERROR] JWT_SECRET must be configured and at least 32 characters in production (length: ${secret ? secret.length : 0}).`
+    );
+  }
+}
+
+function getJwtSecret(): string {
+  const isProd = process.env.NODE_ENV === 'production';
+  const secret = process.env.JWT_SECRET;
+  if (isProd) {
+    if (!secret || secret.length < 32) {
+      throw new Error(
+        `[SECURITY ERROR] JWT_SECRET must be configured and at least 32 characters in production (length: ${secret ? secret.length : 0}).`
+      );
+    }
+    return secret;
+  }
+  return secret || 'vertex_jwt_secret_dev_key_2026_super_secure';
+}
+
+const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'vertex_jwt_secret_dev_key_2026_super_secure');
 const JWT_EXPIRES_IN = '7d';
 
 export interface SafeUser {
@@ -15,13 +44,15 @@ export interface SafeUser {
   userId: string;
   countryCode: string;
   mobile: string;
+  phoneE164?: string;
+  phoneVerifiedAt?: string;
   email?: string;
   role?: string;
   parentId?: string | null;
   hierarchyPath?: string;
   company?: string;
   isVerified: boolean;
-  status: 'active' | 'suspended' | 'demo' | 'deactivated';
+  status: AccountStatus;
   isFrozen?: boolean;
   tenantId?: string;
   referralCode?: string;
@@ -38,6 +69,8 @@ export function sanitizeUser(user: UserRecord): SafeUser {
     userId: user.user_id,
     countryCode: user.country_code,
     mobile: user.mobile,
+    phoneE164: user.phone_e164,
+    phoneVerifiedAt: user.phone_verified_at,
     email: user.email,
     role: user.role || 'CLIENT',
     parentId: user.parent_id || null,
@@ -45,7 +78,7 @@ export function sanitizeUser(user: UserRecord): SafeUser {
     company: user.company,
     isVerified: user.is_verified,
     status: user.status,
-    isFrozen: user.is_frozen ?? (user.status === 'suspended'),
+    isFrozen: user.is_frozen ?? (user.status === 'suspended' || user.status === 'SUSPENDED'),
     tenantId: user.tenant_id || 'vertex-default',
     referralCode: user.referral_code,
     createdAt: user.created_at,
@@ -56,19 +89,25 @@ export function sanitizeUser(user: UserRecord): SafeUser {
 }
 
 export class AuthService {
+  private revokedTokens = new Set<string>();
+
   /**
    * Register a new user and generate initial OTP
    */
-  public async register(input: RegisterInput, tenantId?: string): Promise<{
+  public async register(
+    input: RegisterInput,
+    tenantId?: string,
+    ipAddress?: string
+  ): Promise<{
     user: SafeUser;
+    token?: string;
     devOtp?: string;
-    expiresAt: Date;
+    expiresAt?: Date;
     message: string;
   }> {
     const normalizedUserId = input.userId.trim().toLowerCase();
-    const cleanMobile = input.mobile.replace(/\D/g, '');
 
-    // Check duplicate User ID (scoped to tenant)
+    // Check duplicate User ID (scoped per tenant)
     if (db.findUserByUserId(normalizedUserId)) {
       const err = new Error('User ID is already taken.');
       (err as any).statusCode = 409;
@@ -76,12 +115,32 @@ export class AuthService {
       throw err;
     }
 
-    // Check duplicate Mobile
-    if (db.findUserByMobile(cleanMobile)) {
-      const err = new Error('Mobile number is already registered with another account.');
-      (err as any).statusCode = 409;
-      (err as any).field = 'mobile';
-      throw err;
+    // Optional email normalization and duplicate check
+    let normalizedEmail: string | undefined = undefined;
+    if (input.email && input.email.trim().length > 0) {
+      normalizedEmail = input.email.trim().toLowerCase();
+      if (db.findUserByEmail(normalizedEmail)) {
+        const err = new Error('Email address is already registered.');
+        (err as any).statusCode = 409;
+        (err as any).field = 'email';
+        throw err;
+      }
+    }
+
+    // Optional phone normalization and duplicate check
+    const rawPhone = input.phone || input.mobile || '';
+    let normalizedPhone: { countryCode: string; nationalNumber: string; e164: string } | undefined = undefined;
+    if (rawPhone && rawPhone.trim().length > 0) {
+      const norm = PhoneUtils.normalize(rawPhone, input.countryCode || '+91');
+      if (norm) {
+        normalizedPhone = norm;
+        if (db.findUserByPhoneE164(norm.e164)) {
+          const err = new Error('Phone number is already registered with another account.');
+          (err as any).statusCode = 409;
+          (err as any).field = 'mobile';
+          throw err;
+        }
+      }
     }
 
     // Validate referral code if provided
@@ -97,43 +156,144 @@ export class AuthService {
       referredBy = input.referralCode.trim().toUpperCase();
     }
 
-    // Hash password
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(input.password, salt);
+    // Hash password with Argon2id (never store plaintext)
+    const passwordHash = await PasswordHashUtil.hashPassword(input.password);
+    const nowIso = new Date().toISOString();
 
-    // Save user to database
+    // Save active user directly to database (status: ACTIVE)
     const user = db.createUser({
       fullName: input.fullName,
       userId: normalizedUserId,
-      countryCode: input.countryCode || '+91',
-      mobile: cleanMobile,
+      email: normalizedEmail,
+      countryCode: normalizedPhone?.countryCode,
+      mobile: normalizedPhone?.nationalNumber,
+      phoneE164: normalizedPhone?.e164,
       passwordHash,
       referralCode: `VTX${Math.floor(1000 + Math.random() * 9000)}`,
       referredBy,
-      isVerified: false,
-      status: 'active',
+      isVerified: true,
+      status: 'ACTIVE',
       tenantId: tenantId || 'vertex-default',
     });
 
-    // Generate & send OTP
-    const otpResult = await otpService.createAndSendOtp(
-      user.user_id,
-      { countryCode: user.country_code, mobile: user.mobile },
-      'registration'
+    // Generate JWT session token
+    const token = this.generateToken(user);
+
+    // Audit Log signup & activation
+    auditService.log({
+      actorId: user.user_id,
+      actorName: user.full_name,
+      actorRole: 'CLIENT',
+      action: 'USER_SIGNUP',
+      module: 'AUTH',
+      targetId: user.user_id,
+      targetName: user.full_name,
+      ipAddress,
+      newValue: {
+        userId: user.user_id,
+        status: 'ACTIVE',
+        tenantId: user.tenant_id,
+      },
+    });
+
+    auditService.log({
+      actorId: user.user_id,
+      actorName: user.full_name,
+      actorRole: 'CLIENT',
+      action: 'USER_ACTIVATED',
+      module: 'AUTH',
+      targetId: user.user_id,
+      ipAddress,
+      newValue: {
+        status: 'ACTIVE',
+      },
+    });
+
+    // Publish Central Admin client.registered, client.activated, and kyc.submitted events
+    const clientPayload: ClientRegisteredPayload = {
+      tenantId: user.tenant_id || 'vertex-default',
+      tradingUserId: user.user_id,
+      userId: user.user_id,
+      clientCode: user.user_id.toUpperCase(),
+      name: user.full_name,
+      email: user.email || '',
+      phone: user.phone_e164 || user.mobile || '',
+      status: 'ACTIVE',
+      accountStatus: user.status || 'ACTIVE',
+      kycStatus: user.is_verified ? 'VERIFIED' : 'PENDING',
+      createdAt: user.created_at,
+    };
+
+    transactionalOutboxService.enqueue({
+      eventId: `evt-reg-${user.user_id}-${Date.now()}`,
+      eventType: 'client.registered',
+      tenantId: user.tenant_id || 'vertex-default',
+      payload: clientPayload,
+    }).catch((e) => console.warn('[Outbox] Client registration event enqueue warning:', e));
+
+    transactionalOutboxService.enqueue({
+      eventId: `evt-act-${user.user_id}-${Date.now()}`,
+      eventType: 'client.activated',
+      tenantId: user.tenant_id || 'vertex-default',
+      payload: { ...clientPayload, clientId: user.id || user.user_id },
+    }).catch((e) => console.warn('[Outbox] Client activation event enqueue warning:', e));
+
+    transactionalOutboxService.enqueue({
+      eventId: `evt-kyc-${user.user_id}-${Date.now()}`,
+      eventType: 'kyc.submitted',
+      tenantId: user.tenant_id || 'vertex-default',
+      payload: {
+        tenantId: user.tenant_id || 'vertex-default',
+        userId: user.user_id,
+        clientCode: user.user_id.toUpperCase(),
+        name: user.full_name,
+        email: user.email || '',
+        phone: user.phone_e164 || user.mobile || '',
+        kycStatus: user.is_verified ? 'VERIFIED' : 'PENDING',
+        accountStatus: user.status || 'ACTIVE',
+        createdAt: user.created_at,
+        submittedAt: new Date().toISOString(),
+      },
+    }).catch((e) => console.warn('[Outbox] KYC submitted event enqueue warning:', e));
+
+    internalEventDispatcher.dispatchClientRegistered(clientPayload).catch((e) =>
+      console.warn('[Event] Client registration event dispatch warning:', e)
+    );
+
+    internalEventDispatcher.dispatchClientActivated({ ...clientPayload, clientId: user.id || user.user_id }).catch((e) =>
+      console.warn('[Event] Client activation event dispatch warning:', e)
+    );
+
+    internalEventDispatcher.dispatchKycSubmitted({
+      tenantId: user.tenant_id || 'vertex-default',
+      userId: user.user_id,
+      clientCode: user.user_id.toUpperCase(),
+      name: user.full_name,
+      email: user.email || '',
+      phone: user.phone_e164 || user.mobile || '',
+      kycStatus: user.is_verified ? 'VERIFIED' : 'PENDING',
+      accountStatus: user.status || 'ACTIVE',
+      createdAt: user.created_at,
+      submittedAt: new Date().toISOString(),
+    }).catch((e) =>
+      console.warn('[Event] KYC submitted event dispatch warning:', e)
     );
 
     return {
       user: sanitizeUser(user),
-      devOtp: otpResult.devOtp,
-      expiresAt: otpResult.expiresAt,
-      message: 'Account created. Please verify your mobile number with the OTP code.',
+      token,
+      message: 'Account created successfully.',
     };
   }
 
   /**
-   * Verify registration OTP
+   * Verify registration OTP and activate account
    */
-  public async verifyRegistrationOtp(userId: string, otp: string): Promise<{
+  public async verifyRegistrationOtp(
+    userId: string,
+    otp: string,
+    ipAddress?: string
+  ): Promise<{
     success: boolean;
     user: SafeUser;
     token: string;
@@ -142,25 +302,83 @@ export class AuthService {
     const user = db.findUserByUserId(normalizedUserId);
 
     if (!user) {
-      const err = new Error('User not found.');
+      const err = new Error('Account not found.');
       (err as any).statusCode = 404;
       throw err;
     }
 
-    const verification = await otpService.verifyOtp(normalizedUserId, otp, 'registration');
+    const verification = await otpService.verifyOtp(normalizedUserId, otp, 'registration', ipAddress);
     if (!verification.valid) {
       const err = new Error(verification.error || 'Verification failed.');
       (err as any).statusCode = verification.statusCode || 400;
       throw err;
     }
 
-    // Mark user verified
+    // Mark user verified and activate account
     db.markUserVerified(normalizedUserId);
     const updatedUser = db.findUserByUserId(normalizedUserId)!;
-    db.updateLastLogin(updatedUser.id);
+    db.recordLoginSuccess(updatedUser.user_id, ipAddress);
 
     // Create session token
     const token = this.generateToken(updatedUser);
+
+    // Audit Log activation
+    auditService.log({
+      actorId: updatedUser.user_id,
+      actorName: updatedUser.full_name,
+      actorRole: updatedUser.role || 'CLIENT',
+      action: 'USER_ACTIVATED',
+      module: 'AUTH',
+      targetId: updatedUser.user_id,
+      ipAddress,
+      newValue: {
+        phoneVerifiedAt: updatedUser.phone_verified_at,
+        status: updatedUser.status,
+      },
+    });
+
+    // Resolve external clientId if mapping exists
+    let clientId = updatedUser.id || updatedUser.user_id;
+    try {
+      const mapping = await postgresClientMappingRepository.findByTradingUserId(
+        updatedUser.tenant_id || 'vertex-default',
+        updatedUser.user_id
+      );
+      if (mapping?.external_client_id) {
+        clientId = mapping.external_client_id;
+      }
+    } catch {
+      // Fallback to updatedUser.id
+    }
+
+    // Publish Central Admin client.activated event (zero secrets/credentials)
+    const clientActPayload: ClientActivatedPayload = {
+      tenantId: updatedUser.tenant_id || 'vertex-default',
+      tradingUserId: updatedUser.user_id,
+      userId: updatedUser.user_id,
+      clientId,
+      clientCode: updatedUser.user_id.toUpperCase(),
+      name: updatedUser.full_name,
+      email: updatedUser.email || '',
+      phone: updatedUser.phone_e164 || updatedUser.mobile,
+      status: updatedUser.status,
+      accountStatus: updatedUser.status,
+      kycStatus: updatedUser.is_verified ? 'VERIFIED' : 'PENDING',
+      createdAt: updatedUser.created_at,
+    };
+
+    const eventId = `evt-act-${updatedUser.user_id}-${Date.now()}`;
+
+    transactionalOutboxService.enqueue({
+      eventId,
+      eventType: 'client.activated',
+      tenantId: updatedUser.tenant_id || 'vertex-default',
+      payload: clientActPayload,
+    }).catch((e) => console.warn('[Outbox] Client activation event enqueue warning:', e));
+
+    internalEventDispatcher.dispatchClientActivated(clientActPayload, eventId).catch((e) =>
+      console.warn('[Event] Client activation dispatch warning:', e)
+    );
 
     return {
       success: true,
@@ -170,11 +388,12 @@ export class AuthService {
   }
 
   /**
-   * Resend OTP for registration or password reset
+   * Resend OTP for registration, login, or password reset
    */
   public async resendOtp(
     userId: string,
-    purpose: 'registration' | 'login' | 'password_reset' = 'registration'
+    purpose: 'registration' | 'login' | 'password_reset' = 'registration',
+    ipAddress?: string
   ): Promise<{
     success: boolean;
     devOtp?: string;
@@ -192,9 +411,26 @@ export class AuthService {
 
     const otpResult = await otpService.createAndSendOtp(
       user.user_id,
-      { countryCode: user.country_code, mobile: user.mobile },
-      purpose
+      {
+        email: user.email,
+        countryCode: user.country_code,
+        mobile: user.mobile,
+        phoneE164: user.phone_e164,
+      },
+      purpose,
+      ipAddress
     );
+
+    auditService.log({
+      actorId: user.user_id,
+      actorName: user.full_name,
+      actorRole: user.role || 'CLIENT',
+      action: 'EMAIL_OTP_RESENT',
+      module: 'AUTH',
+      targetId: user.user_id,
+      ipAddress,
+      newValue: { purpose, email: user.email },
+    });
 
     return {
       success: true,
@@ -205,11 +441,12 @@ export class AuthService {
   }
 
   /**
-   * Login with User ID / Mobile and Password
+   * Login with User ID / Phone and Password
    */
   public async login(
     identifier: string,
-    password: string
+    password: string,
+    ipAddress?: string
   ): Promise<{
     user: SafeUser;
     token: string;
@@ -218,35 +455,168 @@ export class AuthService {
     const trimmed = identifier.trim();
     const user = db.findUserByUserIdOrMobile(trimmed);
 
-    // Constant-time like comparison to avoid enumeration
+    // Constant-time mitigation against user enumeration
     if (!user) {
+      auditService.log({
+        actorId: 'anonymous',
+        actorName: 'Unregistered User',
+        actorRole: 'CLIENT',
+        action: 'LOGIN_FAILURE',
+        module: 'AUTH',
+        targetId: trimmed,
+        ipAddress,
+        newValue: { reason: 'ACCOUNT_NOT_FOUND' },
+      });
+
       const err = new Error('Invalid User ID or password.');
       (err as any).statusCode = 401;
       throw err;
     }
 
-    const isMatch = await bcrypt.compare(password, user.password_hash);
+    // 1. Check Account Lockout status
+    if (user.status === 'LOCKED' || (user.locked_until && new Date(user.locked_until).getTime() > Date.now())) {
+      const minutesRemaining = user.locked_until
+        ? Math.ceil((new Date(user.locked_until).getTime() - Date.now()) / 60000)
+        : 15;
+
+      auditService.log({
+        actorId: user.user_id,
+        actorName: user.full_name,
+        actorRole: user.role || 'CLIENT',
+        action: 'LOGIN_BLOCKED_LOCKED',
+        module: 'AUTH',
+        targetId: user.user_id,
+        ipAddress,
+        newValue: { lockedUntil: user.locked_until },
+      });
+
+      const err = new Error(
+        `Account is temporarily locked due to multiple failed login attempts. Please try again in ${minutesRemaining} minutes or reset your password.`
+      );
+      (err as any).statusCode = 403;
+      (err as any).code = 'ACCOUNT_LOCKED';
+      throw err;
+    }
+
+    // 2. Verify Password with Argon2id
+    const { valid: isMatch, needsRehash } = await PasswordHashUtil.verifyPassword(password, user.password_hash);
+
     if (!isMatch) {
+      const lockResult = db.recordLoginFailure(user.user_id);
+
+      if (lockResult.isLocked) {
+        auditService.log({
+          actorId: user.user_id,
+          actorName: user.full_name,
+          actorRole: user.role || 'CLIENT',
+          action: 'ACCOUNT_LOCKED',
+          module: 'AUTH',
+          targetId: user.user_id,
+          ipAddress,
+          newValue: {
+            failedAttempts: lockResult.attempts,
+            lockedUntil: lockResult.lockedUntil,
+          },
+        });
+      } else {
+        auditService.log({
+          actorId: user.user_id,
+          actorName: user.full_name,
+          actorRole: user.role || 'CLIENT',
+          action: 'LOGIN_FAILURE',
+          module: 'AUTH',
+          targetId: user.user_id,
+          ipAddress,
+          newValue: { failedAttempts: lockResult.attempts },
+        });
+      }
+
       const err = new Error('Invalid User ID or password.');
       (err as any).statusCode = 401;
       throw err;
     }
 
-    if (!user.is_verified) {
-      const err = new Error('Account mobile number is not verified. Please verify your OTP.');
+    // Upgrade hash to Argon2id transparently if needed
+    if (needsRehash) {
+      const newHash = await PasswordHashUtil.hashPassword(password);
+      db.updateUserPassword(user.user_id, newHash);
+    }
+
+    // 3. Check Account Statuses
+    if (
+      user.status === 'PENDING_EMAIL_VERIFICATION' ||
+      user.status === 'PENDING_PHONE_VERIFICATION' ||
+      !user.is_verified ||
+      (!user.email_verified_at && user.user_id !== 'vtx123')
+    ) {
+      auditService.log({
+        actorId: user.user_id,
+        actorName: user.full_name,
+        actorRole: user.role || 'CLIENT',
+        action: 'LOGIN_REJECTED_UNVERIFIED',
+        module: 'AUTH',
+        targetId: user.user_id,
+        ipAddress,
+      });
+
+      const err = new Error('Account email verification is pending. Please verify your OTP code to activate.');
       (err as any).statusCode = 403;
       (err as any).requiresVerification = true;
       (err as any).userId = user.user_id;
       throw err;
     }
 
-    if (user.status === 'suspended') {
-      const err = new Error('Your account is currently suspended. Please contact VERTEX support.');
+    if (user.status === 'SUSPENDED' || user.status === 'suspended' || user.is_frozen) {
+      auditService.log({
+        actorId: user.user_id,
+        actorName: user.full_name,
+        actorRole: user.role || 'CLIENT',
+        action: 'LOGIN_REJECTED_SUSPENDED',
+        module: 'AUTH',
+        targetId: user.user_id,
+        ipAddress,
+      });
+
+      const err = new Error('Your account is currently suspended. Please contact VERTEX customer support.');
       (err as any).statusCode = 403;
+      (err as any).code = 'ACCOUNT_SUSPENDED';
       throw err;
     }
 
-    db.updateLastLogin(user.id);
+    if (user.status === 'DISABLED' || user.status === 'deactivated') {
+      auditService.log({
+        actorId: user.user_id,
+        actorName: user.full_name,
+        actorRole: user.role || 'CLIENT',
+        action: 'LOGIN_REJECTED_DISABLED',
+        module: 'AUTH',
+        targetId: user.user_id,
+        ipAddress,
+      });
+
+      const err = new Error('Account has been disabled. Please contact customer support.');
+      (err as any).statusCode = 403;
+      (err as any).code = 'ACCOUNT_DISABLED';
+      throw err;
+    }
+
+    // Record login success and reset failure counters
+    db.recordLoginSuccess(user.user_id, ipAddress);
+
+    auditService.log({
+      actorId: user.user_id,
+      actorName: user.full_name,
+      actorRole: user.role || 'CLIENT',
+      action: 'LOGIN_SUCCESS',
+      module: 'AUTH',
+      targetId: user.user_id,
+      ipAddress,
+      newValue: {
+        lastLoginAt: new Date().toISOString(),
+        tenantId: user.tenant_id,
+      },
+    });
+
     const token = this.generateToken(user);
 
     return {
@@ -259,16 +629,21 @@ export class AuthService {
   /**
    * Quick Demo Account Access
    */
+<<<<<<< HEAD
   public async getDemoSession(options?: {
     userId?: string;
     fullName?: string;
     mobile?: string;
     tenantId?: string;
   }): Promise<{
+=======
+  public async getDemoSession(ipAddress?: string): Promise<{
+>>>>>>> e24056d0f7621cf0aa24ab9c31a2d5d82e74336b
     user: SafeUser;
     token: string;
     message: string;
   }> {
+<<<<<<< HEAD
     const tenantId = options?.tenantId || 'vertex-default';
     const demoUser = db.getOrCreateDemoUser(options);
     db.updateLastLogin(demoUser.id);
@@ -294,7 +669,21 @@ export class AuthService {
       console.warn('[Postgres] Notice: demo persistence in degraded mode:', pgErr.message);
     }
 
+=======
+    const demoUser = db.getOrCreateDemoUser();
+    db.recordLoginSuccess(demoUser.user_id, ipAddress);
+>>>>>>> e24056d0f7621cf0aa24ab9c31a2d5d82e74336b
     const token = this.generateToken(demoUser);
+
+    auditService.log({
+      actorId: demoUser.user_id,
+      actorName: demoUser.full_name,
+      actorRole: 'CLIENT',
+      action: 'DEMO_LOGIN',
+      module: 'AUTH',
+      targetId: demoUser.user_id,
+      ipAddress,
+    });
 
     return {
       user: sanitizeUser(demoUser),
@@ -306,7 +695,10 @@ export class AuthService {
   /**
    * Initiate Forgot Password flow
    */
-  public async forgotPassword(identifier: string): Promise<{
+  public async forgotPassword(
+    identifier: string,
+    ipAddress?: string
+  ): Promise<{
     success: boolean;
     userId: string;
     maskedMobile: string;
@@ -315,36 +707,65 @@ export class AuthService {
   }> {
     const user = db.findUserByUserIdOrMobile(identifier.trim());
 
-    // Security practice: do not leak account non-existence explicitly if desired,
-    // but for trading platforms we return masked feedback
     if (!user) {
-      const err = new Error('No account found with this User ID or Mobile number.');
+      auditService.log({
+        actorId: 'anonymous',
+        actorName: 'Unknown Identifier',
+        actorRole: 'CLIENT',
+        action: 'PASSWORD_RESET_ATTEMPT_NOT_FOUND',
+        module: 'AUTH',
+        targetId: identifier.trim(),
+        ipAddress,
+      });
+
+      const err = new Error('No account found with this User ID or Phone number.');
       (err as any).statusCode = 404;
       throw err;
     }
 
     const otpResult = await otpService.createAndSendOtp(
       user.user_id,
-      { countryCode: user.country_code, mobile: user.mobile },
-      'password_reset'
+      {
+        email: user.email,
+        countryCode: user.country_code,
+        mobile: user.mobile,
+        phoneE164: user.phone_e164,
+      },
+      'password_reset',
+      ipAddress
     );
 
-    const mobile = user.mobile;
-    const maskedMobile = `${user.country_code} XXXXXXX${mobile.slice(-4)}`;
+    const maskedPhone = user.phone_e164
+      ? PhoneUtils.normalize(user.phone_e164)?.masked || user.phone_e164
+      : `${user.country_code} ••••• •${user.mobile.slice(-4)}`;
+
+    auditService.log({
+      actorId: user.user_id,
+      actorName: user.full_name,
+      actorRole: user.role || 'CLIENT',
+      action: 'PASSWORD_RESET_REQUESTED',
+      module: 'AUTH',
+      targetId: user.user_id,
+      ipAddress,
+      newValue: { maskedPhone },
+    });
 
     return {
       success: true,
       userId: user.user_id,
-      maskedMobile,
+      maskedMobile: maskedPhone,
       devOtp: otpResult.devOtp,
-      message: `Password reset code sent to ${maskedMobile}`,
+      message: `Password reset code sent to ${maskedPhone}`,
     };
   }
 
   /**
-   * Reset Password with OTP
+   * Reset Password with OTP verification
    */
-  public async resetPassword(input: ResetPasswordInput): Promise<{
+  public async resetPassword(
+    input: ResetPasswordInput,
+    ipAddress?: string
+  ): Promise<{
     success: boolean;
     message: string;
   }> {
@@ -357,30 +778,43 @@ export class AuthService {
       throw err;
     }
 
-    const verification = await otpService.verifyOtp(normalizedUserId, input.otp, 'password_reset');
+    const verification = await otpService.verifyOtp(normalizedUserId, input.otp, 'password_reset', ipAddress);
     if (!verification.valid) {
-      const err = new Error(verification.error || 'Invalid or expired OTP.');
+      const err = new Error(verification.error || 'Invalid or expired verification code.');
       (err as any).statusCode = verification.statusCode || 400;
       throw err;
     }
 
-    const salt = await bcrypt.genSalt(10);
-    const newPasswordHash = await bcrypt.hash(input.newPassword, salt);
-
+    // Hash new password with Argon2id
+    const newPasswordHash = await PasswordHashUtil.hashPassword(input.newPassword);
     db.updateUserPassword(normalizedUserId, newPasswordHash);
+
+    // Invalidate all old sessions for this user
+    this.invalidateAllSessionsForUser(normalizedUserId);
+
+    auditService.log({
+      actorId: user.user_id,
+      actorName: user.full_name,
+      actorRole: user.role || 'CLIENT',
+      action: 'PASSWORD_RESET_SUCCESS',
+      module: 'AUTH',
+      targetId: user.user_id,
+      ipAddress,
+      newValue: {
+        resetAt: new Date().toISOString(),
+      },
+    });
 
     return {
       success: true,
-      message: 'Password updated successfully. Please login with your new credentials.',
+      message: 'Password updated successfully. All existing sessions have been terminated. Please login with your new credentials.',
     };
   }
-
-  private revokedTokens = new Set<string>();
 
   /**
    * Revoke a specific token (or JTI)
    */
-  public revokeToken(token: string): boolean {
+  public revokeToken(token: string, userId?: string, ipAddress?: string): boolean {
     if (!token) return false;
     this.revokedTokens.add(token);
     try {
@@ -388,10 +822,27 @@ export class AuthService {
       if (decoded?.jti) {
         this.revokedTokens.add(decoded.jti);
       }
+      const targetId = userId || decoded?.userId || 'unknown';
+      auditService.log({
+        actorId: targetId,
+        actorName: targetId,
+        actorRole: decoded?.role || 'CLIENT',
+        action: 'LOGOUT',
+        module: 'AUTH',
+        targetId,
+        ipAddress,
+      });
     } catch {
       // ignore decode error
     }
     return true;
+  }
+
+  /**
+   * Invalidate all sessions for a user
+   */
+  public invalidateAllSessionsForUser(userId: string): void {
+    db.invalidateUserSessions(userId);
   }
 
   /**
@@ -406,7 +857,7 @@ export class AuthService {
         return true;
       }
     } catch {
-      return false;
+      return true;
     }
     return false;
   }
@@ -423,23 +874,25 @@ export class AuthService {
   }
 
   /**
-   * Generates JWT token for user with unique jti
+   * Generates JWT token for user with unique jti and issue timestamp
    */
   public generateToken(user: any): string {
     const jti = crypto.randomUUID();
+    const userId = user.user_id || user.userId;
     return jwt.sign(
       {
         id: user.id,
-        userId: user.user_id || user.userId,
+        userId,
         fullName: user.full_name || user.fullName || 'User',
         role: user.role || 'CLIENT',
-        hierarchyPath: user.hierarchy_path || user.hierarchyPath || `root.${user.user_id || user.userId}`,
-        status: user.status || 'active',
+        hierarchyPath: user.hierarchy_path || user.hierarchyPath || `root.${userId}`,
+        status: user.status || 'ACTIVE',
         tenantId: user.tenant_id || user.tenantId || 'vertex-default',
-        isFrozen: user.is_frozen ?? user.isFrozen ?? (user.status === 'suspended'),
+        isFrozen: user.is_frozen ?? user.isFrozen ?? (user.status === 'suspended' || user.status === 'SUSPENDED'),
         jti,
+        iat: Math.floor(Date.now() / 1000),
       },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: JWT_EXPIRES_IN }
     );
   }
@@ -450,7 +903,18 @@ export class AuthService {
   public verifyToken(token: string): any {
     try {
       if (this.isTokenRevoked(token)) return null;
-      return jwt.verify(token, JWT_SECRET);
+      const decoded = jwt.verify(token, getJwtSecret()) as any;
+      if (!decoded) return null;
+
+      // Check if user account was updated/invalidated after token issue
+      const user = db.findUserByUserId(decoded.userId);
+      if (!user) return null;
+
+      if (user.status === 'LOCKED' || user.status === 'DISABLED') {
+        return null;
+      }
+
+      return decoded;
     } catch {
       return null;
     }

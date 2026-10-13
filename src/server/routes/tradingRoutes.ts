@@ -20,8 +20,11 @@ import {
   setTenantNotifications,
   closeSinglePosition,
 } from '../trading/tradingStore.ts';
+import { db } from '../db/database.ts';
 import { tenantConfigCache } from '../cache/TenantConfigCache.ts';
 import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
+import { SupportTicketPayload } from '../events/types.ts';
+import { transactionalOutboxService } from '../services/TransactionalOutboxService.ts';
 import { tradingExecutionService } from '../services/TradingExecutionService.ts';
 import { postgresOrderRepository } from '../repositories/trading/PostgresOrderRepository.ts';
 import { postgresPositionRepository } from '../repositories/trading/PostgresPositionRepository.ts';
@@ -33,6 +36,7 @@ import { marketDataGateway } from '../gateways/MarketDataGateway.ts';
 import { executionGateway } from '../gateways/ExecutionGateway.ts';
 import { brokerWebhookHandler } from '../gateways/broker/BrokerWebhookHandler.ts';
 import { brokerReconciliationService } from '../services/BrokerReconciliationService.ts';
+import { authoritativeTradingDataService } from '../services/authoritativeTradingDataService.ts';
 
 const router = Router();
 
@@ -113,120 +117,140 @@ router.get('/candles/:symbol', optionalAuth, (req: AuthenticatedRequest, res: Re
   });
 });
 
-// Get portfolio data (scoped to resolved tenant)
+// Get portfolio data (scoped to authenticated user & resolved tenant)
 router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response) => {
   const tenantId = getReqTenantId(req);
   const userObj = (req as any).user;
-  const userId = userObj?.userId || userObj?.user_id || userObj?.id || 'demo-trader';
+  const userId = userObj?.userId || userObj?.user_id || userObj?.id;
 
-  let wallet = getTenantWallet(tenantId);
-  let positions = getTenantPositions(tenantId);
-  let orders = getTenantOrders(tenantId);
-
-  try {
-    if (userId) {
-      const pgWallet = await postgresWalletRepository.getWallet(tenantId, userId);
-      if (pgWallet) {
-        wallet = {
-          availableBalance: pgWallet.available_balance,
-          usedMargin: pgWallet.used_margin,
-          totalPnL: pgWallet.realized_pnl,
-          todayPnL: wallet.todayPnL || 0,
-          deposited: 200000,
-          withdrawn: 50000,
-        };
-      }
-      const pgPositions = await postgresPositionRepository.getPositions(tenantId, userId);
-      if (pgPositions && pgPositions.length > 0) {
-        positions = pgPositions.map((p) => {
-          const inst = findInstrument(p.instrument_id);
-          const ltp = inst ? inst.lastPrice : p.average_price;
-          const posType = p.quantity > 0 ? 'BUY' : 'SELL';
-          const qty = Math.abs(p.quantity);
-          const lotSize = inst?.lotSize || 100;
-          const lots = Math.max(1, Math.round(qty / lotSize));
-          const pnl = posType === 'BUY'
-            ? (ltp - p.average_price) * qty
-            : (p.average_price - ltp) * qty;
-          const pnlPercent = (p.average_price * qty) > 0
-            ? Number(((pnl / (p.average_price * qty)) * 100).toFixed(2))
-            : 0;
-
-          return {
-            id: p.id,
-            symbol: p.instrument_id,
-            category: inst?.category || 'COMMODITY',
-            type: posType,
-            product: 'INTRADAY' as const,
-            lots,
-            qty,
-            lotSize,
-            avgPrice: p.average_price,
-            ltp,
-            pnl: Number(pnl.toFixed(2)),
-            pnlPercent,
-            timestamp: p.updated_at,
-            tenantId: p.tenant_id,
-          };
-        });
-      }
-      const pgOrders = await postgresOrderRepository.getOrders(tenantId, userId);
-      if (pgOrders && pgOrders.length > 0) {
-        orders = pgOrders.map((o) => {
-          const inst = findInstrument(o.instrument_id);
-          const lotSize = inst?.lotSize || 100;
-          return {
-            id: o.id,
-            symbol: o.instrument_id,
-            type: o.side as 'BUY' | 'SELL',
-            orderType: o.order_type as any,
-            product: 'INTRADAY',
-            lots: Math.max(1, Math.round(o.quantity / lotSize)),
-            qty: o.quantity,
-            lotSize,
-            price: o.price,
-            status: o.status as any,
-            time: new Date(o.created_at).toTimeString().split(' ')[0],
-            date: new Date(o.created_at).toLocaleDateString('en-GB'),
-            tenantId: o.tenant_id,
-          };
-        });
-      }
-    }
-  } catch {
-    // fallback to memory
+  if (!userId) {
+    return res.status(401).json({
+      success: false,
+      message: 'Authentication required to view trading portfolio.',
+      wallet: {
+        availableBalance: 0,
+        usedMargin: 0,
+        totalPnL: 0,
+        todayPnL: 0,
+        deposited: 0,
+        withdrawn: 0,
+      },
+      positions: [],
+      orders: [],
+    });
   }
 
-  // Real-time dynamic mark-to-market (MTM) calculation against live instrument prices
-  positions = positions.map((pos) => {
-    const inst = findInstrument(pos.symbol);
-    const ltp = inst ? inst.lastPrice : pos.ltp;
-    const pnl = pos.type === 'BUY'
-      ? (ltp - pos.avgPrice) * pos.qty
-      : (pos.avgPrice - ltp) * pos.qty;
-    const pnlPercent = (pos.avgPrice * pos.qty) > 0
-      ? Number(((pnl / (pos.avgPrice * pos.qty)) * 100).toFixed(2))
-      : 0;
-    return {
-      ...pos,
-      ltp,
-      pnl: Number(pnl.toFixed(2)),
-      pnlPercent,
+  try {
+    const pgWallet = await postgresWalletRepository.getOrCreateWallet(tenantId, userId, 0);
+    const pgPositions = await postgresPositionRepository.getPositions(tenantId, userId);
+    const pgOrders = await postgresOrderRepository.getOrders(tenantId, userId);
+
+    const positions = (pgPositions || []).map((p) => {
+      const inst = findInstrument(p.instrument_id);
+      const avgPrice = Number(p.average_price);
+      const ltp = inst ? inst.lastPrice : avgPrice;
+      const posType: 'BUY' | 'SELL' = Number(p.quantity) >= 0 ? 'BUY' : 'SELL';
+      const qty = Math.abs(Number(p.quantity));
+      const lotSize = inst?.lotSize || 1;
+      const lots = Math.max(1, Math.round(qty / lotSize));
+      const pnl = posType === 'BUY'
+        ? (ltp - avgPrice) * qty
+        : (avgPrice - ltp) * qty;
+      const pnlPercent = (avgPrice * qty) > 0
+        ? Number(((pnl / (avgPrice * qty)) * 100).toFixed(2))
+        : 0;
+
+      return {
+        id: p.id,
+        symbol: p.instrument_id,
+        category: inst?.category || 'EQUITY',
+        type: posType,
+        product: 'INTRADAY' as const,
+        lots,
+        qty,
+        lotSize,
+        avgPrice: Number(avgPrice.toFixed(2)),
+        ltp: Number(ltp.toFixed(2)),
+        pnl: Number(pnl.toFixed(2)),
+        pnlPercent,
+        timestamp: p.updated_at,
+        tenantId: p.tenant_id,
+      };
+    });
+
+    const orders = (pgOrders || []).map((o) => {
+      const inst = findInstrument(o.instrument_id);
+      const lotSize = inst?.lotSize || 100;
+      return {
+        id: o.id,
+        symbol: o.instrument_id,
+        type: o.side as 'BUY' | 'SELL',
+        orderType: o.order_type as any,
+        product: 'INTRADAY',
+        lots: Math.max(1, Math.round(o.quantity / lotSize)),
+        qty: o.quantity,
+        lotSize,
+        price: o.price,
+        status: o.status as any,
+        time: new Date(o.created_at).toTimeString().split(' ')[0],
+        date: new Date(o.created_at).toLocaleDateString('en-GB'),
+        tenantId: o.tenant_id,
+      };
+    });
+
+    // Real-time dynamic mark-to-market (MTM) calculation against live instrument prices
+    const updatedPositions = positions.map((pos) => {
+      const inst = findInstrument(pos.symbol);
+      const ltp = inst ? inst.lastPrice : pos.ltp;
+      const pnl = pos.type === 'BUY'
+        ? (ltp - pos.avgPrice) * pos.qty
+        : (pos.avgPrice - ltp) * pos.qty;
+      const pnlPercent = (pos.avgPrice * pos.qty) > 0
+        ? Number(((pnl / (pos.avgPrice * pos.qty)) * 100).toFixed(2))
+        : 0;
+      return {
+        ...pos,
+        ltp,
+        pnl: Number(pnl.toFixed(2)),
+        pnlPercent,
+      };
+    });
+
+    const totalUnrealizedPnL = updatedPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
+    const realizedPnL = pgWallet.realized_pnl || 0;
+
+    const wallet = {
+      availableBalance: pgWallet.available_balance,
+      usedMargin: pgWallet.used_margin,
+      totalPnL: Number((realizedPnL + totalUnrealizedPnL).toFixed(2)),
+      todayPnL: Number(totalUnrealizedPnL.toFixed(2)),
+      deposited: (pgWallet as any).deposited || 0,
+      withdrawn: (pgWallet as any).withdrawn || 0,
     };
-  });
 
-  const totalUnrealizedPnL = positions.reduce((sum, p) => sum + (p.pnl || 0), 0);
-  const realizedPnL = wallet.totalPnL || 0;
-  wallet.todayPnL = Number((500 + totalUnrealizedPnL).toFixed(2));
-  wallet.totalPnL = Number((realizedPnL + totalUnrealizedPnL).toFixed(2));
-
-  res.json({
-    success: true,
-    tenantId,
-    wallet,
-    positions,
-    orders,
-  });
+    return res.json({
+      success: true,
+      tenantId,
+      wallet,
+      positions: updatedPositions,
+      orders,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to load user portfolio',
+      wallet: {
+        availableBalance: 0,
+        usedMargin: 0,
+        totalPnL: 0,
+        todayPnL: 0,
+        deposited: 0,
+        withdrawn: 0,
+      },
+      positions: [],
+      orders: [],
+    });
+  }
 });
 
 // Place new Order (BUY / SELL) - Enforces Tenant trading freeze, active trader, and ACID persistence
@@ -253,17 +277,36 @@ router.post(
 
       const orderUserId = userObj?.userId || userObj?.user_id || userObj?.id || 'demo-trader';
 
+      if (userObj) {
+        const latestUser = db.findUserById(userObj.id || userObj.userId) || db.findUserByUserId(userObj.userId || userObj.id);
+        if (latestUser) {
+          const check = db.isUserOrHierarchyFrozen(latestUser);
+          if (check.frozen || Boolean(latestUser.is_frozen)) {
+            res.status(403).json({
+              success: false,
+              code: 'USER_FROZEN',
+              message: check.reason || 'Your account is currently frozen.',
+            });
+            return;
+          }
+        }
+      }
+
       const {
         symbol,
         type, // BUY or SELL
         side, // alternative for type
-        orderType, // MARKET or LIMIT
+        orderType, // MARKET, LIMIT, SL, SL-M
         product, // INTRADAY or HOLDING
         lots,
+        quantity,
         limitPrice,
+        triggerPrice,
+        trigger_price,
         price,
         stopLoss,
         target,
+        timeInForce,
         clientOrderId,
         client_order_id,
       } = req.body;
@@ -316,9 +359,12 @@ router.post(
         orderType: orderType || 'MARKET',
         product: product || 'INTRADAY',
         lots: orderLots,
+        quantity: quantity ? Number(quantity) : undefined,
         price: execPrice,
+        triggerPrice: (triggerPrice != null || trigger_price != null) ? Number(triggerPrice ?? trigger_price) : undefined,
         stopLoss: stopLoss ? Number(stopLoss) : undefined,
         target: target ? Number(target) : undefined,
+        timeInForce: timeInForce || 'DAY',
       });
 
       if (result.isDuplicate) {
@@ -347,19 +393,77 @@ router.post(
         read: false,
       });
 
+      const clientPosition = result.position ? {
+        id: result.position.id,
+        symbol: result.position.instrument_id,
+        category: inst.category,
+        type: Number(result.position.quantity) >= 0 ? 'BUY' as const : 'SELL' as const,
+        product: (product || 'INTRADAY') as any,
+        qty: Math.abs(Number(result.position.quantity)),
+        lots: Math.max(1, Math.round(Math.abs(Number(result.position.quantity)) / (inst.lotSize || 1))),
+        lotSize: inst.lotSize || 1,
+        avgPrice: Number(Number(result.position.average_price).toFixed(2)),
+        ltp: Number(inst.lastPrice.toFixed(2)),
+        pnl: Number(
+          (Number(result.position.quantity) >= 0
+            ? (inst.lastPrice - Number(result.position.average_price)) * Math.abs(Number(result.position.quantity))
+            : (Number(result.position.average_price) - inst.lastPrice) * Math.abs(Number(result.position.quantity))
+          ).toFixed(2)
+        ),
+        pnlPercent: Number(result.position.average_price) > 0
+          ? Number(
+              (
+                (((Number(result.position.quantity) >= 0
+                  ? inst.lastPrice - Number(result.position.average_price)
+                  : Number(result.position.average_price) - inst.lastPrice) *
+                  Math.abs(Number(result.position.quantity))) /
+                  (Number(result.position.average_price) * Math.abs(Number(result.position.quantity)))) *
+                100
+              ).toFixed(2)
+            )
+          : 0,
+        timestamp: new Date().toISOString(),
+        tenantId,
+      } : undefined;
+
       res.json({
         success: true,
         message: result.message,
         order: result.order,
         trade: result.trade,
-        position: result.position,
+        position: clientPosition,
         wallet: {
           availableBalance: result.wallet.available_balance,
           usedMargin: result.wallet.used_margin,
           totalPnL: result.wallet.realized_pnl,
           todayPnL: 0,
         },
-        positions: getTenantPositions(tenantId),
+        positions: (await postgresPositionRepository.getPositions(tenantId, orderUserId)).map((p) => {
+          const pInst = findInstrument(p.instrument_id);
+          const avgPrice = Number(p.average_price);
+          const ltp = pInst ? pInst.lastPrice : avgPrice;
+          const posType: 'BUY' | 'SELL' = Number(p.quantity) >= 0 ? 'BUY' : 'SELL';
+          const qty = Math.abs(Number(p.quantity));
+          const lotSize = pInst?.lotSize || 1;
+          const lots = Math.max(1, Math.round(qty / lotSize));
+          const pnl = posType === 'BUY' ? (ltp - avgPrice) * qty : (avgPrice - ltp) * qty;
+          return {
+            id: p.id,
+            symbol: p.instrument_id,
+            category: pInst?.category || 'EQUITY',
+            type: posType,
+            product: 'INTRADAY' as const,
+            lots,
+            qty,
+            lotSize,
+            avgPrice: Number(avgPrice.toFixed(2)),
+            ltp: Number(ltp.toFixed(2)),
+            pnl: Number(pnl.toFixed(2)),
+            pnlPercent: (avgPrice * qty) > 0 ? Number(((pnl / (avgPrice * qty)) * 100).toFixed(2)) : 0,
+            timestamp: p.updated_at,
+            tenantId: p.tenant_id,
+          };
+        }),
       });
     } catch (err: any) {
       const status = err.statusCode || (err.code === 'INSUFFICIENT_MARGIN' ? 400 : 500);
@@ -459,7 +563,32 @@ router.post(
           totalPnL: result.wallet.realized_pnl ?? result.wallet.totalPnL,
           todayPnL: 0,
         },
-        positions: getTenantPositions(tenantId),
+        positions: (await postgresPositionRepository.getPositions(tenantId, userId)).map((p) => {
+          const pInst = findInstrument(p.instrument_id);
+          const avgPrice = Number(p.average_price);
+          const ltp = pInst ? pInst.lastPrice : avgPrice;
+          const posType: 'BUY' | 'SELL' = Number(p.quantity) >= 0 ? 'BUY' : 'SELL';
+          const qty = Math.abs(Number(p.quantity));
+          const lotSize = pInst?.lotSize || 1;
+          const lots = Math.max(1, Math.round(qty / lotSize));
+          const pnl = posType === 'BUY' ? (ltp - avgPrice) * qty : (avgPrice - ltp) * qty;
+          return {
+            id: p.id,
+            symbol: p.instrument_id,
+            category: pInst?.category || 'EQUITY',
+            type: posType,
+            product: 'INTRADAY' as const,
+            lots,
+            qty,
+            lotSize,
+            avgPrice: Number(avgPrice.toFixed(2)),
+            ltp: Number(ltp.toFixed(2)),
+            pnl: Number(pnl.toFixed(2)),
+            pnlPercent: (avgPrice * qty) > 0 ? Number(((pnl / (avgPrice * qty)) * 100).toFixed(2)) : 0,
+            timestamp: p.updated_at,
+            tenantId: p.tenant_id,
+          };
+        }),
       });
     } catch (err: any) {
       res.status(err.statusCode || 500).json({ success: false, message: err.message || 'Failed to close position.' });
@@ -591,76 +720,112 @@ router.get('/trades', requireAuth, async (req: TenantRequest, res: Response) => 
   }
 });
 
-// Add Funds (Deposit)
-router.post('/funds/deposit', requireAuth, (req: TenantRequest, res: Response) => {
-  const tenantId = getReqTenantId(req);
-  const wallet = getTenantWallet(tenantId);
-  const notifications = getTenantNotifications(tenantId);
+// Add Funds (Deposit) - Authoritative PostgreSQL Transaction & Immutable Ledger Flow
+router.post('/funds/deposit', requireAuth, async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const userObj = (req as any).user;
+    const userId = userObj?.userId || userObj?.user_id || 'demo-trader';
 
-  const { amount, method } = req.body;
-  const numAmount = Number(amount);
-  if (!numAmount || numAmount < 100) {
-    res.status(400).json({ success: false, message: 'Minimum deposit amount is ₹100.' });
-    return;
+    const { amount, method } = req.body;
+    const numAmount = Number(amount);
+    if (!numAmount || numAmount < 100) {
+      res.status(400).json({ success: false, message: 'Minimum deposit amount is ₹100.' });
+      return;
+    }
+
+    // 1. Create authoritative fund transaction in PostgreSQL (PENDING state + outbox deposit.created event)
+    const refId = `DEP-${Date.now()}`;
+    const tx = await authoritativeTradingDataService.createFundTransaction(
+      tenantId,
+      userId,
+      'DEPOSIT',
+      numAmount,
+      method || 'UPI Instant',
+      refId
+    );
+
+    // Customer deposit remains PENDING until admin approval.
+    // Wallet balance and immutable ledger are only mutated upon admin approval.
+    const wallet = getTenantWallet(tenantId);
+
+    const notifications = getTenantNotifications(tenantId);
+    notifications.unshift({
+      id: `NOTIF-${Date.now()}`,
+      title: 'Deposit Submitted',
+      message: `Deposit request of ₹${numAmount.toLocaleString('en-IN')} submitted and pending approval.`,
+      type: 'SYSTEM',
+      time: 'Just now',
+      read: false,
+    });
+
+    res.json({
+      success: true,
+      transactionId: tx.id,
+      status: 'PENDING',
+      message: `Deposit request of ₹${numAmount.toLocaleString('en-IN')} submitted and pending admin approval.`,
+      wallet,
+    });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
   }
-
-  wallet.availableBalance += numAmount;
-  wallet.deposited += numAmount;
-
-  notifications.unshift({
-    id: `NOTIF-${Date.now()}`,
-    title: 'Deposit Successful',
-    message: `₹${numAmount.toLocaleString('en-IN')} added via ${method || 'UPI Instant'}.`,
-    type: 'SYSTEM',
-    time: 'Just now',
-    read: false,
-  });
-
-  res.json({
-    success: true,
-    message: `Deposit of ₹${numAmount.toLocaleString('en-IN')} successful.`,
-    wallet,
-  });
 });
 
-// Withdraw Funds
-router.post('/funds/withdraw', requireAuth, (req: TenantRequest, res: Response) => {
-  const tenantId = getReqTenantId(req);
-  const wallet = getTenantWallet(tenantId);
-  const notifications = getTenantNotifications(tenantId);
+// Withdraw Funds - Authoritative PostgreSQL Transaction & Immutable Ledger Flow
+router.post('/funds/withdraw', requireAuth, async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const userObj = (req as any).user;
+    const userId = userObj?.userId || userObj?.user_id || 'demo-trader';
 
-  const { amount, bankName } = req.body;
-  const numAmount = Number(amount);
-  if (!numAmount || numAmount <= 0) {
-    res.status(400).json({ success: false, message: 'Invalid withdrawal amount.' });
-    return;
-  }
+    const { amount, bankName } = req.body;
+    const numAmount = Number(amount);
+    if (!numAmount || numAmount <= 0) {
+      res.status(400).json({ success: false, message: 'Invalid withdrawal amount.' });
+      return;
+    }
 
-  if (numAmount > wallet.availableBalance) {
-    res.status(400).json({
-      success: false,
-      message: `Insufficient balance. Available to withdraw: ₹${wallet.availableBalance.toLocaleString('en-IN')}`,
+    const pgWallet = await postgresWalletRepository.getOrCreateWallet(tenantId, userId);
+    if (numAmount > pgWallet.available_balance) {
+      res.status(400).json({
+        success: false,
+        message: `Insufficient balance. Available to withdraw: ₹${pgWallet.available_balance.toLocaleString('en-IN')}`,
+      });
+      return;
+    }
+
+    // Create authoritative PENDING withdrawal transaction + outbox event withdrawal.created
+    const refId = `WDR-${Date.now()}`;
+    const tx = await authoritativeTradingDataService.createFundTransaction(
+      tenantId,
+      userId,
+      'WITHDRAWAL',
+      numAmount,
+      bankName || 'Verified Bank',
+      refId
+    );
+
+    const wallet = getTenantWallet(tenantId);
+    const notifications = getTenantNotifications(tenantId);
+    notifications.unshift({
+      id: `NOTIF-${Date.now()}`,
+      title: 'Withdrawal Initiated',
+      message: `Payout request for ₹${numAmount.toLocaleString('en-IN')} sent to ${bankName || 'Verified Bank'} (Status: PENDING).`,
+      type: 'SYSTEM',
+      time: 'Just now',
+      read: false,
     });
-    return;
+
+    res.json({
+      success: true,
+      transactionId: tx.id,
+      status: 'PENDING',
+      message: `Withdrawal request of ₹${numAmount.toLocaleString('en-IN')} submitted and pending approval.`,
+      wallet,
+    });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
   }
-
-  wallet.availableBalance -= numAmount;
-  wallet.withdrawn += numAmount;
-
-  notifications.unshift({
-    id: `NOTIF-${Date.now()}`,
-    title: 'Withdrawal Initiated',
-    message: `Payout request for ₹${numAmount.toLocaleString('en-IN')} sent to ${bankName || 'Verified Bank'}.`,
-    type: 'SYSTEM',
-    time: 'Just now',
-    read: false,
-  });
-
-  res.json({
-    success: true,
-    message: `Withdrawal request of ₹${numAmount.toLocaleString('en-IN')} processed successfully.`,
-    wallet,
-  });
 });
 
 // Get & Create Support Tickets (scoped to resolved tenant)
@@ -732,6 +897,32 @@ router.post('/tickets', optionalAuth, (req: TenantRequest, res: Response) => {
     read: false,
   });
 
+  const ticketUserId = req.user?.userId || req.user?.id || 'CLIENT';
+  const ticketClientCode = (req.user?.userId || req.user?.id || 'CLIENT').toUpperCase();
+  const ticketPayload: SupportTicketPayload = {
+    tenantId,
+    ticketId: newTicket.id,
+    userId: ticketUserId,
+    clientCode: ticketClientCode,
+    subject: newTicket.subject,
+    category: newTicket.category,
+    status: newTicket.status,
+    priority: newTicket.priority,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  transactionalOutboxService.enqueue({
+    eventId: `evt-ticket-${newTicket.id}-${Date.now()}`,
+    eventType: 'support.ticket_created',
+    tenantId,
+    payload: ticketPayload,
+  }).catch((e) => console.warn('[Outbox] Support ticket created enqueue warning:', e));
+
+  internalEventDispatcher.dispatchSupportTicketCreated(ticketPayload).catch((e) =>
+    console.warn('[Event] Support ticket created dispatch warning:', e)
+  );
+
   res.json({ success: true, message: 'Support ticket raised successfully.', ticket: newTicket });
 });
 
@@ -772,6 +963,32 @@ router.post('/tickets/:id/reply', optionalAuth, (req: TenantRequest, res: Respon
     ticket.status = 'IN_PROGRESS';
   }
 
+  const replyUserId = req.user?.userId || req.user?.id || 'CLIENT';
+  const replyClientCode = (req.user?.userId || req.user?.id || 'CLIENT').toUpperCase();
+  const updatePayload: SupportTicketPayload = {
+    tenantId,
+    ticketId: ticket.id,
+    userId: replyUserId,
+    clientCode: replyClientCode,
+    subject: ticket.subject,
+    category: ticket.category,
+    status: ticket.status,
+    priority: ticket.priority,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  transactionalOutboxService.enqueue({
+    eventId: `evt-ticket-upd-${ticket.id}-${Date.now()}`,
+    eventType: 'support.ticket_updated',
+    tenantId,
+    payload: updatePayload,
+  }).catch((e) => console.warn('[Outbox] Support ticket updated enqueue warning:', e));
+
+  internalEventDispatcher.dispatchSupportTicketUpdated(updatePayload).catch((e) =>
+    console.warn('[Event] Support ticket updated dispatch warning:', e)
+  );
+
   res.json({ success: true, message: 'Reply sent.', ticket });
 });
 
@@ -791,6 +1008,32 @@ router.post('/tickets/:id/status', optionalAuth, (req: TenantRequest, res: Respo
     const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     const timeStr = now.toTimeString().split(' ')[0].slice(0, 5);
     ticket.updatedAt = `${dateStr}, ${timeStr}`;
+
+    const statusUserId = req.user?.userId || req.user?.id || 'CLIENT';
+    const statusClientCode = (req.user?.userId || req.user?.id || 'CLIENT').toUpperCase();
+    const updatePayload: SupportTicketPayload = {
+      tenantId,
+      ticketId: ticket.id,
+      userId: statusUserId,
+      clientCode: statusClientCode,
+      subject: ticket.subject,
+      category: ticket.category,
+      status: ticket.status,
+      priority: ticket.priority,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    transactionalOutboxService.enqueue({
+      eventId: `evt-ticket-upd-${ticket.id}-${Date.now()}`,
+      eventType: 'support.ticket_updated',
+      tenantId,
+      payload: updatePayload,
+    }).catch((e) => console.warn('[Outbox] Support ticket updated enqueue warning:', e));
+
+    internalEventDispatcher.dispatchSupportTicketUpdated(updatePayload).catch((e) =>
+      console.warn('[Event] Support ticket updated dispatch warning:', e)
+    );
   }
 
   res.json({ success: true, message: `Ticket status updated to ${ticket.status}.`, ticket });

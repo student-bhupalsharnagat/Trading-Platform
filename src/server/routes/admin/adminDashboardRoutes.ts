@@ -8,8 +8,9 @@ const router = Router();
 // GET /api/admin/dashboard/kpis
 router.get('/kpis', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const tenantId = (req.user as any)?.tenant_id || (req.user as any)?.tenantId || 'vertex-default';
     const kpis = await adminDashboardService.getKPIs(req.user as any);
-    const charts = adminDashboardService.getChartData();
+    const charts = await adminDashboardService.getChartData(tenantId);
     res.json({
       success: true,
       data: {

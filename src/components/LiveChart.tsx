@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Instrument, Candle } from '../types.ts';
 import { authApi } from '../services/authApi.ts';
-import { TradingViewChart } from './TradingViewChart.tsx';
+import { TradingViewChart, isTradingViewRestrictedSymbol } from './TradingViewChart.tsx';
 import { MarketClosedModal } from './MarketClosedModal.tsx';
 import { getMarketHoursInfo, MarketHoursInfo } from '../utils/marketHours.ts';
 import {
@@ -41,7 +41,18 @@ export const LiveChart: React.FC<LiveChartProps> = ({
   // Timeframe and chart mode
   const [timeframe, setTimeframe] = useState<'1m' | '5m' | '15m' | '30m' | '1h' | '1D'>('15m');
   const [chartType, setChartType] = useState<'Candle' | 'Line' | 'Area'>('Candle');
-  const [engineMode, setEngineMode] = useState<'TRADINGVIEW' | 'CANVAS'>('TRADINGVIEW');
+
+  const isRestricted = useMemo(
+    () => isTradingViewRestrictedSymbol(instrument.symbol, instrument.category),
+    [instrument.symbol, instrument.category]
+  );
+  const [engineMode, setEngineMode] = useState<'TRADINGVIEW' | 'CANVAS'>(() => (isRestricted ? 'CANVAS' : 'TRADINGVIEW'));
+
+  useEffect(() => {
+    if (isRestricted) {
+      setEngineMode('CANVAS');
+    }
+  }, [isRestricted, instrument.symbol]);
   const [candles, setCandles] = useState<Candle[]>([]);
 
   // Market Closed modal

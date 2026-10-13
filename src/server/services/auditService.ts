@@ -166,6 +166,10 @@ class AuditService {
     return this.logs.slice(0, limit);
   }
 
+  public getAllLogs(): AuditLogItem[] {
+    return [...this.logs];
+  }
+
   public getLogsByTarget(targetId: string): AuditLogItem[] {
     return this.logs.filter((l) => l.targetId === targetId);
   }

@@ -90,6 +90,24 @@ export const getTradingViewSymbol = (symbol: string): string => {
   return `NSE:${basePart || 'NIFTY'}`;
 };
 
+/**
+ * Checks whether an instrument symbol is restricted on TradingView's free widgetembed
+ * (e.g. Indian NSE/BSE equities, MCX commodities, and Indian indices)
+ */
+export const isTradingViewRestrictedSymbol = (symbol: string, category?: string): boolean => {
+  if (!symbol) return false;
+  if (category === 'EQUITY' || category === 'INDEX') return true;
+  const upper = symbol.toUpperCase().trim();
+  if (upper.startsWith('NSE:') || upper.startsWith('BSE:') || upper.startsWith('MCX:')) return true;
+  const indianKeywords = [
+    'RELIANCE', 'HDFC', 'TCS', 'INFY', 'INFOSYS', 'ICICI', 'SBIN', 'SBI',
+    'BHARTI', 'AIRTEL', 'ITC', 'TATAMOTORS', 'TATASTEEL', 'AXIS', 'KOTAK',
+    'LT', 'LARSEN', 'WIPRO', 'MARUTI', 'BAJFINANCE', 'NIFTY', 'BANKNIFTY',
+    'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'
+  ];
+  return indianKeywords.some((k) => upper.includes(k));
+};
+
 // Map timeframe to TradingView interval string
 export const getTradingViewInterval = (tf: string): string => {
   switch (tf) {
@@ -131,14 +149,25 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
-  // Engine state: 'tradingview' (official real-time embed) or 'canvas' (high-performance local fallback)
-  const [engine, setEngine] = useState<'tradingview' | 'canvas'>('tradingview');
+  const tvSymbol = useMemo(() => getTradingViewSymbol(instrument.symbol), [instrument.symbol]);
+  const interval = useMemo(() => getTradingViewInterval(timeframe), [timeframe]);
+  const isRestricted = useMemo(
+    () => isTradingViewRestrictedSymbol(instrument.symbol, instrument.category) || tvSymbol.startsWith('NSE:') || tvSymbol.startsWith('BSE:'),
+    [instrument.symbol, instrument.category, tvSymbol]
+  );
+
+  // Engine state: Default to 'canvas' for Indian symbols (since TradingView free widgetembed blocks Indian exchange feeds),
+  // and 'tradingview' for global Crypto, Forex, and Commodities.
+  const [engine, setEngine] = useState<'tradingview' | 'canvas'>(() => (isRestricted ? 'canvas' : 'tradingview'));
   const [isIframeLoading, setIsIframeLoading] = useState(true);
   const [hasIframeError, setHasIframeError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
-  const tvSymbol = useMemo(() => getTradingViewSymbol(instrument.symbol), [instrument.symbol]);
-  const interval = useMemo(() => getTradingViewInterval(timeframe), [timeframe]);
+  useEffect(() => {
+    if (isRestricted) {
+      setEngine('canvas');
+    }
+  }, [isRestricted, instrument.symbol]);
 
   // Construct official, robust TradingView widget embed URL
   const iframeUrl = useMemo(() => {

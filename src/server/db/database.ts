@@ -4,13 +4,28 @@ import crypto from 'crypto';
 
 export type UserRole = 'SUPER_ADMIN' | 'MASTER' | 'BROKER' | 'SUB_BROKER' | 'CLIENT';
 
+export type AccountStatus =
+  | 'PENDING_EMAIL_VERIFICATION'
+  | 'PENDING_PHONE_VERIFICATION'
+  | 'ACTIVE'
+  | 'SUSPENDED'
+  | 'LOCKED'
+  | 'DISABLED'
+  | 'active'
+  | 'suspended'
+  | 'demo'
+  | 'deactivated';
+
 export interface UserRecord {
   id: string; // UUID
   full_name: string;
   user_id: string; // Normalized lowercase unique
   country_code: string;
-  mobile: string; // Normalized unique
+  mobile: string; // Normalized digits
+  phone_e164?: string; // Normalized E.164 (+[countryCode][digits])
+  phone_verified_at?: string;
   email?: string;
+  email_verified_at?: string;
   password_hash: string;
   role?: UserRole;
   parent_id?: string | null;
@@ -19,12 +34,20 @@ export interface UserRecord {
   address?: string;
   commission_rate?: number;
   is_verified: boolean;
+<<<<<<< HEAD
   status: 'active' | 'suspended' | 'demo' | 'deactivated';
   account_type?: 'real' | 'demo';
+=======
+  status: AccountStatus;
+>>>>>>> e24056d0f7621cf0aa24ab9c31a2d5d82e74336b
   is_frozen?: boolean;
   tenant_id?: string;
   referral_code?: string;
   referred_by?: string;
+  failed_login_attempts?: number;
+  locked_until?: string;
+  last_login_ip?: string;
+  revoked_sessions?: string[];
   created_at: string;
   updated_at: string;
   last_login_at?: string;
@@ -34,12 +57,15 @@ export interface UserRecord {
 export interface OtpRecord {
   id: string;
   user_id: string; // normalized user_id
+  phone_e164?: string; // normalized E.164
   otp_hash: string;
   purpose: 'registration' | 'login' | 'password_reset';
   expires_at: string;
   attempts: number;
+  max_attempts: number;
   verified_at?: string;
   created_at: string;
+  ip_address?: string;
   // Non-sensitive dev aid for immediate preview when SMTP not configured
   dev_otp_preview?: string;
 }
@@ -125,7 +151,9 @@ class DatabaseService {
 
   // --- Users Operations ---
   public findUserById(id: string): UserRecord | undefined {
-    return this.state.users.find((u) => u.id === id);
+    if (!id) return undefined;
+    const normalized = id.trim().toLowerCase();
+    return this.state.users.find((u) => u.id === id || (u.user_id && u.user_id.toLowerCase() === normalized));
   }
 
   public findUserByUserId(userId: string): UserRecord | undefined {
@@ -138,6 +166,19 @@ class DatabaseService {
     return this.state.users.find((u) => u.mobile.replace(/\D/g, '') === cleanMobile);
   }
 
+  public findUserByPhoneE164(phoneE164: string): UserRecord | undefined {
+    const clean = phoneE164.trim();
+    return this.state.users.find(
+      (u) => (u.phone_e164 && u.phone_e164 === clean) || (u.mobile && u.mobile.replace(/\D/g, '') === clean.replace(/\D/g, ''))
+    );
+  }
+
+  public findUserByEmail(email: string): UserRecord | undefined {
+    if (!email) return undefined;
+    const cleanEmail = email.trim().toLowerCase();
+    return this.state.users.find((u) => u.email && u.email.trim().toLowerCase() === cleanEmail);
+  }
+
   public findUserByUserIdOrMobile(identifier: string): UserRecord | undefined {
     const trimmed = identifier.trim();
     const normalized = trimmed.toLowerCase();
@@ -145,7 +186,11 @@ class DatabaseService {
 
     return this.state.users.find((u) => {
       if (u.user_id.toLowerCase() === normalized) return true;
-      if (cleanDigits.length >= 10 && u.mobile.replace(/\D/g, '').endsWith(cleanDigits.slice(-10))) {
+      if (u.phone_e164 && u.phone_e164 === trimmed) return true;
+      if (cleanDigits.length >= 7 && u.mobile && u.mobile.replace(/\D/g, '').endsWith(cleanDigits.slice(-10))) {
+        return true;
+      }
+      if (cleanDigits.length >= 7 && u.phone_e164 && u.phone_e164.replace(/\D/g, '').endsWith(cleanDigits.slice(-10))) {
         return true;
       }
       return false;
@@ -157,6 +202,7 @@ class DatabaseService {
     userId: string;
     countryCode: string;
     mobile: string;
+    phoneE164?: string;
     passwordHash: string;
     email?: string;
     role?: UserRole;
@@ -168,12 +214,17 @@ class DatabaseService {
     demoBalance?: number;
     referralCode?: string;
     referredBy?: string;
-    status?: 'active' | 'suspended' | 'demo';
+    status?: AccountStatus;
     isVerified?: boolean;
     tenantId?: string;
   }): UserRecord {
     const normalizedUserId = userData.userId.trim().toLowerCase();
-    const cleanMobile = userData.mobile.replace(/\D/g, '');
+    const cleanMobile = userData.mobile ? userData.mobile.replace(/\D/g, '') : '';
+    const cleanE164 = userData.phoneE164
+      ? userData.phoneE164.trim()
+      : cleanMobile
+      ? `+${(userData.countryCode || '+91').replace(/\D/g, '')}${cleanMobile}`
+      : undefined;
 
     // Check unique constraints (scoped per tenant if specified)
     const existingByUserId = this.state.users.find(
@@ -188,19 +239,24 @@ class DatabaseService {
       throw err;
     }
 
-    const existingByMobile = this.state.users.find(
-      (u) =>
-        u.mobile.replace(/\D/g, '') === cleanMobile &&
-        (!userData.tenantId || (u.tenant_id || 'vertex-default') === userData.tenantId)
-    );
-    if (existingByMobile) {
-      const err = new Error('Mobile number is already registered with another account.');
-      (err as any).statusCode = 409;
-      (err as any).field = 'mobile';
-      throw err;
+    if (cleanMobile || cleanE164) {
+      const existingByMobile = this.state.users.find(
+        (u) =>
+          ((cleanMobile && u.mobile && u.mobile.replace(/\D/g, '') === cleanMobile) ||
+            (cleanE164 && u.phone_e164 && u.phone_e164 === cleanE164)) &&
+          (!userData.tenantId || (u.tenant_id || 'vertex-default') === userData.tenantId)
+      );
+      if (existingByMobile) {
+        const err = new Error('Phone number is already registered with another account.');
+        (err as any).statusCode = 409;
+        (err as any).field = 'mobile';
+        throw err;
+      }
     }
 
     const now = new Date().toISOString();
+    const initialStatus = userData.status || (userData.isVerified ? 'ACTIVE' : 'PENDING_PHONE_VERIFICATION');
+
     const newUser: UserRecord = {
       id: crypto.randomUUID(),
       tenant_id: userData.tenantId || 'vertex-default',
@@ -208,7 +264,8 @@ class DatabaseService {
       user_id: normalizedUserId,
       email: userData.email,
       country_code: userData.countryCode || '+91',
-      mobile: cleanMobile,
+      mobile: cleanMobile || undefined,
+      phone_e164: cleanE164,
       password_hash: userData.passwordHash,
       role: userData.role || 'CLIENT',
       parent_id: userData.parentId !== undefined ? userData.parentId : null,
@@ -217,13 +274,16 @@ class DatabaseService {
       address: userData.address,
       commission_rate: userData.commissionRate,
       is_verified: userData.isVerified ?? false,
-      status: userData.status || 'active',
+      email_verified_at: userData.isVerified ? now : undefined,
+      phone_verified_at: userData.isVerified ? now : undefined,
+      status: initialStatus,
       is_frozen: false,
+      failed_login_attempts: 0,
       referral_code: userData.referralCode,
       referred_by: userData.referredBy,
       created_at: now,
       updated_at: now,
-      demo_balance: userData.demoBalance !== undefined ? userData.demoBalance : 1000000.0, // ₹10,00,000 virtual demo trading balance
+      demo_balance: userData.demoBalance !== undefined ? userData.demoBalance : 0.0,
     };
 
     this.state.users.push(newUser);
@@ -235,14 +295,16 @@ class DatabaseService {
     const user = this.findUserById(userId) || this.findUserByUserId(userId);
     if (!user) return null;
     user.is_frozen = isFrozen;
+    (user as any).isFrozen = isFrozen;
+    user.status = isFrozen ? 'suspended' : 'active';
     user.updated_at = new Date().toISOString();
     this.save();
     return user;
   }
 
   public isUserOrHierarchyFrozen(user: UserRecord): { frozen: boolean; reason?: string } {
-    // 1. Direct individual user freeze
-    if (user.status === 'suspended' || user.is_frozen === true) {
+    // 1. Direct individual user freeze / suspension
+    if (user.status === 'suspended' || user.status === 'SUSPENDED' || Boolean(user.is_frozen) || Boolean((user as any).isFrozen)) {
       return {
         frozen: true,
         reason: 'Your trading account is currently frozen. Please contact customer support.',
@@ -256,7 +318,7 @@ class DatabaseService {
         if (ancestorUserId === 'root' || ancestorUserId.toLowerCase() === user.user_id.toLowerCase()) continue;
         const ancestor = this.findUserByUserId(ancestorUserId);
         if (ancestor) {
-          if (ancestor.status === 'suspended' || ancestor.is_frozen === true) {
+          if (ancestor.status === 'suspended' || ancestor.status === 'SUSPENDED' || ancestor.is_frozen === true) {
             const roleLabel = ancestor.role === 'MASTER' ? 'Master Broker' : 'Broker';
             return {
               frozen: true,
@@ -284,7 +346,9 @@ class DatabaseService {
   }
 
   public updateUser(id: string, updates: Partial<UserRecord>): UserRecord | undefined {
-    const userIndex = this.state.users.findIndex((u) => u.id === id);
+    if (!id) return undefined;
+    const normId = id.trim().toLowerCase();
+    const userIndex = this.state.users.findIndex((u) => u.id === id || (u.user_id && u.user_id.toLowerCase() === normId));
     if (userIndex === -1) return undefined;
 
     this.state.users[userIndex] = {
@@ -298,14 +362,70 @@ class DatabaseService {
 
   public markUserVerified(userId: string): boolean {
     const normalized = userId.trim().toLowerCase();
-    const user = this.state.users.find((u) => u.user_id.toLowerCase() === normalized);
+    const user = this.state.users.find(
+      (u) => u.user_id.toLowerCase() === normalized || (u.email && u.email.toLowerCase() === normalized)
+    );
     if (user) {
+      const now = new Date().toISOString();
       user.is_verified = true;
-      user.updated_at = new Date().toISOString();
+      user.phone_verified_at = user.phone_verified_at || now;
+      user.email_verified_at = now;
+      if (
+        user.status === 'PENDING_EMAIL_VERIFICATION' ||
+        user.status === 'PENDING_PHONE_VERIFICATION' ||
+        user.status === 'active'
+      ) {
+        user.status = 'ACTIVE';
+      }
+      user.failed_login_attempts = 0;
+      user.locked_until = undefined;
+      user.updated_at = now;
       this.save();
       return true;
     }
     return false;
+  }
+
+  public recordLoginFailure(userId: string): { attempts: number; isLocked: boolean; lockedUntil?: string } {
+    const user = this.findUserByUserId(userId);
+    if (!user) return { attempts: 0, isLocked: false };
+
+    user.failed_login_attempts = (user.failed_login_attempts || 0) + 1;
+    let isLocked = false;
+    let lockedUntil: string | undefined = undefined;
+
+    // Lock account for 15 minutes after 5 failed attempts
+    if (user.failed_login_attempts >= 5) {
+      isLocked = true;
+      user.status = 'LOCKED';
+      const lockoutExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+      user.locked_until = lockoutExpiry.toISOString();
+      lockedUntil = user.locked_until;
+    }
+
+    user.updated_at = new Date().toISOString();
+    this.save();
+
+    return {
+      attempts: user.failed_login_attempts,
+      isLocked,
+      lockedUntil,
+    };
+  }
+
+  public recordLoginSuccess(userId: string, ip?: string): void {
+    const user = this.findUserByUserId(userId);
+    if (!user) return;
+
+    user.failed_login_attempts = 0;
+    user.locked_until = undefined;
+    if (user.status === 'LOCKED') {
+      user.status = 'ACTIVE';
+    }
+    user.last_login_at = new Date().toISOString();
+    if (ip) user.last_login_ip = ip;
+    user.updated_at = new Date().toISOString();
+    this.save();
   }
 
   public updateLastLogin(id: string): void {
@@ -320,6 +440,11 @@ class DatabaseService {
     const user = this.findUserByUserId(userId);
     if (user) {
       user.password_hash = newPasswordHash;
+      user.failed_login_attempts = 0;
+      user.locked_until = undefined;
+      if (user.status === 'LOCKED') {
+        user.status = 'ACTIVE';
+      }
       user.updated_at = new Date().toISOString();
       this.save();
       return true;
@@ -327,12 +452,24 @@ class DatabaseService {
     return false;
   }
 
+  public invalidateUserSessions(userId: string): void {
+    const user = this.findUserByUserId(userId);
+    if (user) {
+      // Rotate session generation timestamp
+      user.updated_at = new Date().toISOString();
+      this.save();
+    }
+  }
+
   // --- OTP Verifications Operations ---
   public createOtp(params: {
     userId: string;
+    phoneE164?: string;
     otpHash: string;
     purpose: 'registration' | 'login' | 'password_reset';
     expiresAt: Date;
+    maxAttempts?: number;
+    ipAddress?: string;
     devOtpPreview?: string;
   }): OtpRecord {
     const normalizedUserId = params.userId.trim().toLowerCase();
@@ -343,10 +480,13 @@ class DatabaseService {
     const otpRecord: OtpRecord = {
       id: crypto.randomUUID(),
       user_id: normalizedUserId,
+      phone_e164: params.phoneE164,
       otp_hash: params.otpHash,
       purpose: params.purpose,
       expires_at: params.expiresAt.toISOString(),
       attempts: 0,
+      max_attempts: params.maxAttempts || 5,
+      ip_address: params.ipAddress,
       created_at: new Date().toISOString(),
       dev_otp_preview: params.devOtpPreview,
     };
@@ -409,7 +549,7 @@ class DatabaseService {
 
     // Also check if any existing verified user has this user_id as their referral code
     const userReferrer = this.state.users.find(
-      (u) => u.user_id.toUpperCase() === cleanCode && u.is_verified
+      (u) => u.user_id.toUpperCase() === cleanCode && (u.is_verified || u.status === 'ACTIVE')
     );
     return !!userReferrer;
   }
@@ -430,6 +570,7 @@ class DatabaseService {
         full_name: data?.fullName || 'Demo Trader',
         user_id: demoUserId,
         country_code: '+91',
+<<<<<<< HEAD
         mobile: data?.mobile || '9876543210',
         password_hash: '$2a$10$DEMO_ACCOUNT_NOT_PASSWORD_ACCESSIBLE_DIRECTLY',
         role: 'CLIENT',
@@ -439,6 +580,14 @@ class DatabaseService {
         status: 'active',
         account_type: 'demo',
         tenant_id: data?.tenantId || 'vertex-default',
+=======
+        mobile: '9876543210',
+        phone_e164: '+919876543210',
+        phone_verified_at: new Date().toISOString(),
+        password_hash: '$argon2id$v=19$m=19456,t=2,p=1$DEMO_ACCOUNT_NOT_PASSWORD_ACCESSIBLE_DIRECTLY',
+        is_verified: true,
+        status: 'ACTIVE',
+>>>>>>> e24056d0f7621cf0aa24ab9c31a2d5d82e74336b
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         demo_balance: 1000000.0,

@@ -40,13 +40,30 @@ export class CentralAdminEventClient {
   private baseRetryDelayMs: number;
 
   constructor(options: CentralAdminEventClientOptions = {}) {
+    const isProduction = process.env.NODE_ENV === 'production';
     const config = getInternalAuthConfig();
-    this.baseUrl =
-      options.baseUrl ||
-      options.endpointUrl ||
-      process.env.CENTRAL_ADMIN_BASE_URL ||
-      config.tradingPlatformBaseUrl ||
-      'http://localhost:3000';
+
+    if (isProduction) {
+      const centralAdminUrl = process.env.CENTRAL_ADMIN_BASE_URL;
+      if (!centralAdminUrl) {
+        throw new Error('[SECURITY ERROR] CENTRAL_ADMIN_BASE_URL is required in production.');
+      }
+      if (
+        centralAdminUrl.includes('localhost') ||
+        centralAdminUrl.includes('127.0.0.1') ||
+        (process.env.TRADING_PLATFORM_BASE_URL && centralAdminUrl === process.env.TRADING_PLATFORM_BASE_URL)
+      ) {
+        throw new Error('[SECURITY ERROR] CENTRAL_ADMIN_BASE_URL cannot point to localhost or TRADING_PLATFORM_BASE_URL in production.');
+      }
+      this.baseUrl = centralAdminUrl;
+    } else {
+      this.baseUrl =
+        options.baseUrl ||
+        options.endpointUrl ||
+        process.env.CENTRAL_ADMIN_BASE_URL ||
+        config.tradingPlatformBaseUrl ||
+        'http://localhost:3000';
+    }
     this.secret = options.secret || options.hmacSecret || config.internalCommunicationSecret;
     this.timeoutMs = options.timeoutMs ?? (process.env.INTERNAL_REQUEST_TIMEOUT_MS ? parseInt(process.env.INTERNAL_REQUEST_TIMEOUT_MS, 10) : 3000);
     this.maxRetries = options.maxRetries ?? 2;
@@ -54,6 +71,18 @@ export class CentralAdminEventClient {
   }
 
   public setBaseUrl(url: string): void {
+    if (process.env.NODE_ENV === 'production') {
+      if (!url) {
+        throw new Error('[SECURITY ERROR] CentralAdminEventClient base URL cannot be empty in production.');
+      }
+      if (
+        url.includes('localhost') ||
+        url.includes('127.0.0.1') ||
+        (process.env.TRADING_PLATFORM_BASE_URL && url === process.env.TRADING_PLATFORM_BASE_URL)
+      ) {
+        throw new Error('[SECURITY ERROR] CentralAdminEventClient base URL cannot point to localhost or TRADING_PLATFORM_BASE_URL in production.');
+      }
+    }
     this.baseUrl = url;
   }
 

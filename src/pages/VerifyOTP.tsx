@@ -8,6 +8,7 @@ import { RotateCw, ShieldCheck, ArrowLeft } from 'lucide-react';
 interface VerifyOTPProps {
   initialUserId?: string;
   initialMobile?: string;
+  initialEmail?: string;
   initialCountryCode?: string;
   purpose?: 'registration' | 'password_reset';
   onNavigate: (route: string, state?: any) => void;
@@ -16,6 +17,7 @@ interface VerifyOTPProps {
 export const VerifyOTP: React.FC<VerifyOTPProps> = ({
   initialUserId = '',
   initialMobile = '',
+  initialEmail = '',
   initialCountryCode = '+91',
   purpose = 'registration',
   onNavigate,
@@ -24,6 +26,7 @@ export const VerifyOTP: React.FC<VerifyOTPProps> = ({
 
   const [userId] = useState(initialUserId);
   const [mobile] = useState(initialMobile);
+  const [email] = useState(initialEmail);
   const [countryCode] = useState(initialCountryCode);
 
   const [otp, setOtp] = useState('');
@@ -31,18 +34,18 @@ export const VerifyOTP: React.FC<VerifyOTPProps> = ({
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
 
-  // 10:00 Validity Countdown
-  const [validitySeconds, setValiditySeconds] = useState(600);
-  // 45 seconds Resend Cooldown
-  const [resendCooldown, setResendCooldown] = useState(45);
+  // 5:00 Validity Countdown (300 seconds)
+  const [validitySeconds, setValiditySeconds] = useState(300);
+  // 60 seconds Resend Cooldown
+  const [resendCooldown, setResendCooldown] = useState(60);
 
   useEffect(() => {
-    // Timer for 10-minute validity
+    // Timer for 5-minute validity
     const validityTimer = setInterval(() => {
       setValiditySeconds((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
 
-    // Timer for 45s resend cooldown
+    // Timer for 60s resend cooldown
     const cooldownTimer = setInterval(() => {
       setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
@@ -59,9 +62,11 @@ export const VerifyOTP: React.FC<VerifyOTPProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const maskedMobile = mobile
+  const maskedDestination = email
+    ? email.replace(/(.{2})(.*)(?=@)/, '$1••••')
+    : mobile
     ? `${countryCode} XXXXXXX${mobile.slice(-4)}`
-    : `${countryCode} registered mobile`;
+    : 'your registered email / mobile';
 
   const handleVerify = async (codeToVerify?: string) => {
     const targetOtp = codeToVerify || otp;
@@ -102,8 +107,13 @@ export const VerifyOTP: React.FC<VerifyOTPProps> = ({
 
     try {
       await resendOtp(userId, purpose);
-      setResendCooldown(45);
-      setValiditySeconds(600);
+      setResendCooldown(60);
+      setValiditySeconds(300);
+      showToast({
+        type: 'info',
+        title: 'Verification Code Sent',
+        description: 'A new 6-digit OTP code has been sent to your email.',
+      });
     } catch (err: any) {
       setError(err.message || 'Failed to resend OTP.');
     } finally {
@@ -113,8 +123,8 @@ export const VerifyOTP: React.FC<VerifyOTPProps> = ({
 
   return (
     <AuthCard
-      title="Verify your mobile number"
-      subtitle={`We sent a 6-digit verification code to ${maskedMobile}`}
+      title="Verify your email address"
+      subtitle={`We sent a 6-digit verification code to ${maskedDestination}`}
       footer={
         <button
           type="button"

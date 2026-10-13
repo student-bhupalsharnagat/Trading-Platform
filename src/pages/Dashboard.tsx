@@ -63,7 +63,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   // Navigation & Sub-views
   const [activeNav, setActiveNav] = useState<'watchlist' | 'orders' | 'positions' | 'history' | 'profile'>('watchlist');
-  const [activeTab, setActiveTab] = useState<'ALL' | 'CRYPTO' | 'EQUITY' | 'FOREX' | 'COMMODITY' | 'INDEX'>('ALL');
+  const [activeTab, setActiveTab] = useState<'ALL' | 'EQUITY' | 'COMMODITY' | 'INDEX' | 'CRYPTO' | 'FOREX'>('ALL');
+  const [equitySectorFilter, setEquitySectorFilter] = useState<'ALL' | 'NIFTY50' | 'BANKING' | 'IT' | 'AUTO' | 'ENERGY' | 'FMCG_RETAIL' | 'PHARMA' | 'PSU_DEFENCE' | 'FUTURES'>('ALL');
   const [positionFilter, setPositionFilter] = useState<'ALL' | 'INTRADAY' | 'HOLDING'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -205,11 +206,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const orderWindowInstrumentRef = useRef(orderWindowInstrument);
   orderWindowInstrumentRef.current = orderWindowInstrument;
 
+  const processedEventsRef = useRef<Set<string>>(new Set());
+
   // Connect to Live Trading WebSocket for instantaneous updates
   useEffect(() => {
     let ws: WebSocket | null = null;
     let reconnectTimeout: any = null;
     let isMounted = true;
+    let reconnectAttempts = 0;
 
     const connectWs = () => {
       try {
@@ -218,12 +222,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
-          // Connected to trading stream
+          reconnectAttempts = 0;
         };
 
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
+            if (!data || !data.event) return;
+
+            // Deduplicate incoming events
+            const eventKey = `${data.event}:${data.timestamp || ''}:${JSON.stringify(data.payload?.id || data.payload?.orderId || '')}`;
+            if (processedEventsRef.current.has(eventKey)) return;
+
+            if (processedEventsRef.current.size > 200) {
+              processedEventsRef.current.clear();
+            }
+            if (data.event !== 'market.ticks') {
+              processedEventsRef.current.add(eventKey);
+            }
+
             if (data.event === 'market.ticks' && data.payload?.instruments) {
               setInstruments(data.payload.instruments);
               if (selectedChartInstrumentRef.current) {
@@ -238,21 +255,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 );
                 if (updatedOrder) setOrderWindowInstrument(updatedOrder);
               }
-            } else if (data.event === 'portfolio.mtm' && data.payload) {
+            } else if (data.event === 'wallet.updated' && data.payload) {
+              const w = data.payload;
               setPortfolio((prev) => {
                 if (!prev) return prev;
                 return {
                   ...prev,
-                  positions: data.payload.positions || prev.positions,
-                  wallet: data.payload.wallet ? { ...prev.wallet, ...data.payload.wallet } : prev.wallet,
+                  wallet: {
+                    availableBalance: w.availableBalance ?? w.available_balance ?? prev.wallet.availableBalance,
+                    usedMargin: w.usedMargin ?? w.used_margin ?? prev.wallet.usedMargin,
+                    totalPnL: w.realizedPnl ?? w.realized_pnl ?? w.totalPnL ?? prev.wallet.totalPnL,
+                    todayPnL: prev.wallet.todayPnL,
+                    deposited: w.deposited ?? prev.wallet.deposited,
+                    withdrawn: w.withdrawn ?? prev.wallet.withdrawn,
+                  },
                 };
               });
+              fetchData();
             } else if (
               data.event === 'order.created' ||
               data.event === 'trade.executed' ||
               data.event === 'position.updated' ||
-              data.event === 'wallet.updated' ||
-              data.event === 'order.cancelled'
+              data.event === 'order.cancelled' ||
+              data.event === 'portfolio.mtm'
             ) {
               fetchData();
             }
@@ -261,12 +286,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
         ws.onclose = () => {
           if (isMounted) {
-            reconnectTimeout = setTimeout(connectWs, 3000);
+            reconnectAttempts++;
+            const delay = Math.min(10000, 1000 * Math.pow(1.5, reconnectAttempts));
+            reconnectTimeout = setTimeout(connectWs, delay);
           }
         };
 
         ws.onerror = () => {
-          // Fallback to active interval polling
+          // Closed event will trigger reconnect
         };
       } catch {}
     };
@@ -282,8 +309,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 1000);
-    return () => clearInterval(interval);
   }, []);
 
   const handleLogout = async () => {
@@ -307,8 +332,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   const handleOrderPlaced = (orderRes?: any) => {
     setOrderWindowInstrument(null);
-    setSelectedChartInstrument(null);
-    setActiveNav('positions');
+    // Retain chart if user was viewing live chart
+    if (!selectedChartInstrument) {
+      setActiveNav('positions');
+    }
 
     if (orderRes) {
       setPortfolio((prev) => {
@@ -421,36 +448,130 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     }
   };
 
-  // Filter instruments based on search and category tab
+  // Filter instruments based on search, category tab, and equity sector
   const filteredInstruments = instruments.filter((inst) => {
-    const matchesCategory = activeTab === 'ALL' || inst.category === activeTab;
+    const isEquity =
+      inst.category === 'EQUITY' ||
+      inst.sectionName?.includes('EQUITY') ||
+      inst.sectionName?.includes('NSE') ||
+      inst.sectionName?.includes('BSE');
+
+    const matchesCategory =
+      activeTab === 'ALL' ||
+      (activeTab === 'EQUITY' ? isEquity : inst.category === activeTab);
+
+    const q = searchQuery.toLowerCase().trim();
     const matchesSearch =
-      inst.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (inst.name && inst.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      inst.category.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCategory && matchesSearch;
+      !q ||
+      inst.symbol.toLowerCase().includes(q) ||
+      (inst.name && inst.name.toLowerCase().includes(q)) ||
+      inst.category.toLowerCase().includes(q) ||
+      (inst.sectionName && inst.sectionName.toLowerCase().includes(q));
+
+    if (!matchesCategory || !matchesSearch) return false;
+
+    // Optional equity sector filter when activeTab === 'EQUITY'
+    if (activeTab === 'EQUITY' && equitySectorFilter !== 'ALL') {
+      if (equitySectorFilter === 'FUTURES') {
+        return inst.symbol.includes('FUT') || inst.sectionName === 'NSE FUT';
+      }
+      if (equitySectorFilter === 'NIFTY50') {
+        const niftyTop = [
+          'RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'INFY', 'SBIN', 'BHARTIARTL',
+          'ITC', 'HINDUNILVR', 'LT', 'BAJFINANCE', 'MARUTI', 'TATAMOTORS', 'TATASTEEL',
+          'KOTAKBANK', 'AXISBANK', 'SUNPHARMA', 'TITAN', 'ADANIENT', 'ADANIPORTS',
+          'WIPRO', 'HCLTECH', 'NTPC', 'POWERGRID', 'ONGC', 'COALINDIA', 'ASIANPAINT',
+          'ULTRACEMCO', 'BAJAJFINSV', 'NESTLEIND'
+        ];
+        return niftyTop.some((sym) => inst.symbol.startsWith(sym));
+      }
+      if (equitySectorFilter === 'BANKING') {
+        const banks = [
+          'HDFCBANK', 'ICICIBANK', 'SBIN', 'KOTAKBANK', 'AXISBANK', 'INDUSINDBK',
+          'PNB', 'BANKBARODA', 'CANBK', 'YESBANK', 'BAJFINANCE', 'BAJAJFINSV',
+          'JIOFIN', 'CHOLAFIN', 'SHRIRAMFIN', 'MUTHOOTFIN', 'LICI', 'HDFCLIFE', 'SBILIFE'
+        ];
+        return banks.some((sym) => inst.symbol.startsWith(sym));
+      }
+      if (equitySectorFilter === 'IT') {
+        const it = ['TCS', 'INFY', 'WIPRO', 'HCLTECH', 'TECHM', 'TATAELXSI', 'KPITTECH', 'PERSISTENT', 'COFORGE'];
+        return it.some((sym) => inst.symbol.startsWith(sym));
+      }
+      if (equitySectorFilter === 'AUTO') {
+        const auto = ['MARUTI', 'TATAMOTORS', 'BAJAJ-AUTO', 'HEROMOTOCO', 'EICHERMOT', 'ASHOKLEY', 'BOSCHLTD', 'MRF'];
+        return auto.some((sym) => inst.symbol.startsWith(sym));
+      }
+      if (equitySectorFilter === 'ENERGY') {
+        const energy = ['RELIANCE', 'NTPC', 'POWERGRID', 'ONGC', 'COALINDIA', 'IOC', 'BPCL', 'TATAPOWER', 'NHPC', 'SUZLON', 'IREDA'];
+        return energy.some((sym) => inst.symbol.startsWith(sym));
+      }
+      if (equitySectorFilter === 'PHARMA') {
+        const pharma = ['SUNPHARMA', 'CIPLA', 'DRREDDY', 'DIVISLAB', 'APOLLOHOSP', 'LUPIN', 'AUROPHARMA', 'TORNTPHARM', 'ALKEM', 'ZYDUSLIFE'];
+        return pharma.some((sym) => inst.symbol.startsWith(sym));
+      }
+      if (equitySectorFilter === 'FMCG_RETAIL') {
+        const fmcg = ['ITC', 'HINDUNILVR', 'NESTLEIND', 'BRITANNIA', 'TATACONSUM', 'VBL', 'DABUR', 'MARICO', 'COLPAL', 'GODREJCP', 'TRENT', 'DMART', 'PAGEIND', 'JUBLFOOD', 'ZOMATO'];
+        return fmcg.some((sym) => inst.symbol.startsWith(sym));
+      }
+      if (equitySectorFilter === 'PSU_DEFENCE') {
+        const psu = ['BEL', 'HAL', 'MAZDOCK', 'COCHINSHIP', 'RVNL', 'BHEL', 'IRCTC', 'SBIN', 'PNB', 'BANKBARODA', 'CANBK', 'RECLTD', 'PFC', 'ONGC', 'IOC', 'BPCL', 'COALINDIA', 'NTPC', 'POWERGRID'];
+        return psu.some((sym) => inst.symbol.startsWith(sym));
+      }
+    }
+
+    return true;
   });
 
   const isDemo = user?.status === 'demo' || user?.userId === 'vtx123';
 
   // Live dynamic Mark-to-Market calculation using live ticking instruments
   const livePositions = useMemo(() => {
-    return (portfolio?.positions || []).map((pos) => {
-      const liveInst = instruments.find((i) => i.symbol === pos.symbol);
-      const ltp = liveInst ? liveInst.lastPrice : pos.ltp;
-      const pnl = pos.type === 'BUY'
-        ? (ltp - pos.avgPrice) * pos.qty
-        : (pos.avgPrice - ltp) * pos.qty;
-      const pnlPercent = (pos.avgPrice * pos.qty) > 0
-        ? Number(((pnl / (pos.avgPrice * pos.qty)) * 100).toFixed(2))
+    return (portfolio?.positions || []).map((pos: any) => {
+      const sym = pos.symbol || pos.instrument_id || '';
+      const cleanSym = sym.replace(/^(NSE|BSE|MCX|NFO|BINANCE|TVC):/i, '').trim().toUpperCase();
+
+      const liveInst = instruments.find((i) => {
+        const iSym = i.symbol.replace(/^(NSE|BSE|MCX|NFO|BINANCE|TVC):/i, '').trim().toUpperCase();
+        return iSym === cleanSym || i.id?.toUpperCase() === cleanSym;
+      });
+
+      const rawQty = pos.qty ?? pos.quantity ?? 0;
+      const qty = Math.abs(Number(rawQty) || 0);
+      const avgPrice = Number(pos.avgPrice ?? pos.average_price ?? pos.averagePrice ?? 0);
+      const ltp = liveInst?.lastPrice ? Number(liveInst.lastPrice) : Number(pos.ltp ?? pos.lastPrice ?? avgPrice);
+
+      const rawType = (pos.type || (Number(rawQty) >= 0 ? 'BUY' : 'SELL') || 'BUY').toUpperCase();
+      const posType: 'BUY' | 'SELL' = rawType === 'SELL' ? 'SELL' : 'BUY';
+      const product = ((pos.product || 'INTRADAY') as string).toUpperCase() as 'INTRADAY' | 'HOLDING';
+
+      const lotSize = Number(pos.lotSize || liveInst?.lotSize || (liveInst?.category === 'EQUITY' ? 1 : 100));
+      const lots = Number(pos.lots || Math.max(1, Math.round(qty / lotSize)));
+
+      // Real-time MTM (Mark-to-market) P&L
+      const pnl = posType === 'BUY'
+        ? (ltp - avgPrice) * qty
+        : (avgPrice - ltp) * qty;
+
+      const totalExposure = avgPrice * qty;
+      const pnlPercent = totalExposure > 0
+        ? Number(((pnl / totalExposure) * 100).toFixed(2))
         : 0;
+
       return {
         ...pos,
-        ltp,
+        id: pos.id || `POS-${sym}`,
+        symbol: sym,
+        category: liveInst?.category || pos.category || 'COMMODITY',
+        type: posType,
+        product,
+        qty,
+        lots,
+        lotSize,
+        avgPrice: Number(avgPrice.toFixed(2)),
+        ltp: Number(ltp.toFixed(2)),
         pnl: Number(pnl.toFixed(2)),
         pnlPercent,
-        category: liveInst?.category || pos.category || 'COMMODITY',
-        lotSize: liveInst?.lotSize || pos.lotSize || 100,
+        timestamp: pos.timestamp || pos.updated_at || new Date().toISOString(),
       };
     });
   }, [portfolio?.positions, instruments]);
@@ -525,7 +646,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           onBack={() => setSelectedChartInstrument(null)}
           onOpenOrderWindow={(inst, type) => handleOpenOrder(inst, type)}
           onOpenWallet={() => setIsWalletModalOpen(true)}
-          walletBalance={portfolio?.wallet?.availableBalance || 142840}
+          walletBalance={portfolio?.wallet?.availableBalance ?? 0}
         />
 
         {/* Modal Order Window overlay if triggered from chart */}
@@ -548,12 +669,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           isOpen={isWalletModalOpen}
           wallet={
             portfolio?.wallet || {
-              availableBalance: 142840,
-              usedMargin: 38210,
-              totalPnL: 34386.86,
-              todayPnL: 504.52,
-              deposited: 200000,
-              withdrawn: 50000,
+              availableBalance: 0,
+              usedMargin: 0,
+              totalPnL: 0,
+              todayPnL: 0,
+              deposited: 0,
+              withdrawn: 0,
             }
           }
           onClose={() => setIsWalletModalOpen(false)}
@@ -765,6 +886,73 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         </div>
       </header>
 
+      {/* Live Market Indices Ticker Bar (Zerodha Kite & Upstox standard) */}
+      <div className="bg-slate-100 dark:bg-[#070D18] border-b border-slate-200 dark:border-[#141F30] px-3 sm:px-6 py-1.5 overflow-x-auto no-scrollbar flex items-center justify-between text-xs">
+        <div className="flex items-center gap-6 shrink-0 font-mono">
+          {/* NIFTY 50 */}
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-slate-800 dark:text-slate-200 font-sans text-[11px]">NIFTY 50</span>
+            <span className="font-bold text-slate-900 dark:text-white">
+              ₹{(instruments.find((i) => i.id === 'nifty_50' || i.symbol.startsWith('NIFTY 50'))?.lastPrice || 24852.15).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            </span>
+            <span className={`text-[11px] font-semibold flex items-center ${
+              (instruments.find((i) => i.id === 'nifty_50' || i.symbol.startsWith('NIFTY 50'))?.change ?? 142.6) >= 0 ? 'text-emerald-500' : 'text-rose-500'
+            }`}>
+              {(instruments.find((i) => i.id === 'nifty_50' || i.symbol.startsWith('NIFTY 50'))?.change ?? 142.6) >= 0 ? '+' : ''}{(instruments.find((i) => i.id === 'nifty_50' || i.symbol.startsWith('NIFTY 50'))?.change ?? 142.6).toFixed(2)} ({(instruments.find((i) => i.id === 'nifty_50' || i.symbol.startsWith('NIFTY 50'))?.changePercent ?? 0.58) >= 0 ? '+' : ''}{(instruments.find((i) => i.id === 'nifty_50' || i.symbol.startsWith('NIFTY 50'))?.changePercent ?? 0.58).toFixed(2)}%)
+            </span>
+          </div>
+
+          <div className="h-3 w-px bg-slate-300 dark:bg-slate-700 hidden sm:block" />
+
+          {/* SENSEX */}
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-slate-800 dark:text-slate-200 font-sans text-[11px]">SENSEX</span>
+            <span className="font-bold text-slate-900 dark:text-white">
+              ₹{(instruments.find((i) => i.id === 'sensex' || i.symbol.startsWith('SENSEX'))?.lastPrice || 81332.72).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            </span>
+            <span className={`text-[11px] font-semibold flex items-center ${
+              (instruments.find((i) => i.id === 'sensex' || i.symbol.startsWith('SENSEX'))?.change ?? 352.52) >= 0 ? 'text-emerald-500' : 'text-rose-500'
+            }`}>
+              {(instruments.find((i) => i.id === 'sensex' || i.symbol.startsWith('SENSEX'))?.change ?? 352.52) >= 0 ? '+' : ''}{(instruments.find((i) => i.id === 'sensex' || i.symbol.startsWith('SENSEX'))?.change ?? 352.52).toFixed(2)} ({(instruments.find((i) => i.id === 'sensex' || i.symbol.startsWith('SENSEX'))?.changePercent ?? 0.44) >= 0 ? '+' : ''}{(instruments.find((i) => i.id === 'sensex' || i.symbol.startsWith('SENSEX'))?.changePercent ?? 0.44).toFixed(2)}%)
+            </span>
+          </div>
+
+          <div className="h-3 w-px bg-slate-300 dark:bg-slate-700 hidden sm:block" />
+
+          {/* NIFTY BANK */}
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-slate-800 dark:text-slate-200 font-sans text-[11px]">NIFTY BANK</span>
+            <span className="font-bold text-slate-900 dark:text-white">
+              ₹{(instruments.find((i) => i.id === 'bank_nifty_fut' || i.symbol.startsWith('BANKNIFTY'))?.lastPrice || 51383.41).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            </span>
+            <span className={`text-[11px] font-semibold flex items-center ${
+              (instruments.find((i) => i.id === 'bank_nifty_fut' || i.symbol.startsWith('BANKNIFTY'))?.change ?? -380.0) >= 0 ? 'text-emerald-500' : 'text-rose-500'
+            }`}>
+              {(instruments.find((i) => i.id === 'bank_nifty_fut' || i.symbol.startsWith('BANKNIFTY'))?.change ?? -380.0) >= 0 ? '+' : ''}{(instruments.find((i) => i.id === 'bank_nifty_fut' || i.symbol.startsWith('BANKNIFTY'))?.change ?? -380.0).toFixed(2)} ({(instruments.find((i) => i.id === 'bank_nifty_fut' || i.symbol.startsWith('BANKNIFTY'))?.changePercent ?? -0.74) >= 0 ? '+' : ''}{(instruments.find((i) => i.id === 'bank_nifty_fut' || i.symbol.startsWith('BANKNIFTY'))?.changePercent ?? -0.74).toFixed(2)}%)
+            </span>
+          </div>
+
+          <div className="h-3 w-px bg-slate-300 dark:bg-slate-700 hidden md:block" />
+
+          {/* INDIA VIX */}
+          <div className="hidden md:flex items-center gap-2">
+            <span className="font-bold text-slate-800 dark:text-slate-200 font-sans text-[11px]">INDIA VIX</span>
+            <span className="font-bold text-amber-500">12.84</span>
+            <span className="text-[11px] font-semibold text-rose-500">-0.32 (-2.43%)</span>
+          </div>
+        </div>
+
+        {/* Funds Glance in Ticker */}
+        <div className="hidden lg:flex items-center gap-4 font-mono text-[11px]">
+          <span className="text-slate-500 dark:text-slate-400">
+            Available Margin: <span className="font-bold text-slate-900 dark:text-white">₹{(portfolio?.wallet?.availableBalance ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+          </span>
+          <span className="text-slate-500 dark:text-slate-400">
+            Used: <span className="font-bold text-slate-700 dark:text-slate-300">₹{(portfolio?.wallet?.usedMargin ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+          </span>
+        </div>
+      </div>
+
       {/* Wallet Balance Drawer */}
       {isWalletDrawerOpen && (
         <div className="bg-[#0E1726] border-b border-[#1E293B] px-4 py-4 animate-fadeIn shadow-xl">
@@ -772,13 +960,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             <div className="p-3 bg-[#080E18] rounded-xl border border-[#1A2638]">
               <span className="text-[11px] text-slate-400">Available Funds</span>
               <p className="text-base font-mono font-bold text-amber-400 mt-0.5">
-                ₹{portfolio?.wallet?.availableBalance?.toLocaleString('en-IN', { minimumFractionDigits: 2 }) || '1,42,840.00'}
+                ₹{(portfolio?.wallet?.availableBalance ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </p>
             </div>
             <div className="p-3 bg-[#080E18] rounded-xl border border-[#1A2638]">
               <span className="text-[11px] text-slate-400">Used Margin</span>
               <p className="text-base font-mono font-bold text-slate-200 mt-0.5">
-                ₹{portfolio?.wallet?.usedMargin?.toLocaleString('en-IN', { minimumFractionDigits: 2 }) || '38,210.00'}
+                ₹{(portfolio?.wallet?.usedMargin ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </p>
             </div>
             <div className="p-3 bg-[#080E18] rounded-xl border border-[#1A2638]">
@@ -900,7 +1088,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                       {t('availableMargin')}
                     </div>
                     <div className="text-sm sm:text-base lg:text-lg font-mono font-black text-slate-900 dark:text-white tracking-tight mt-0.5 truncate">
-                      ₹{(portfolio?.wallet?.availableBalance ?? 242680).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      ₹{(portfolio?.wallet?.availableBalance ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                     </div>
                   </button>
 
@@ -954,9 +1142,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                   />
                 </div>
 
-                {/* Category Filter Pills matching Screenshot 1: ALL, CRYPTO, EQUITY, FOREX, COMMODITY */}
+                {/* Category Filter Pills: ALL, EQUITY, COMMODITY, INDEX, CRYPTO, FOREX */}
                 <div id="tour-target-categories" className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
-                  {(['ALL', 'CRYPTO', 'EQUITY', 'FOREX', 'COMMODITY'] as const).map((tab) => {
+                  {(['ALL', 'EQUITY', 'COMMODITY', 'INDEX', 'CRYPTO', 'FOREX'] as const).map((tab) => {
                     const isSelected = activeTab === tab;
                     const tabKey = tab.toLowerCase();
                     const label = t(tabKey) || tab;
@@ -964,24 +1152,67 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                       <button
                         key={tab}
                         type="button"
-                        onClick={() => setActiveTab(tab)}
+                        onClick={() => {
+                          setActiveTab(tab);
+                          if (tab !== 'EQUITY') {
+                            setEquitySectorFilter('ALL');
+                          }
+                        }}
                         className={`px-3.5 sm:px-4 py-1.5 text-xs font-bold tracking-wider rounded-lg transition-all cursor-pointer whitespace-nowrap active:scale-95 ${
                           isSelected
                             ? 'bg-amber-500 text-slate-950 shadow-sm'
                             : 'bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1E2E44] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:border-slate-300 dark:hover:border-slate-600'
                         }`}
                       >
-                        {label}
+                        {label} {tab === 'EQUITY' && `(${instruments.filter(i => i.category === 'EQUITY').length})`}
                       </button>
                     );
                   })}
                 </div>
 
-                {/* Watchlist Subheader matching Screenshot 1 */}
+                {/* Sub-sector filtering when EQUITY tab is active */}
+                {activeTab === 'EQUITY' && (
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar pt-0.5">
+                    {[
+                      { key: 'ALL', label: `All Shares (${instruments.filter(i => i.category === 'EQUITY').length})` },
+                      { key: 'NIFTY50', label: 'Nifty 50' },
+                      { key: 'BANKING', label: 'Banking & Fin' },
+                      { key: 'IT', label: 'IT & Tech' },
+                      { key: 'AUTO', label: 'Auto & EV' },
+                      { key: 'ENERGY', label: 'Energy & Power' },
+                      { key: 'FMCG_RETAIL', label: 'FMCG & Retail' },
+                      { key: 'PHARMA', label: 'Pharma & Health' },
+                      { key: 'PSU_DEFENCE', label: 'PSU & Defence' },
+                      { key: 'FUTURES', label: 'Stock Futures' },
+                    ].map((sec) => (
+                      <button
+                        key={sec.key}
+                        type="button"
+                        onClick={() => setEquitySectorFilter(sec.key as any)}
+                        className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap ${
+                          equitySectorFilter === sec.key
+                            ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/50'
+                            : 'bg-slate-100 dark:bg-[#121B2B] text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 border border-transparent'
+                        }`}
+                      >
+                        {sec.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Watchlist Subheader */}
                 <div className="flex items-center justify-between pt-1">
-                  <h2 className="text-xs sm:text-sm font-black text-slate-500 dark:text-slate-400 tracking-wider uppercase">
-                    {t('watchlist')}
-                  </h2>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xs sm:text-sm font-black text-slate-500 dark:text-slate-400 tracking-wider uppercase">
+                      {activeTab === 'EQUITY' ? 'Indian Equities (NSE / BSE)' : t('watchlist')}
+                    </h2>
+                    {activeTab === 'EQUITY' && (
+                      <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                        Cash & Derivatives
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs text-slate-500 font-mono">
                     {filteredInstruments.length} {t('instruments')}
                   </span>
@@ -1032,13 +1263,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                                     }`}
                                   />
                                 </button>
-                                <h3 className="font-black text-sm sm:text-base text-slate-900 dark:text-white tracking-wide group-hover:text-amber-500 dark:group-hover:text-amber-400 transition-colors">
-                                  {inst.symbol}
-                                </h3>
-                                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 ml-1">
-                                  {inst.expiry}
-                                </span>
+                                <div className="flex items-baseline gap-1.5 flex-wrap">
+                                  <h3 className="font-black text-sm sm:text-base text-slate-900 dark:text-white tracking-wide group-hover:text-amber-500 dark:group-hover:text-amber-400 transition-colors">
+                                    {inst.symbol}
+                                  </h3>
+                                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                                    {inst.expiry}
+                                  </span>
+                                  {inst.sectionName && (
+                                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-[#121B2B] text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-800">
+                                      {inst.sectionName}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
+
+                              {/* Row 1.5: Company Name */}
+                              {inst.name && inst.name !== inst.symbol && (
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[220px] sm:max-w-[320px] mt-0.5">
+                                  {inst.name}
+                                </p>
+                              )}
 
                               {/* Row 2: Intraday and Holding values */}
                               <div className="flex items-center gap-3 text-xs mt-2 text-slate-500 dark:text-slate-400">
@@ -1068,33 +1313,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                               />
                             </div>
 
-                            {/* Right: Live Price & Absolute / Percentage Change */}
-                            <div className="text-right flex flex-col items-end shrink-0">
-                              {/* Row 1: Last Price */}
-                              <div className="font-mono font-black text-base sm:text-lg text-slate-900 dark:text-white tracking-tight">
-                                ₹{inst.lastPrice < 10
-                                  ? inst.lastPrice.toFixed(4)
-                                  : inst.lastPrice.toLocaleString('en-IN', {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    })}
+                            {/* Right: Live Price & Absolute / Percentage Change + Quick Chart Button */}
+                            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                              <div className="text-right flex flex-col items-end">
+                                {/* Row 1: Last Price */}
+                                <div className="font-mono font-black text-base sm:text-lg text-slate-900 dark:text-white tracking-tight">
+                                  ₹{inst.lastPrice < 10
+                                    ? inst.lastPrice.toFixed(4)
+                                    : inst.lastPrice.toLocaleString('en-IN', {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2,
+                                      })}
+                                </div>
+                                {/* Row 2: Direction Arrow & Change */}
+                                <div
+                                  className={`font-mono text-xs sm:text-sm flex items-center gap-1 font-bold mt-0.5 ${
+                                    isPositive ? 'text-emerald-500' : 'text-rose-500'
+                                  }`}
+                                >
+                                  <span>{isPositive ? '↗' : '↘'}</span>
+                                  <span>
+                                    {isPositive ? '+' : '-'}
+                                    {Math.abs(inst.change).toFixed(
+                                      inst.lastPrice < 10 ? 4 : 4
+                                    )}{' '}
+                                    ({isPositive ? '+' : ''}
+                                    {inst.changePercent.toFixed(2)}%)
+                                  </span>
+                                </div>
                               </div>
-                              {/* Row 2: Direction Arrow & Change */}
-                              <div
-                                className={`font-mono text-xs sm:text-sm flex items-center gap-1 font-bold mt-0.5 ${
-                                  isPositive ? 'text-emerald-500' : 'text-rose-500'
-                                }`}
+
+                              {/* Quick Open Chart Button */}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenChart(inst);
+                                }}
+                                className="p-2 rounded-xl bg-slate-100 hover:bg-amber-500/10 dark:bg-[#121B2B] dark:hover:bg-amber-500/20 text-slate-400 hover:text-amber-500 dark:text-slate-400 dark:hover:text-amber-400 border border-slate-200 dark:border-slate-800 hover:border-amber-500/40 transition-all cursor-pointer group/chart"
+                                title="Open Live Chart"
+                                aria-label="Open Live Chart"
                               >
-                                <span>{isPositive ? '↗' : '↘'}</span>
-                                <span>
-                                  {isPositive ? '+' : '-'}
-                                  {Math.abs(inst.change).toFixed(
-                                    inst.lastPrice < 10 ? 4 : 4
-                                  )}{' '}
-                                  ({isPositive ? '+' : ''}
-                                  {inst.changePercent.toFixed(2)}%)
-                                </span>
-                              </div>
+                                <BarChart2 className="w-4 h-4 group-hover/chart:scale-110 transition-transform" />
+                              </button>
                             </div>
                           </div>
                         </div>
@@ -2523,6 +2784,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         <OrderWindow
           instrument={orderWindowInstrument}
           initialType={orderWindowInitialType}
+          availableBalance={portfolio?.wallet?.availableBalance ?? 0}
           marketClosedOverride={marketClosedOverride}
           tourStep={tourStep}
           onClose={() => setOrderWindowInstrument(null)}

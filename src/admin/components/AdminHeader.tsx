@@ -1,8 +1,9 @@
 import React from 'react';
-import { Menu, Bell, Search, ExternalLink } from 'lucide-react';
+import { Menu, Bell, Search, Activity, Wifi } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { HierarchyBadge } from './HierarchyBadge';
 import { UserRole } from '../types/adminTypes';
+import { useAdminRealtime } from '../context/AdminRealtimeContext';
 
 interface AdminHeaderProps {
   onToggleSidebar: () => void;
@@ -12,6 +13,7 @@ interface AdminHeaderProps {
 export const AdminHeader: React.FC<AdminHeaderProps> = ({ onToggleSidebar, title }) => {
   const { user } = useAuth();
   const userRole = (user?.role || 'CLIENT') as UserRole;
+  const { isConnected, eventCount } = useAdminRealtime();
 
   return (
     <header className="h-16 bg-[#090d16] border-b border-slate-800/80 px-4 sm:px-6 flex items-center justify-between sticky top-0 z-30">
@@ -26,6 +28,28 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({ onToggleSidebar, title
       </div>
 
       <div className="flex items-center gap-3 sm:gap-4">
+        {/* Real-time WebSocket Status Pill */}
+        <div
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all ${
+            isConnected
+              ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-500/40 shadow-xs shadow-emerald-500/10'
+              : 'bg-amber-950/80 text-amber-400 border border-amber-500/40'
+          }`}
+          title={isConnected ? 'Live WebSocket streaming active' : 'Connecting to live real-time server...'}
+        >
+          <span
+            className={`w-2 h-2 rounded-full ${
+              isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400 animate-ping'
+            }`}
+          />
+          <span className="hidden sm:inline">{isConnected ? 'LIVE FEED' : 'CONNECTING'}</span>
+          {eventCount > 0 && (
+            <span className="text-[10px] font-mono px-1 rounded bg-emerald-500/20 text-emerald-300">
+              {eventCount}
+            </span>
+          )}
+        </div>
+
         {/* Quick Search */}
         <div className="relative hidden md:block w-64">
           <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />

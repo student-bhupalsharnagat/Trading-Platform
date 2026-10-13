@@ -16,4 +16,5 @@ export interface ITradingWalletRepository {
   getOrCreateWallet(tenantId: string, userId: string, initialBalance?: number, client?: DbClient): Promise<TradingWallet>;
   lockWalletForUpdate(tenantId: string, userId: string, client: DbClient): Promise<TradingWallet>;
   updateWallet(tenantId: string, userId: string, updates: Partial<TradingWallet>, client?: DbClient): Promise<TradingWallet>;
+  upsertWallet(wallet: Partial<TradingWallet> & { tenant_id: string; user_id: string }, client?: DbClient): Promise<TradingWallet>;
 }
