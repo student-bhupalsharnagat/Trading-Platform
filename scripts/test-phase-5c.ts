@@ -24,6 +24,7 @@ import {
 import { auditService } from '../src/server/services/auditService.ts';
 import { tenantRepository } from '../src/server/repositories/JsonTenantRepository.ts';
 import { pgDb } from '../src/server/db/postgres.ts';
+import { runTradingMigrations } from '../src/server/db/migrationRunner.ts';
 
 const config = getInternalAuthConfig();
 const SECRET = config.internalCommunicationSecret;
@@ -34,7 +35,8 @@ async function runPhase5CTests() {
   console.log('Central Admin Emergency Controls & Tenant Configuration Sync');
   console.log('================================================================\n');
 
-  // Seed super admin and setup database
+  // Run migrations and seed super admin
+  await runTradingMigrations();
   await hierarchyService.ensureSuperAdmin();
 
   // Create an active test trader

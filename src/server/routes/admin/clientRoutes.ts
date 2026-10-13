@@ -3,6 +3,7 @@ import { requireAuth, AuthenticatedRequest } from '../../middleware/authMiddlewa
 import { requireRole } from '../../middleware/requireRole.ts';
 import { hierarchyGuard } from '../../middleware/hierarchyGuard.ts';
 import { hierarchyService } from '../../services/hierarchyService.ts';
+import { postgresClientMappingRepository } from '../../repositories/PostgresClientMappingRepository.ts';
 
 const router = Router();
 
@@ -13,7 +14,14 @@ router.get(
   requireRole('SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const clients = await hierarchyService.getScopedEntities(req.user as any, 'CLIENT');
+      const rawAccountType = (req.query.account_type as string || 'all').toLowerCase().trim();
+      const accountType = (['real', 'demo'].includes(rawAccountType) ? rawAccountType : 'all') as 'all' | 'real' | 'demo';
+
+      const clients = await postgresClientMappingRepository.getClients({
+        caller: req.user as any,
+        accountType,
+      });
+
       res.json({ success: true, data: clients });
     } catch (err: any) {
       res.status(500).json({ success: false, message: err.message });
@@ -29,7 +37,7 @@ router.get(
   hierarchyGuard('id'),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const client = await hierarchyService.getScopedEntityById(req.user as any, req.params.id);
+      const client = await postgresClientMappingRepository.getClientById(req.user as any, req.params.id);
       if (!client || client.role !== 'CLIENT') {
         res.status(404).json({ success: false, message: 'Client not found' });
         return;

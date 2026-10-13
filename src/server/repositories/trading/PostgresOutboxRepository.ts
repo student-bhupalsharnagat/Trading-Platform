@@ -226,12 +226,6 @@ export class PostgresOutboxRepository {
     deadLetter: number;
     total: number;
   }> {
-    const sql = `
-      SELECT status, COUNT(*) as count
-      FROM trading_outbox
-      GROUP BY status;
-    `;
-    const res = await pgDb.query(sql);
     const stats = {
       pending: 0,
       processing: 0,
@@ -240,15 +234,25 @@ export class PostgresOutboxRepository {
       deadLetter: 0,
       total: 0,
     };
+    try {
+      const sql = `
+        SELECT status, COUNT(*) as count
+        FROM trading_outbox
+        GROUP BY status;
+      `;
+      const res = await pgDb.query(sql);
 
-    for (const row of res.rows || []) {
-      const cnt = parseInt(row.count, 10) || 0;
-      stats.total += cnt;
-      if (row.status === 'PENDING') stats.pending += cnt;
-      else if (row.status === 'PROCESSING') stats.processing += cnt;
-      else if (row.status === 'COMPLETED') stats.completed += cnt;
-      else if (row.status === 'FAILED') stats.failed += cnt;
-      else if (row.status === 'DEAD_LETTER') stats.deadLetter += cnt;
+      for (const row of res.rows || []) {
+        const cnt = parseInt(row.count, 10) || 0;
+        stats.total += cnt;
+        if (row.status === 'PENDING') stats.pending += cnt;
+        else if (row.status === 'PROCESSING') stats.processing += cnt;
+        else if (row.status === 'COMPLETED') stats.completed += cnt;
+        else if (row.status === 'FAILED') stats.failed += cnt;
+        else if (row.status === 'DEAD_LETTER') stats.deadLetter += cnt;
+      }
+    } catch {
+      // Table may not exist yet or database uninitialized
     }
 
     return stats;

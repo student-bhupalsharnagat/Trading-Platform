@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { db, type UserRecord } from '../db/database.ts';
 import { otpService } from './otpService.ts';
 import type { RegisterInput, ResetPasswordInput } from '../schemas/authSchemas.ts';
+import { postgresClientMappingRepository } from '../repositories/PostgresClientMappingRepository.ts';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'vertex_jwt_secret_dev_key_2026_super_secure';
 const JWT_EXPIRES_IN = '7d';
@@ -27,6 +28,7 @@ export interface SafeUser {
   createdAt: string;
   lastLoginAt?: string;
   demoBalance?: number;
+  account_type?: 'real' | 'demo';
 }
 
 export function sanitizeUser(user: UserRecord): SafeUser {
@@ -49,6 +51,7 @@ export function sanitizeUser(user: UserRecord): SafeUser {
     createdAt: user.created_at,
     lastLoginAt: user.last_login_at,
     demoBalance: user.demo_balance,
+    account_type: user.account_type || (user.status === 'demo' ? 'demo' : 'real'),
   };
 }
 
@@ -256,13 +259,41 @@ export class AuthService {
   /**
    * Quick Demo Account Access
    */
-  public async getDemoSession(): Promise<{
+  public async getDemoSession(options?: {
+    userId?: string;
+    fullName?: string;
+    mobile?: string;
+    tenantId?: string;
+  }): Promise<{
     user: SafeUser;
     token: string;
     message: string;
   }> {
-    const demoUser = db.getOrCreateDemoUser();
+    const tenantId = options?.tenantId || 'vertex-default';
+    const demoUser = db.getOrCreateDemoUser(options);
     db.updateLastLogin(demoUser.id);
+
+    // Safely insert / persist demo user and client mapping in PostgreSQL
+    try {
+      await postgresClientMappingRepository.persistDemoUser({
+        id: demoUser.id,
+        tenant_id: tenantId,
+        full_name: demoUser.full_name,
+        user_id: demoUser.user_id,
+        country_code: demoUser.country_code,
+        mobile: demoUser.mobile,
+        role: 'CLIENT',
+        parent_id: demoUser.parent_id || 'master-node-0001',
+        hierarchy_path: demoUser.hierarchy_path || `root.master_alpha.${demoUser.user_id}`,
+        is_verified: true,
+        status: 'active',
+        account_type: 'demo',
+        demo_balance: demoUser.demo_balance || 1000000.0,
+      });
+    } catch (pgErr: any) {
+      console.warn('[Postgres] Notice: demo persistence in degraded mode:', pgErr.message);
+    }
+
     const token = this.generateToken(demoUser);
 
     return {

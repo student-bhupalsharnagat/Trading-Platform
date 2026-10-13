@@ -1,8 +1,8 @@
+import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import path from 'path';
 import cookieParser from 'cookie-parser';
-import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
 
 import authRoutes from './src/server/routes/authRoutes.ts';
@@ -17,6 +17,7 @@ import { resolveTenantMiddleware } from './src/server/middleware/tenantMiddlewar
 import { getInternalAuthConfig } from './src/server/config/internalConfig.ts';
 import { ProductionValidator } from './src/server/config/productionValidator.ts';
 import {
+  corsMiddleware,
   securityHeadersMiddleware,
   csrfProtectionMiddleware,
   sanitizeQueryParams,
@@ -28,9 +29,8 @@ import { redisService } from './src/server/redis/RedisService.ts';
 import { transactionalOutboxService } from './src/server/services/TransactionalOutboxService.ts';
 import { pgDb } from './src/server/db/postgres.ts';
 
-dotenv.config();
 
-const PORT = 3000;
+const PORT = parseInt(process.env.PORT || '3000', 10);
 const isProd = process.env.NODE_ENV === 'production';
 
 async function startServer() {
@@ -90,7 +90,8 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
   app.use(cookieParser());
 
-  // Production Security Headers & Parameter Sanitization
+  // Production Security Headers & Parameter Sanitization & CORS
+  app.use(corsMiddleware);
   app.use(securityHeadersMiddleware);
   app.use(sanitizeQueryParams);
 
@@ -145,7 +146,8 @@ async function startServer() {
     } catch (e) {
       console.warn('[ADMIN] Super admin hierarchy init notice:', e);
     }
-    console.log(`[VERTEX] Server running on http://0.0.0.0:${PORT} (env: ${process.env.NODE_ENV || 'development'})`);
+    console.log(`[VERTEX] Server running on http://localhost:${PORT} (env: ${process.env.NODE_ENV || 'development'})`);
+    console.log(`[VERTEX] Network URL: http://127.0.0.1:${PORT}`);
   });
 
   const gracefulShutdown = async (signal: string) => {

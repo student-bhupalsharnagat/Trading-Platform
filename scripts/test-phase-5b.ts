@@ -14,6 +14,8 @@ import authRoutes from '../src/server/routes/authRoutes.ts';
 import tradingRoutes from '../src/server/routes/tradingRoutes.ts';
 import adminRoutes from '../src/server/routes/admin/index.ts';
 
+import { runTradingMigrations } from '../src/server/db/migrationRunner.ts';
+
 const config = getInternalAuthConfig();
 const SECRET = config.internalCommunicationSecret;
 
@@ -21,6 +23,9 @@ async function runAllTests() {
   console.log('\n==================================================');
   console.log('STARTING PHASE 5B TEST SUITE: 18 TARGET TESTS');
   console.log('==================================================\n');
+
+  // Run DB migrations
+  await runTradingMigrations();
 
   // Seed super admin
   await hierarchyService.ensureSuperAdmin();

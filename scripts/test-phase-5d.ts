@@ -56,6 +56,7 @@ import { eventIdempotencyStore } from '../src/server/events/EventIdempotencyStor
 import { tradingHaltService } from '../src/server/services/tradingHaltService.ts';
 import { emergencyControlService } from '../src/server/services/emergencyControlService.ts';
 import { tenantRepository } from '../src/server/repositories/JsonTenantRepository.ts';
+import { runTradingMigrations } from '../src/server/db/migrationRunner.ts';
 
 const config = getInternalAuthConfig();
 const SECRET = config.internalCommunicationSecret;
@@ -66,6 +67,7 @@ async function runPhase5DTests() {
   console.log('Event Webhooks, Tenant Config Cache & Asynchronous Event Dispatcher');
   console.log('================================================================\n');
 
+  await runTradingMigrations();
   await hierarchyService.ensureSuperAdmin();
 
   // Create test trader in vertex-default

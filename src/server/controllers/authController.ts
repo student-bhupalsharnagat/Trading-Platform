@@ -100,7 +100,13 @@ export class AuthController {
 
   public async demoLogin(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const result = await authService.getDemoSession();
+      const tenantId = (req as any).tenant?.tenant?.id || 'vertex-default';
+      const result = await authService.getDemoSession({
+        userId: req.body?.userId,
+        fullName: req.body?.fullName,
+        mobile: req.body?.mobile,
+        tenantId,
+      });
       res.cookie(COOKIE_NAME, result.token, COOKIE_OPTIONS);
 
       res.status(200).json({

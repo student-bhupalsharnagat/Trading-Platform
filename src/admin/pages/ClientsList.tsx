@@ -76,15 +76,22 @@ export const ClientsList: React.FC<ClientsListProps> = ({ onNavigate }) => {
     {
       header: 'Status',
       cell: (item) => (
-        <span
-          className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-            item.status === 'active'
-              ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'
-              : 'bg-rose-950/80 text-rose-300 border border-rose-800/60'
-          }`}
-        >
-          {item.status.toUpperCase()}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span
+            className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+              item.status === 'active'
+                ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'
+                : 'bg-rose-950/80 text-rose-300 border border-rose-800/60'
+            }`}
+          >
+            {item.status.toUpperCase()}
+          </span>
+          {item.account_type === 'demo' && (
+            <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+              DEMO
+            </span>
+          )}
+        </div>
       ),
     },
     {

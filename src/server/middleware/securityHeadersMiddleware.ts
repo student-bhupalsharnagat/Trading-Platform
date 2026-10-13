@@ -7,9 +7,35 @@ import { Request, Response, NextFunction } from 'express';
 
 const isProd = process.env.NODE_ENV === 'production';
 
+/**
+ * Cross-Origin Resource Sharing (CORS) Middleware
+ * Allows cross-origin requests from User Panel dashboard port/domain with credentials.
+ */
+export function corsMiddleware(req: Request, res: Response, next: NextFunction): void {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Requested-With, X-Tenant-ID, X-Dev-Tenant-ID, X-CSRF-Token, Cache-Control'
+    );
+    res.setHeader('Access-Control-Expose-Headers', 'X-Tenant-ID, X-Tenant-Brand');
+  }
+
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+
+  next();
+}
+
 export function securityHeadersMiddleware(req: Request, res: Response, next: NextFunction): void {
   // Baseline Security Headers
   res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'geolocation=(), camera=(), microphone=()');

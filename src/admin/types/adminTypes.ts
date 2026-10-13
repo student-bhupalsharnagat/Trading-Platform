@@ -23,6 +23,7 @@ export interface HierarchyNode {
   clientsCount?: number;
   createdAt: string;
   updatedAt: string;
+  account_type?: 'real' | 'demo';
 }
 
 export interface AdminDashboardKPIs {

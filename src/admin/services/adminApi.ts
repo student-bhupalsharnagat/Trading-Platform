@@ -94,8 +94,9 @@ export const adminApi = {
   },
 
   // Clients
-  getClients: async (): Promise<HierarchyNode[]> => {
-    return request<HierarchyNode[]>('/clients');
+  getClients: async (accountType?: 'all' | 'real' | 'demo'): Promise<HierarchyNode[]> => {
+    const query = accountType && accountType !== 'all' ? `?account_type=${accountType}` : '';
+    return request<HierarchyNode[]>(`/clients${query}`);
   },
   getClientById: async (id: string): Promise<HierarchyNode> => {
     return request<HierarchyNode>(`/clients/${id}`);

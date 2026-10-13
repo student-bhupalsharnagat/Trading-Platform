@@ -20,6 +20,7 @@ export interface UserRecord {
   commission_rate?: number;
   is_verified: boolean;
   status: 'active' | 'suspended' | 'demo' | 'deactivated';
+  account_type?: 'real' | 'demo';
   is_frozen?: boolean;
   tenant_id?: string;
   referral_code?: string;
@@ -414,25 +415,48 @@ class DatabaseService {
   }
 
   // --- Demo Account Helper ---
-  public getOrCreateDemoUser(): UserRecord {
-    const demoUserId = 'vtx_demo';
+  public getOrCreateDemoUser(data?: {
+    id?: string;
+    fullName?: string;
+    userId?: string;
+    mobile?: string;
+    tenantId?: string;
+  }): UserRecord {
+    const demoUserId = (data?.userId || 'vtx_demo').toLowerCase().trim();
     let demoUser = this.findUserByUserId(demoUserId);
     if (!demoUser) {
       demoUser = {
-        id: 'demo-user-uuid-0000-000000000001',
-        full_name: 'Demo Trader',
-        user_id: 'vtx123',
+        id: data?.id || 'demo-user-uuid-0000-000000000001',
+        full_name: data?.fullName || 'Demo Trader',
+        user_id: demoUserId,
         country_code: '+91',
-        mobile: '9876543210',
+        mobile: data?.mobile || '9876543210',
         password_hash: '$2a$10$DEMO_ACCOUNT_NOT_PASSWORD_ACCESSIBLE_DIRECTLY',
+        role: 'CLIENT',
+        parent_id: 'master-node-0001',
+        hierarchy_path: `root.master_alpha.${demoUserId}`,
         is_verified: true,
-        status: 'demo',
+        status: 'active',
+        account_type: 'demo',
+        tenant_id: data?.tenantId || 'vertex-default',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         demo_balance: 1000000.0,
       };
       this.state.users.push(demoUser);
       this.save();
+    } else {
+      let changed = false;
+      if (!demoUser.account_type) {
+        demoUser.account_type = 'demo';
+        changed = true;
+      }
+      if (!demoUser.parent_id) {
+        demoUser.parent_id = 'master-node-0001';
+        demoUser.hierarchy_path = `root.master_alpha.${demoUserId}`;
+        changed = true;
+      }
+      if (changed) this.save();
     }
     return demoUser;
   }

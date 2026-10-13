@@ -76,8 +76,16 @@ class PostgresDatabase {
 
     try {
       this.pglite = new PGlite(dataDir);
-    } catch {
+      await this.pglite.waitReady;
+    } catch (err: any) {
+      console.warn('[Postgres] Failed to initialize persistent PGlite dataDir, falling back to in-memory:', err?.message || err);
+      try {
+        if (this.pglite) {
+          await this.pglite.close().catch(() => {});
+        }
+      } catch {}
       this.pglite = new PGlite();
+      await this.pglite.waitReady;
     }
     this.isPgLite = true;
     console.log('[Postgres] Initialized embedded PostgreSQL engine (PGlite)');
