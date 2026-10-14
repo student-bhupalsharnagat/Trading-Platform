@@ -13,6 +13,7 @@ import { emergencyStateCache } from '../cache/EmergencyStateCache.ts';
 import { transactionalOutboxService } from './TransactionalOutboxService.ts';
 import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
 import { auditService } from './auditService.ts';
+import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
 import crypto from 'crypto';
 
 export class AuthoritativeTradingDataService {
@@ -573,6 +574,14 @@ export class AuthoritativeTradingDataService {
       console.warn(`[Event] ${eventType} dispatch warning:`, e)
     );
 
+    // Real-time WebSocket delivery to client and broker panel
+    tradingWebSocketServer.broadcastToTenant(
+      tenantId,
+      'fund.created',
+      fundPayload,
+      (ws) => ws.userId === resolvedUserId || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
+    );
+
     return tx;
   }
 
@@ -631,6 +640,14 @@ export class AuthoritativeTradingDataService {
 
       internalEventDispatcher.dispatchFundTransaction(eventType, rejectPayload).catch((e) =>
         console.warn(`[Event] ${eventType} dispatch warning:`, e)
+      );
+
+      // Real-time WebSocket delivery to client and broker panel
+      tradingWebSocketServer.broadcastToTenant(
+        tenantId,
+        'fund.updated',
+        rejectPayload,
+        (ws) => ws.userId === tx.user_id || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
       );
 
       return updated;
@@ -759,6 +776,20 @@ export class AuthoritativeTradingDataService {
 
     internalEventDispatcher.dispatchWalletUpdated(approvalResult.walletPayload).catch((e) =>
       console.warn('[Event] wallet.updated dispatch warning:', e)
+    );
+
+    // Real-time WebSocket delivery to client and broker panel
+    tradingWebSocketServer.broadcastToTenant(
+      tenantId,
+      'wallet.updated',
+      approvalResult.walletPayload,
+      (ws) => ws.userId === tx.user_id || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
+    );
+    tradingWebSocketServer.broadcastToTenant(
+      tenantId,
+      'fund.updated',
+      approvalResult.approvePayload,
+      (ws) => ws.userId === tx.user_id || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
     );
 
     return approvalResult.updatedTx;

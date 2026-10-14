@@ -34,12 +34,21 @@ router.get('/', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res
   }
 });
 
-// POST /api/admin/funds/process - Approve or reject fund transaction
-router.post('/process', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+// POST /api/admin/funds/process (aliases: /:id/approve, /:id/reject) - Approve or reject fund transaction
+router.post(['/process', '/:id/approve', '/:id/reject'], requireAuth, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = req.user?.tenantId || 'vertex-default';
     const adminId = req.user?.userId || req.user?.id || 'ADMIN';
-    const { transactionId, action, reason } = req.body;
+    let { transactionId, action, reason } = req.body;
+
+    const reqPath = req.path || '';
+    if (reqPath.endsWith('/approve')) {
+      action = 'APPROVE';
+      transactionId = transactionId || req.params.id;
+    } else if (reqPath.endsWith('/reject')) {
+      action = 'REJECT';
+      transactionId = transactionId || req.params.id;
+    }
 
     if (!transactionId || !action || (action !== 'APPROVE' && action !== 'REJECT')) {
       res.status(400).json({ success: false, message: 'Fields "transactionId" and "action" (APPROVE|REJECT) are required' });

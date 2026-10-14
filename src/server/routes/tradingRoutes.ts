@@ -37,6 +37,8 @@ import { executionGateway } from '../gateways/ExecutionGateway.ts';
 import { brokerWebhookHandler } from '../gateways/broker/BrokerWebhookHandler.ts';
 import { brokerReconciliationService } from '../services/BrokerReconciliationService.ts';
 import { authoritativeTradingDataService } from '../services/authoritativeTradingDataService.ts';
+import { postgresFundTransactionRepository } from '../repositories/trading/PostgresFundTransactionRepository.ts';
+import { postgresLedgerRepository } from '../repositories/trading/PostgresLedgerRepository.ts';
 
 const router = Router();
 
@@ -294,41 +296,49 @@ router.post(
 
       const {
         symbol,
+        instrument,
         type, // BUY or SELL
         side, // alternative for type
         orderType, // MARKET, LIMIT, SL, SL-M
-        product, // INTRADAY or HOLDING
+        product, // INTRADAY or HOLDING, MIS, CNC, NRML
         lots,
         quantity,
         limitPrice,
         triggerPrice,
         trigger_price,
         price,
+        orderPrice,
         stopLoss,
         target,
         timeInForce,
         clientOrderId,
         client_order_id,
+        clientId,
       } = req.body;
 
       const orderSide = ((type || side || '') as string).toUpperCase() as 'BUY' | 'SELL';
-      const orderLots = Number(lots);
+      const effectiveSymbol = symbol || instrument;
 
-      if (!symbol || (orderSide !== 'BUY' && orderSide !== 'SELL') || !orderLots || orderLots <= 0) {
-        res.status(400).json({ success: false, message: 'Invalid order parameters: symbol, type (BUY/SELL), and positive lots are required.' });
+      const inst = effectiveSymbol
+        ? (findInstrument(effectiveSymbol) ||
+            INSTRUMENTS.find(
+              (i) =>
+                i.symbol === effectiveSymbol ||
+                i.id === effectiveSymbol ||
+                i.symbol.toLowerCase().replace(/[\s\-_]/g, '') === (effectiveSymbol || '').toLowerCase().replace(/[\s\-_]/g, '')
+            ))
+        : undefined;
+
+      if (!inst) {
+        res.status(404).json({ success: false, message: 'Instrument not found.' });
         return;
       }
 
-      const inst =
-        findInstrument(symbol) ||
-        INSTRUMENTS.find(
-          (i) =>
-            i.symbol === symbol ||
-            i.id === symbol ||
-            i.symbol.toLowerCase().replace(/[\s\-_]/g, '') === (symbol || '').toLowerCase().replace(/[\s\-_]/g, '')
-        );
-      if (!inst) {
-        res.status(404).json({ success: false, message: 'Instrument not found.' });
+      const lotSize = inst?.lotSize || 1;
+      const orderLots = Number(lots) > 0 ? Number(lots) : (quantity ? Math.max(1, Math.round(Number(quantity) / lotSize)) : 0);
+
+      if ((orderSide !== 'BUY' && orderSide !== 'SELL') || !orderLots || orderLots <= 0) {
+        res.status(400).json({ success: false, message: 'Invalid order parameters: symbol, type (BUY/SELL), and positive lots (or quantity) are required.' });
         return;
       }
 
@@ -347,17 +357,40 @@ router.post(
         return;
       }
 
-      const execPrice = price ? Number(price) : (orderType === 'LIMIT' && limitPrice ? Number(limitPrice) : inst.lastPrice);
+      // Map product codes
+      let normalizedProduct: 'INTRADAY' | 'HOLDING' = 'INTRADAY';
+      const prodUpper = String(product || '').toUpperCase();
+      if (prodUpper === 'CNC' || prodUpper === 'HOLDING') {
+        normalizedProduct = 'HOLDING';
+      }
+
+      const execPrice = (price !== undefined && price !== 'Market')
+        ? Number(price)
+        : (orderPrice !== undefined && orderPrice !== 'Market'
+            ? Number(orderPrice)
+            : (orderType === 'LIMIT' && limitPrice ? Number(limitPrice) : inst.lastPrice));
+
+      const callerRole = String(userObj?.role || '').toUpperCase();
+      const isHierarchyCaller = ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER', 'OPERATIONS'].includes(callerRole);
+      if (clientId && clientId !== orderUserId && !isHierarchyCaller) {
+        res.status(403).json({
+          success: false,
+          code: 'UNAUTHORIZED_CLIENT_OVERRIDE',
+          message: 'You are not authorized to place orders on behalf of another client.',
+        });
+        return;
+      }
+      const effectiveUserId = (isHierarchyCaller && clientId) ? clientId : orderUserId;
 
       // Execute through ACID TradingExecutionService
       const result = await tradingExecutionService.placeOrder({
         tenantId,
-        userId: orderUserId,
+        userId: effectiveUserId,
         clientOrderId: clientOrderId || client_order_id,
         symbol: inst.symbol,
         side: orderSide,
         orderType: orderType || 'MARKET',
-        product: product || 'INTRADAY',
+        product: normalizedProduct,
         lots: orderLots,
         quantity: quantity ? Number(quantity) : undefined,
         price: execPrice,
@@ -438,7 +471,7 @@ router.post(
           totalPnL: result.wallet.realized_pnl,
           todayPnL: 0,
         },
-        positions: (await postgresPositionRepository.getPositions(tenantId, orderUserId)).map((p) => {
+        positions: (await postgresPositionRepository.getPositions(tenantId, effectiveUserId)).map((p) => {
           const pInst = findInstrument(p.instrument_id);
           const avgPrice = Number(p.average_price);
           const ltp = pInst ? pInst.lastPrice : avgPrice;
@@ -474,7 +507,7 @@ router.post(
 
 // Close / Square-off position - Supports both Postgres and fallback memory store
 router.post(
-  '/position/close',
+  ['/position/close', '/positions/close', '/positions/:id/square-off'],
   optionalAuth,
   requireTradingEnabled,
   requireActiveTrader,
@@ -483,7 +516,7 @@ router.post(
       const tenantId = getReqTenantId(req);
       const userObj = (req as any).user;
       const userId = userObj?.userId || userObj?.user_id || userObj?.id || 'demo-trader';
-      const { positionId } = req.body;
+      const positionId = req.body?.positionId || req.body?.id || req.params?.id;
 
       if (!positionId) {
         res.status(400).json({ success: false, message: 'Position ID is required.' });
@@ -664,14 +697,14 @@ router.post(
 
 // Cancel Order
 router.post(
-  ['/order/cancel', '/orders/cancel'],
+  ['/order/cancel', '/orders/cancel', '/orders/:id/cancel'],
   optionalAuth,
   async (req: TenantRequest, res: Response) => {
     try {
       const tenantId = getReqTenantId(req);
       const userObj = (req as any).user;
       const userId = userObj?.userId || userObj?.user_id || userObj?.id || 'demo-trader';
-      const { orderId } = req.body;
+      const orderId = req.body?.orderId || req.body?.id || req.params?.id;
 
       if (!orderId) {
         res.status(400).json({ success: false, message: 'Order ID is required.' });
@@ -828,6 +861,128 @@ router.post('/funds/withdraw', requireAuth, async (req: TenantRequest, res: Resp
   }
 });
 
+// GET /api/trading/funds & /api/trading/funds/transactions - Authenticated trader/broker fund transactions
+router.get(['/funds', '/funds/transactions'], requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const caller = req.user!;
+    let targetUserId = caller.userId;
+
+    if (req.query.userId && ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(caller.role || '')) {
+      const requestedId = String(req.query.userId);
+      if (caller.role !== 'SUPER_ADMIN') {
+        const targetUser = db.findUserByUserId(requestedId) || db.findUserById(requestedId);
+        if (!targetUser || !targetUser.hierarchy_path?.startsWith(caller.hierarchyPath || '')) {
+          res.status(403).json({ success: false, message: 'Access denied: client is outside your hierarchy' });
+          return;
+        }
+      }
+      targetUserId = requestedId;
+    }
+
+    const type = req.query.type as 'DEPOSIT' | 'WITHDRAWAL' | undefined;
+    const status = req.query.status as string | undefined;
+
+    const transactions = await postgresFundTransactionRepository.getByTenant(tenantId, targetUserId, type, status);
+    res.json({ success: true, tenantId, userId: targetUserId, transactions });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// GET /api/trading/ledger - Authenticated trader/broker immutable financial ledger
+router.get('/ledger', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const caller = req.user!;
+    let targetUserId = caller.userId;
+
+    if (req.query.userId && ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(caller.role || '')) {
+      const requestedId = String(req.query.userId);
+      if (caller.role !== 'SUPER_ADMIN') {
+        const targetUser = db.findUserByUserId(requestedId) || db.findUserById(requestedId);
+        if (!targetUser || !targetUser.hierarchy_path?.startsWith(caller.hierarchyPath || '')) {
+          res.status(403).json({ success: false, message: 'Access denied: client is outside your hierarchy' });
+          return;
+        }
+      }
+      targetUserId = requestedId;
+    }
+
+    const ledger = await postgresLedgerRepository.getByUserId(targetUserId, tenantId);
+    res.json({ success: true, tenantId, userId: targetUserId, ledger });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// GET /api/trading/account - Consolidated authoritative client account, margin & wallet status
+router.get('/account', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const caller = req.user!;
+    let targetUserId = caller.userId;
+
+    if (req.query.userId && ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(caller.role || '')) {
+      const requestedId = String(req.query.userId);
+      if (caller.role !== 'SUPER_ADMIN') {
+        const targetUser = db.findUserByUserId(requestedId) || db.findUserById(requestedId);
+        if (!targetUser || !targetUser.hierarchy_path?.startsWith(caller.hierarchyPath || '')) {
+          res.status(403).json({ success: false, message: 'Access denied: client is outside your hierarchy' });
+          return;
+        }
+      }
+      targetUserId = requestedId;
+    }
+
+    const userRecord = db.findUserByUserId(targetUserId) || db.findUserById(targetUserId);
+    const wallet = await postgresWalletRepository.getOrCreateWallet(tenantId, targetUserId);
+    const positions = await postgresPositionRepository.getPositions(tenantId, targetUserId);
+
+    const openPositions = positions.filter((p) => Number(p.quantity) !== 0);
+    let unrealizedPnL = 0;
+    for (const pos of openPositions) {
+      const inst = findInstrument(pos.instrument_id);
+      const ltp = inst ? inst.lastPrice : Number(pos.average_price);
+      const qty = Number(pos.quantity);
+      unrealizedPnL += (ltp - Number(pos.average_price)) * qty;
+    }
+
+    const availableBalance = Number(wallet.available_balance);
+    const usedMargin = Number(wallet.used_margin);
+    const blockedBalance = Number(wallet.blocked_balance || 0);
+    const realizedPnL = Number(wallet.realized_pnl || 0);
+    const equity = Number((availableBalance + usedMargin + unrealizedPnL).toFixed(2));
+    const marginLevel = usedMargin > 0 ? Number(((equity / usedMargin) * 100).toFixed(2)) : 999;
+
+    res.json({
+      success: true,
+      tenantId,
+      user: {
+        userId: targetUserId,
+        fullName: userRecord?.full_name || targetUserId,
+        role: userRecord?.role || 'CLIENT',
+        accountType: userRecord?.account_type || 'real',
+        status: userRecord?.status || 'active',
+        isFrozen: Boolean(userRecord?.is_frozen),
+        tenantId: userRecord?.tenant_id || tenantId,
+      },
+      wallet: {
+        availableBalance,
+        usedMargin,
+        blockedBalance,
+        realizedPnL,
+        unrealizedPnL: Number(unrealizedPnL.toFixed(2)),
+        equity,
+        marginLevel,
+      },
+      openPositionsCount: openPositions.length,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // Get & Create Support Tickets (scoped to resolved tenant)
 router.get('/tickets', optionalAuth, (req: TenantRequest, res: Response) => {
   const tenantId = getReqTenantId(req);
@@ -850,7 +1005,8 @@ router.post('/tickets', optionalAuth, (req: TenantRequest, res: Response) => {
   const tickets = getTenantTickets(tenantId);
   const notifications = getTenantNotifications(tenantId);
 
-  const { subject, category, priority, message, attachmentUrl, attachmentName } = req.body;
+  const { subject, category, priority, attachmentUrl, attachmentName } = req.body;
+  const message = req.body.message || req.body.description;
   if (!subject || !message) {
     res.status(400).json({ success: false, message: 'Subject and description are required.' });
     return;

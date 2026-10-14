@@ -34,6 +34,7 @@ class PostgresDatabase {
           throw new Error('[FATAL DATABASE ERROR] DATABASE_URL is required in production. Embedded PGlite fallback is not permitted in production.');
         }
 
+        const useSsl = isProduction || Boolean(process.env.PG_SSL === 'true' || databaseUrl.includes('sslmode=') || databaseUrl.includes('render.com') || databaseUrl.includes('supabase.co') || databaseUrl.includes('neon.tech'));
         try {
           const poolConfig: PoolConfig = {
             connectionString: databaseUrl,
@@ -41,6 +42,7 @@ class PostgresDatabase {
             idleTimeoutMillis: parseInt(process.env.PG_IDLE_TIMEOUT_MS || '30000', 10),
             max: parseInt(process.env.PG_MAX_POOL_SIZE || '20', 10),
             min: parseInt(process.env.PG_MIN_POOL_SIZE || '2', 10),
+            ...(useSsl && !databaseUrl.includes('localhost') && !databaseUrl.includes('127.0.0.1') ? { ssl: { rejectUnauthorized: false } } : {}),
           };
 
           const testPool = new Pool(poolConfig);
@@ -65,6 +67,7 @@ class PostgresDatabase {
         !databaseUrl?.includes('127.0.0.1:5432/vertex_db');
 
       if (hasExplicitPgUrl && databaseUrl) {
+        const useSsl = Boolean(process.env.PG_SSL === 'true' || databaseUrl.includes('sslmode=') || databaseUrl.includes('render.com') || databaseUrl.includes('supabase.co') || databaseUrl.includes('neon.tech'));
         try {
           const poolConfig: PoolConfig = {
             connectionString: databaseUrl,
@@ -72,6 +75,7 @@ class PostgresDatabase {
             idleTimeoutMillis: parseInt(process.env.PG_IDLE_TIMEOUT_MS || '30000', 10),
             max: parseInt(process.env.PG_MAX_POOL_SIZE || '20', 10),
             min: parseInt(process.env.PG_MIN_POOL_SIZE || '2', 10),
+            ...(useSsl && !databaseUrl.includes('localhost') && !databaseUrl.includes('127.0.0.1') ? { ssl: { rejectUnauthorized: false } } : {}),
           };
 
           const testPool = new Pool(poolConfig);

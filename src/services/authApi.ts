@@ -263,4 +263,18 @@ export const authApi = {
   async clearNotifications(): Promise<{ success: boolean; message: string }> {
     return fetchJson('/api/trading/notifications/clear', { method: 'POST' });
   },
+
+  async getAccount(): Promise<{ success: boolean; tenantId: string; user: any; wallet: any; openPositionsCount: number }> {
+    return fetchJson('/api/trading/account', { method: 'GET' });
+  },
+
+  async getLedger(userId?: string): Promise<{ success: boolean; tenantId: string; userId: string; ledger: any[] }> {
+    const query = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+    return fetchJson(`/api/trading/ledger${query}`, { method: 'GET' });
+  },
+
+  async getFunds(params?: { type?: string; status?: string; userId?: string }): Promise<{ success: boolean; tenantId: string; userId: string; transactions: any[] }> {
+    const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+    return fetchJson(`/api/trading/funds${query}`, { method: 'GET' });
+  },
 };

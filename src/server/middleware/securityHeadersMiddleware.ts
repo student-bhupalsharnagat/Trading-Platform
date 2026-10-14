@@ -100,12 +100,22 @@ export function csrfProtectionMiddleware(req: Request, res: Response, next: Next
       try {
         const originUrl = new URL(typeof origin === 'string' ? origin : origin[0]);
         if (originUrl.host !== host) {
-          res.status(403).json({
-            success: false,
-            code: 'CSRF_ORIGIN_MISMATCH',
-            message: 'Cross-site request blocked: Origin does not match Host.',
-          });
-          return;
+          const allowedOrigins = [
+            ...(process.env.CORS_ALLOWED_ORIGINS ? process.env.CORS_ALLOWED_ORIGINS.split(',').map((s) => s.trim().toLowerCase()) : []),
+            ...(process.env.CLIENT_URL ? [new URL(process.env.CLIENT_URL).host.toLowerCase(), process.env.CLIENT_URL.toLowerCase()] : []),
+          ];
+          const originHost = originUrl.host.toLowerCase();
+          const originFull = originUrl.origin.toLowerCase();
+          const isAllowed = allowedOrigins.some((ao) => ao === originHost || ao === originFull || ao === '*');
+
+          if (!isAllowed) {
+            res.status(403).json({
+              success: false,
+              code: 'CSRF_ORIGIN_MISMATCH',
+              message: 'Cross-site request blocked: Origin does not match Host.',
+            });
+            return;
+          }
         }
       } catch {
         // Invalid origin format
