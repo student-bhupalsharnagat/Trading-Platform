@@ -8,7 +8,6 @@ import { auditService } from './auditService.ts';
 import { transactionalOutboxService } from './TransactionalOutboxService.ts';
 import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
 import type { ClientRegisteredPayload, ClientActivatedPayload } from '../events/types.ts';
-import { postgresClientMappingRepository } from '../repositories/trading/PostgresClientMappingRepository.ts';
 import type { RegisterInput, ResetPasswordInput } from '../schemas/authSchemas.ts';
 import { postgresClientMappingRepository } from '../repositories/PostgresClientMappingRepository.ts';
 
@@ -629,24 +628,25 @@ export class AuthService {
   /**
    * Quick Demo Account Access
    */
-<<<<<<< HEAD
-  public async getDemoSession(options?: {
+  public async getDemoSession(optionsOrIp?: string | {
     userId?: string;
     fullName?: string;
     mobile?: string;
     tenantId?: string;
-  }): Promise<{
-=======
-  public async getDemoSession(ipAddress?: string): Promise<{
->>>>>>> e24056d0f7621cf0aa24ab9c31a2d5d82e74336b
+    ipAddress?: string;
+  }, maybeIp?: string): Promise<{
     user: SafeUser;
     token: string;
     message: string;
   }> {
-<<<<<<< HEAD
-    const tenantId = options?.tenantId || 'vertex-default';
-    const demoUser = db.getOrCreateDemoUser(options);
+    const opts = typeof optionsOrIp === 'object' ? optionsOrIp : {};
+    const ipAddress = typeof optionsOrIp === 'string' ? optionsOrIp : (opts.ipAddress || maybeIp);
+    const tenantId = opts.tenantId || 'vertex-default';
+    const demoUser = db.getOrCreateDemoUser(opts);
     db.updateLastLogin(demoUser.id);
+    if ((db as any).recordLoginSuccess) {
+      (db as any).recordLoginSuccess(demoUser.user_id, ipAddress);
+    }
 
     // Safely insert / persist demo user and client mapping in PostgreSQL
     try {
@@ -669,10 +669,6 @@ export class AuthService {
       console.warn('[Postgres] Notice: demo persistence in degraded mode:', pgErr.message);
     }
 
-=======
-    const demoUser = db.getOrCreateDemoUser();
-    db.recordLoginSuccess(demoUser.user_id, ipAddress);
->>>>>>> e24056d0f7621cf0aa24ab9c31a2d5d82e74336b
     const token = this.generateToken(demoUser);
 
     auditService.log({

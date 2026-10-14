@@ -24,11 +24,8 @@ import {
 import { auditService } from '../src/server/services/auditService.ts';
 import { tenantRepository } from '../src/server/repositories/JsonTenantRepository.ts';
 import { pgDb } from '../src/server/db/postgres.ts';
-<<<<<<< HEAD
 import { runTradingMigrations } from '../src/server/db/migrationRunner.ts';
-=======
 import { postgresWalletRepository } from '../src/server/repositories/trading/PostgresWalletRepository.ts';
->>>>>>> e24056d0f7621cf0aa24ab9c31a2d5d82e74336b
 
 const config = getInternalAuthConfig();
 const SECRET = config.internalCommunicationSecret;

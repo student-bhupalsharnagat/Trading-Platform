@@ -124,18 +124,15 @@ export class AuthController {
 
   public async demoLogin(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-<<<<<<< HEAD
       const tenantId = (req as any).tenant?.tenant?.id || 'vertex-default';
+      const ipAddress = getClientIp(req);
       const result = await authService.getDemoSession({
         userId: req.body?.userId,
         fullName: req.body?.fullName,
         mobile: req.body?.mobile,
         tenantId,
+        ipAddress,
       });
-=======
-      const ipAddress = getClientIp(req);
-      const result = await authService.getDemoSession(ipAddress);
->>>>>>> e24056d0f7621cf0aa24ab9c31a2d5d82e74336b
       res.cookie(COOKIE_NAME, result.token, COOKIE_OPTIONS);
 
       res.status(200).json({

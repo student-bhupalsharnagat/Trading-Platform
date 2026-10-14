@@ -56,11 +56,8 @@ import { eventIdempotencyStore } from '../src/server/events/EventIdempotencyStor
 import { tradingHaltService } from '../src/server/services/tradingHaltService.ts';
 import { emergencyControlService } from '../src/server/services/emergencyControlService.ts';
 import { tenantRepository } from '../src/server/repositories/JsonTenantRepository.ts';
-<<<<<<< HEAD
 import { runTradingMigrations } from '../src/server/db/migrationRunner.ts';
-=======
 import { postgresWalletRepository } from '../src/server/repositories/trading/PostgresWalletRepository.ts';
->>>>>>> e24056d0f7621cf0aa24ab9c31a2d5d82e74336b
 
 const config = getInternalAuthConfig();
 const SECRET = config.internalCommunicationSecret;

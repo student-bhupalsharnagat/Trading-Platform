@@ -3,11 +3,8 @@ import { requireAuth, AuthenticatedRequest } from '../../middleware/authMiddlewa
 import { requireRole } from '../../middleware/requireRole.ts';
 import { hierarchyGuard } from '../../middleware/hierarchyGuard.ts';
 import { hierarchyService } from '../../services/hierarchyService.ts';
-<<<<<<< HEAD
 import { postgresClientMappingRepository } from '../../repositories/PostgresClientMappingRepository.ts';
-=======
 import { authoritativeTradingDataService } from '../../services/authoritativeTradingDataService.ts';
->>>>>>> e24056d0f7621cf0aa24ab9c31a2d5d82e74336b
 
 const router = Router();
 

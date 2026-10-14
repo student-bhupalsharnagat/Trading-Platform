@@ -34,12 +34,8 @@ export interface UserRecord {
   address?: string;
   commission_rate?: number;
   is_verified: boolean;
-<<<<<<< HEAD
-  status: 'active' | 'suspended' | 'demo' | 'deactivated';
-  account_type?: 'real' | 'demo';
-=======
   status: AccountStatus;
->>>>>>> e24056d0f7621cf0aa24ab9c31a2d5d82e74336b
+  account_type?: 'real' | 'demo';
   is_frozen?: boolean;
   tenant_id?: string;
   referral_code?: string;
@@ -570,8 +566,9 @@ class DatabaseService {
         full_name: data?.fullName || 'Demo Trader',
         user_id: demoUserId,
         country_code: '+91',
-<<<<<<< HEAD
         mobile: data?.mobile || '9876543210',
+        phone_e164: `+91${(data?.mobile || '9876543210').slice(-10)}`,
+        phone_verified_at: new Date().toISOString(),
         password_hash: '$2a$10$DEMO_ACCOUNT_NOT_PASSWORD_ACCESSIBLE_DIRECTLY',
         role: 'CLIENT',
         parent_id: 'master-node-0001',
@@ -580,14 +577,6 @@ class DatabaseService {
         status: 'active',
         account_type: 'demo',
         tenant_id: data?.tenantId || 'vertex-default',
-=======
-        mobile: '9876543210',
-        phone_e164: '+919876543210',
-        phone_verified_at: new Date().toISOString(),
-        password_hash: '$argon2id$v=19$m=19456,t=2,p=1$DEMO_ACCOUNT_NOT_PASSWORD_ACCESSIBLE_DIRECTLY',
-        is_verified: true,
-        status: 'ACTIVE',
->>>>>>> e24056d0f7621cf0aa24ab9c31a2d5d82e74336b
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         demo_balance: 1000000.0,

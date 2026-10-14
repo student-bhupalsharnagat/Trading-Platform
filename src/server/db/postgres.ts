@@ -120,7 +120,6 @@ class PostgresDatabase {
     try {
       this.pglite = new PGlite(dataDir);
       await this.pglite.waitReady;
-<<<<<<< HEAD
     } catch (err: any) {
       console.warn('[Postgres] Failed to initialize persistent PGlite dataDir, falling back to in-memory:', err?.message || err);
       try {
@@ -128,9 +127,6 @@ class PostgresDatabase {
           await this.pglite.close().catch(() => {});
         }
       } catch {}
-=======
-    } catch {
->>>>>>> e24056d0f7621cf0aa24ab9c31a2d5d82e74336b
       this.pglite = new PGlite();
       await this.pglite.waitReady;
     }

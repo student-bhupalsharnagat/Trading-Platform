@@ -17,8 +17,6 @@ import { postgresWalletRepository } from '../src/server/repositories/trading/Pos
 
 import { runTradingMigrations } from '../src/server/db/migrationRunner.ts';
 
-import { runTradingMigrations } from '../src/server/db/migrationRunner.ts';
-
 const config = getInternalAuthConfig();
 const SECRET = config.internalCommunicationSecret;
 
@@ -27,10 +25,7 @@ async function runAllTests() {
   console.log('STARTING PHASE 5B TEST SUITE: 18 TARGET TESTS');
   console.log('==================================================\n');
 
-<<<<<<< HEAD
   // Run DB migrations
-=======
->>>>>>> e24056d0f7621cf0aa24ab9c31a2d5d82e74336b
   await runTradingMigrations();
 
   // Seed super admin
