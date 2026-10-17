@@ -62,11 +62,11 @@ export class ProductionValidator {
       }
     }
 
-    // 2. INTERNAL_COMMUNICATION_SECRET Validation
-    const internalSecret = env.INTERNAL_COMMUNICATION_SECRET;
+    // 2. INTERNAL_COMMUNICATION_SECRET / INTERNAL_API_SECRET Validation
+    const internalSecret = env.INTERNAL_COMMUNICATION_SECRET || env.INTERNAL_API_SECRET || env.CENTRAL_ADMIN_INTERNAL_SECRET;
     if (!internalSecret) {
       if (isProd) {
-        errors.push('INTERNAL_COMMUNICATION_SECRET environment variable is missing in production.');
+        errors.push('INTERNAL_COMMUNICATION_SECRET (or INTERNAL_API_SECRET) environment variable is missing in production.');
       } else {
         warnings.push('INTERNAL_COMMUNICATION_SECRET is unset; using development testing secret.');
       }
@@ -107,7 +107,7 @@ export class ProductionValidator {
     }
 
     // 6. S2S Base URLs check (CentralAdminEventClient base URL = CENTRAL_ADMIN_BASE_URL only)
-    const centralAdminBaseUrl = env.CENTRAL_ADMIN_BASE_URL;
+    const centralAdminBaseUrl = env.CENTRAL_ADMIN_BASE_URL || env.CENTRAL_ADMIN_URL || env.CENTRAL_API_URL;
     if (isProd) {
       if (!centralAdminBaseUrl) {
         errors.push('CENTRAL_ADMIN_BASE_URL is required in production.');

@@ -210,6 +210,201 @@ const SEED_TENANTS: Record<
       maintenance_active: false,
     },
   },
+  'TNT-001': {
+    tenant: {
+      id: 'TNT-001',
+      name: 'Alpha Prime Capital',
+      slug: 'alpha-prime',
+      customDomain: 'trade.alphaprime.com',
+      domains: ['trade.alphaprime.com', 'alphaprime.com', 'alpha.local', 'localhost'],
+      status: 'active',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-10-17T00:00:00.000Z',
+    },
+    branding: {
+      brandName: 'Alpha Prime Capital',
+      shortName: 'ALPHA',
+      logoUrl: '',
+      faviconUrl: '/favicon.ico',
+      tagline: 'Enterprise Multi-Asset Platform',
+      primaryColor: '#3B82F6',
+      secondaryColor: '#10B981',
+      accentColor: '#F59E0B',
+      backgroundColor: '#060B13',
+      surfaceColor: '#0B111C',
+      loginBranding: {
+        title: 'Alpha Prime Trading Desk',
+        subtitle: 'Enterprise-grade algorithmic routing and institutional liquidity.',
+        badgeText: 'Direct Market Access',
+        heroHighlight: 'Professional Multi-Tier Trading',
+      },
+      headerBranding: {
+        showTagline: true,
+        badgeText: 'Live Feed',
+      },
+      sidebarBranding: {
+        brandText: 'Trading Platform',
+      },
+      supportEmail: 'support@alphaprime.com',
+      supportPhone: '+91 1800 234 5678',
+      footerLinks: {
+        termsUrl: '#terms',
+        privacyUrl: '#privacy',
+        riskDisclosureUrl: '#risk',
+        helpCenterUrl: '#support',
+      },
+    },
+    config: {
+      trading_enabled: true,
+      registration_enabled: true,
+      api_enabled: true,
+      support_enabled: true,
+      notifications_enabled: true,
+      deposit_enabled: true,
+      withdrawal_enabled: true,
+      options_trading_enabled: true,
+      max_leverage: 50,
+      maintenance_mode: false,
+      maintenance_message: 'Alpha Prime systems operational.',
+    },
+    status: {
+      tenant_frozen: false,
+      trading_killswitch_active: false,
+      registration_frozen: false,
+      api_frozen: false,
+      maintenance_active: false,
+    },
+  },
+  'TNT-002': {
+    tenant: {
+      id: 'TNT-002',
+      name: 'Horizon Securities',
+      slug: 'horizon',
+      customDomain: 'portal.horizonsec.in',
+      domains: ['portal.horizonsec.in', 'horizonsec.in', 'horizon.local'],
+      status: 'active',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-10-17T00:00:00.000Z',
+    },
+    branding: {
+      brandName: 'Horizon Securities',
+      shortName: 'HORIZON',
+      logoUrl: '',
+      faviconUrl: '/favicon.ico',
+      tagline: 'Professional Brokerage & Trading',
+      primaryColor: '#10B981',
+      secondaryColor: '#3B82F6',
+      accentColor: '#F59E0B',
+      backgroundColor: '#060B13',
+      surfaceColor: '#0B111C',
+      loginBranding: {
+        title: 'Horizon Securities Portal',
+        subtitle: 'Advanced execution across all exchange segments.',
+        badgeText: 'Pro Brokerage',
+        heroHighlight: 'Institutional Trading',
+      },
+      headerBranding: {
+        showTagline: true,
+        badgeText: 'Pro Feed',
+      },
+      sidebarBranding: {
+        brandText: 'Horizon Securities',
+      },
+      supportEmail: 'support@horizonsec.in',
+      supportPhone: '+91 1800 888 1234',
+      footerLinks: {
+        termsUrl: '#terms',
+        privacyUrl: '#privacy',
+        riskDisclosureUrl: '#risk',
+        helpCenterUrl: '#support',
+      },
+    },
+    config: {
+      trading_enabled: true,
+      registration_enabled: true,
+      api_enabled: true,
+      support_enabled: true,
+      notifications_enabled: true,
+      deposit_enabled: true,
+      withdrawal_enabled: true,
+      options_trading_enabled: true,
+      max_leverage: 50,
+      maintenance_mode: false,
+      maintenance_message: 'Horizon Securities systems operational.',
+    },
+    status: {
+      tenant_frozen: false,
+      trading_killswitch_active: false,
+      registration_frozen: false,
+      api_frozen: false,
+      maintenance_active: false,
+    },
+  },
+  'TNT-003': {
+    tenant: {
+      id: 'TNT-003',
+      name: 'Apex Capital Markets',
+      slug: 'apex-capital-markets',
+      customDomain: 'trading.apexcap.io',
+      domains: ['trading.apexcap.io', 'apexcap.io', 'apex.local'],
+      status: 'active',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-10-17T00:00:00.000Z',
+    },
+    branding: {
+      brandName: 'Apex Capital Markets',
+      shortName: 'APEX',
+      logoUrl: '',
+      faviconUrl: '/favicon.ico',
+      tagline: 'High-Frequency Derivatives & Equities',
+      primaryColor: '#10B981',
+      secondaryColor: '#14B8A6',
+      accentColor: '#F59E0B',
+      backgroundColor: '#050E0C',
+      surfaceColor: '#0B1A17',
+      loginBranding: {
+        title: 'Apex Capital Terminal',
+        subtitle: 'Enterprise-grade algorithmic routing, deep order books, and institutional liquidity.',
+        badgeText: 'Institutional Grade',
+        heroHighlight: 'Precision Execution',
+      },
+      headerBranding: {
+        showTagline: true,
+        badgeText: 'Apex DMA Tier-1',
+      },
+      sidebarBranding: {
+        brandText: 'Capital Markets',
+      },
+      supportEmail: 'desk@apex-capital.markets',
+      supportPhone: '+91 1800 888 9090',
+      footerLinks: {
+        termsUrl: '#apex-terms',
+        privacyUrl: '#apex-privacy',
+        riskDisclosureUrl: '#apex-risk',
+        helpCenterUrl: '#apex-help',
+      },
+    },
+    config: {
+      trading_enabled: true,
+      registration_enabled: true,
+      api_enabled: true,
+      support_enabled: true,
+      notifications_enabled: true,
+      deposit_enabled: true,
+      withdrawal_enabled: true,
+      options_trading_enabled: true,
+      max_leverage: 40,
+      maintenance_mode: false,
+      maintenance_message: 'Apex Capital systems operational.',
+    },
+    status: {
+      tenant_frozen: false,
+      trading_killswitch_active: false,
+      registration_frozen: false,
+      api_frozen: false,
+      maintenance_active: false,
+    },
+  },
 };
 
 export class JsonTenantRepository implements ITenantRepository {
@@ -228,8 +423,17 @@ export class JsonTenantRepository implements ITenantRepository {
     this.store = JSON.parse(JSON.stringify(SEED_TENANTS));
   }
 
+  private getItem(tenantId: string) {
+    if (!tenantId) return null;
+    if (this.store[tenantId]) return this.store[tenantId];
+    const match = Object.values(this.store).find(
+      (s) => s.tenant.id.toLowerCase() === tenantId.toLowerCase()
+    );
+    return match || null;
+  }
+
   public async findById(id: string): Promise<Tenant | null> {
-    const item = this.store[id];
+    const item = this.getItem(id);
     return item ? { ...item.tenant } : null;
   }
 
@@ -256,17 +460,17 @@ export class JsonTenantRepository implements ITenantRepository {
   }
 
   public async getBranding(tenantId: string): Promise<TenantBranding | null> {
-    const item = this.store[tenantId];
+    const item = this.getItem(tenantId);
     return item ? { ...item.branding } : null;
   }
 
   public async getPlatformConfig(tenantId: string): Promise<TenantPlatformConfig | null> {
-    const item = this.store[tenantId];
+    const item = this.getItem(tenantId);
     return item ? { ...item.config } : null;
   }
 
   public async getStatus(tenantId: string): Promise<TenantSecurityStatus | null> {
-    const item = this.store[tenantId];
+    const item = this.getItem(tenantId);
     return item ? { ...item.status } : null;
   }
 
@@ -274,7 +478,7 @@ export class JsonTenantRepository implements ITenantRepository {
     tenantId: string,
     updates: Partial<TenantPlatformConfig>
   ): Promise<TenantPlatformConfig | null> {
-    const item = this.store[tenantId];
+    const item = this.getItem(tenantId);
     if (!item) return null;
     item.config = { ...item.config, ...updates };
     return { ...item.config };

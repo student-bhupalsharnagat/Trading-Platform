@@ -10,6 +10,7 @@ import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
 import type { ClientRegisteredPayload, ClientActivatedPayload } from '../events/types.ts';
 import type { RegisterInput, ResetPasswordInput } from '../schemas/authSchemas.ts';
 import { postgresClientMappingRepository } from '../repositories/PostgresClientMappingRepository.ts';
+import { postgresClientMappingRepository as tradingClientMappingRepo } from '../repositories/trading/PostgresClientMappingRepository.ts';
 
 if (process.env.NODE_ENV === 'production') {
   const secret = process.env.JWT_SECRET;
@@ -339,7 +340,7 @@ export class AuthService {
     // Resolve external clientId if mapping exists
     let clientId = updatedUser.id || updatedUser.user_id;
     try {
-      const mapping = await postgresClientMappingRepository.findByTradingUserId(
+      const mapping = await tradingClientMappingRepo.findByTradingUserId(
         updatedUser.tenant_id || 'vertex-default',
         updatedUser.user_id
       );

@@ -153,7 +153,10 @@ export class CentralAdminEventClient {
 
       let data: any = null;
       try {
-        data = await response.json();
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          data = await response.json();
+        }
       } catch {
         data = null;
       }

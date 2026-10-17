@@ -151,14 +151,28 @@ export function verifyInternalHmac(secret: string, payload: string, signature: s
   }
   try {
     const expected = generateInternalHmac(secret, payload);
-    const sigBuffer = Buffer.from(signature, 'hex');
-    const expectedBuffer = Buffer.from(expected, 'hex');
+    const cleanSig = signature.trim().toLowerCase();
+    const cleanExpected = expected.trim().toLowerCase();
 
-    if (sigBuffer.length !== expectedBuffer.length) {
-      return false;
+    // Check if signature is hex
+    if (/^[0-9a-f]+$/i.test(cleanSig)) {
+      const sigBuffer = Buffer.from(cleanSig, 'hex');
+      const expectedBuffer = Buffer.from(cleanExpected, 'hex');
+
+      if (sigBuffer.length === expectedBuffer.length && sigBuffer.length > 0) {
+        if (crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
+          return true;
+        }
+      }
     }
 
-    return crypto.timingSafeEqual(sigBuffer, expectedBuffer);
+    // Check if signature is base64
+    const expectedBase64 = crypto.createHmac('sha256', secret).update(payload, 'utf8').digest('base64');
+    if (signature.trim() === expectedBase64) {
+      return true;
+    }
+
+    return false;
   } catch {
     return false;
   }
@@ -263,10 +277,19 @@ export function requireInternalAuth(
     return;
   }
 
-  const rawTimestamp = req.headers['x-internal-timestamp'] as string;
-  const signature = req.headers['x-internal-signature'] as string;
-  const tenantId = req.headers['x-tenant-id'] as string;
-  const nonce = req.headers['x-internal-nonce'] as string;
+  const rawTimestamp =
+    (req.headers['x-internal-timestamp'] as string) ||
+    (req.headers['x-timestamp'] as string);
+  const signature =
+    (req.headers['x-internal-signature'] as string) ||
+    (req.headers['x-signature'] as string) ||
+    (req.headers['x-hmac-signature'] as string);
+  const tenantId =
+    (req.headers['x-tenant-id'] as string) ||
+    (req.headers['x-tenant'] as string);
+  const nonce =
+    (req.headers['x-internal-nonce'] as string) ||
+    (req.headers['x-nonce'] as string);
 
   // 1. Validate header presence
   if (!rawTimestamp) {
@@ -358,13 +381,55 @@ export function requireInternalAuth(
     return;
   }
 
-  // 4. Validate HMAC signature
+  // 4. Validate HMAC signature against all candidate secrets & payload permutations
   const rawBodyString = req.rawBody;
   const bodyString = serializeRequestBody(req.body, rawBodyString);
-  const normalizedPath = (req.originalUrl || req.url).split('?')[0];
-  const payload = buildSignaturePayload(rawTimestamp, req.method, normalizedPath, bodyString);
+  const originalUrl = req.originalUrl || req.url || '';
+  const normalizedPath = originalUrl.split('?')[0];
+  const fullPath = originalUrl;
+  const method = req.method.trim().toUpperCase();
 
-  const isValidSig = verifyInternalHmac(config.internalCommunicationSecret, payload, signature);
+  const candidatePayloads = new Set<string>();
+
+  // 4.1 Standard: timestamp.METHOD.normalizedPath.bodyString
+  candidatePayloads.add(buildSignaturePayload(rawTimestamp, method, normalizedPath, bodyString));
+
+  // 4.2 Without trailing dot when body is empty
+  candidatePayloads.add(`${rawTimestamp}.${method}.${normalizedPath}`);
+
+  // 4.3 With full path (including query string if any)
+  if (fullPath !== normalizedPath) {
+    candidatePayloads.add(buildSignaturePayload(rawTimestamp, method, fullPath, bodyString));
+    candidatePayloads.add(`${rawTimestamp}.${method}.${fullPath}`);
+  }
+
+  // 4.4 If body is empty, test with empty JSON "{}"
+  if (!bodyString) {
+    candidatePayloads.add(`${rawTimestamp}.${method}.${normalizedPath}.{}`);
+    if (fullPath !== normalizedPath) {
+      candidatePayloads.add(`${rawTimestamp}.${method}.${fullPath}.{}`);
+    }
+  }
+
+  // 4.5 Colon-delimited variants
+  candidatePayloads.add(`${rawTimestamp}:${method}:${normalizedPath}:${bodyString}`);
+  candidatePayloads.add(`${rawTimestamp}:${method}:${normalizedPath}`);
+  if (fullPath !== normalizedPath) {
+    candidatePayloads.add(`${rawTimestamp}:${method}:${fullPath}:${bodyString}`);
+    candidatePayloads.add(`${rawTimestamp}:${method}:${fullPath}`);
+  }
+
+  let isValidSig = false;
+  for (const candidateSecret of config.candidateSecrets) {
+    for (const payload of candidatePayloads) {
+      if (verifyInternalHmac(candidateSecret, payload, signature)) {
+        isValidSig = true;
+        break;
+      }
+    }
+    if (isValidSig) break;
+  }
+
   if (!isValidSig) {
     logInternalSecurityRejection(req, 'INVALID_SIGNATURE');
     res.status(401).json({

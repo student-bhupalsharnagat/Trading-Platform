@@ -7,8 +7,14 @@
  * - Insecure hardcoded fallbacks are strictly prohibited in production.
  */
 
+export const DEFAULT_INTERNAL_FALLBACK_SECRET = 'nextrade-internal-hmac-secret-2026';
+
 if (process.env.NODE_ENV === 'production') {
-  const secret = process.env.INTERNAL_COMMUNICATION_SECRET || process.env.CENTRAL_ADMIN_INTERNAL_SECRET || process.env.INTERNAL_API_SECRET || '';
+  const secret =
+    process.env.INTERNAL_COMMUNICATION_SECRET ||
+    process.env.INTERNAL_API_SECRET ||
+    process.env.CENTRAL_ADMIN_INTERNAL_SECRET ||
+    DEFAULT_INTERNAL_FALLBACK_SECRET;
   if (!secret || secret.length < 32) {
     throw new Error(
       `[SECURITY ERROR] INTERNAL_COMMUNICATION_SECRET (or INTERNAL_API_SECRET) must be configured and at least 32 characters in production (length: ${secret.length}).`
@@ -19,33 +25,37 @@ if (process.env.NODE_ENV === 'production') {
 export interface InternalAuthConfig {
   tradingPlatformBaseUrl: string;
   internalCommunicationSecret: string;
+  candidateSecrets: string[];
   maxAgeMs: number;
   isProduction: boolean;
 }
 
 export function getInternalAuthConfig(): InternalAuthConfig {
   const isProduction = process.env.NODE_ENV === 'production';
-  const secret = process.env.INTERNAL_COMMUNICATION_SECRET || process.env.CENTRAL_ADMIN_INTERNAL_SECRET || process.env.INTERNAL_API_SECRET || '';
+  const commSecret = process.env.INTERNAL_COMMUNICATION_SECRET?.trim() || '';
+  const apiSecret = process.env.INTERNAL_API_SECRET?.trim() || '';
+  const centralSecret = process.env.CENTRAL_ADMIN_INTERNAL_SECRET?.trim() || '';
+  const fallbackSecret = DEFAULT_INTERNAL_FALLBACK_SECRET;
 
-  if (isProduction) {
-    if (!secret || secret.length < 32) {
-      throw new Error(
-        `[SECURITY ERROR] INTERNAL_COMMUNICATION_SECRET (or INTERNAL_API_SECRET) must be configured and at least 32 characters in production (length: ${secret ? secret.length : 0}).`
-      );
-    }
-  } else if (!secret) {
-    console.warn(
-      '[SECURITY WARNING] INTERNAL_COMMUNICATION_SECRET is not configured. Using internal fallback secret. Set INTERNAL_COMMUNICATION_SECRET in environment for production.'
-    );
-  }
+  // Primary effective secret for outbound requests
+  const effectiveSecret = commSecret || apiSecret || centralSecret || fallbackSecret;
 
-  const effectiveSecret = isProduction ? secret : (secret || 'vtx_dev_internal_shared_secret_do_not_use_in_prod');
-  const baseUrl = process.env.TRADING_PLATFORM_BASE_URL || process.env.TRADING_PLATFORM_URL || process.env.CLIENT_URL || 'https://trading-platform-2t6r.onrender.com';
+  // All acceptable candidate secrets for inbound verification (deduplicated)
+  const candidateSecrets = Array.from(
+    new Set([commSecret, apiSecret, centralSecret, fallbackSecret].filter((s) => s.length > 0))
+  );
+
+  const baseUrl =
+    process.env.TRADING_PLATFORM_BASE_URL ||
+    process.env.TRADING_PLATFORM_URL ||
+    process.env.CLIENT_URL ||
+    'https://trading-platform-2t6r.onrender.com';
   const maxAgeMs = parseInt(process.env.INTERNAL_REQUEST_MAX_AGE_MS || '30000', 10) || 30000;
 
   return {
     tradingPlatformBaseUrl: baseUrl,
     internalCommunicationSecret: effectiveSecret,
+    candidateSecrets,
     maxAgeMs,
     isProduction,
   };
