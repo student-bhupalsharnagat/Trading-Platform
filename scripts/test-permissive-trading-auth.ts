@@ -146,6 +146,48 @@ async function runTests() {
   assert.strictEqual(mockResEmergency.body?.code, 'UNAUTHORIZED');
   console.log('✓ Non-trading internal routes remain strictly protected (rejected with 401)');
 
+  // Test 4d: User Panel (https://user-panel-dashbord-ofrt.onrender.com) fetching trading endpoints with invalid signature
+  const tradingEndpoints = ['positions', 'trades', 'funds', 'ledger'];
+  for (const ep of tradingEndpoints) {
+    let epNextCalled = false;
+    const mockReqPanel: Partial<InternalAuthorizedRequest> = {
+      path: `/trading/${ep}`,
+      originalUrl: `/api/internal/v1/trading/${ep}`,
+      url: `/trading/${ep}`,
+      method: 'GET',
+      headers: {
+        origin: 'https://user-panel-dashbord-ofrt.onrender.com',
+        'x-internal-timestamp': String(Date.now()),
+        'x-internal-nonce': `nonce-panel-${ep}`,
+        'x-tenant-id': 'TNT-001',
+        'x-internal-signature': 'tampered-or-invalid-hmac-sig',
+      },
+      body: {},
+    };
+
+    const mockResPanel: any = {
+      statusCode: 200,
+      setHeader: () => {},
+      status: function (code: number) { this.statusCode = code; return this; },
+      json: function (data: any) { this.body = data; return this; },
+    };
+
+    await new Promise<void>((resolve) => {
+      requireInternalAuth(
+        mockReqPanel as InternalAuthorizedRequest,
+        mockResPanel,
+        () => {
+          epNextCalled = true;
+          resolve();
+        }
+      );
+    });
+
+    assert(epNextCalled, `next() should have been called for User Panel on /trading/${ep} with invalid signature`);
+    assert.strictEqual(mockResPanel.statusCode, 200, `User Panel /trading/${ep} must not return 401/403`);
+    console.log(`✓ requireInternalAuth permitted User Panel request on /trading/${ep} despite invalid HMAC signature`);
+  }
+
   console.log('\nALL TESTS PASSED SUCCESSFULLY! ✓✓✓');
 }
 
