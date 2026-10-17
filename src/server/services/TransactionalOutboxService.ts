@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { DbClient } from '../db/postgres.ts';
+import { pgDb, DbClient } from '../db/postgres.ts';
 import {
   postgresOutboxRepository,
   OutboxEventRecord,
@@ -78,6 +78,11 @@ export class TransactionalOutboxService {
       console.warn('[TransactionalOutbox] Stale processing recovery notice:', err.message);
     });
 
+    // Reset failed and dead-letter events so they re-attempt delivery to Central Admin
+    this.resetFailedAndDeadLetterEvents().catch((err) => {
+      console.warn('[TransactionalOutbox] Reset dead-letter recovery notice:', err.message);
+    });
+
     this.workerTimer = setInterval(() => {
       this.processBatch().catch((err) => {
         console.error('[TransactionalOutbox] Unhandled batch error:', err.message);
@@ -85,6 +90,170 @@ export class TransactionalOutboxService {
     }, this.pollIntervalMs);
 
     console.log('[TransactionalOutbox] Outbox background worker started');
+  }
+
+  /**
+   * Resets any FAILED or DEAD_LETTER outbox events to PENDING with next_attempt_at = NOW()
+   * so they are immediately picked up by the outbox dispatcher.
+   */
+  public async resetFailedAndDeadLetterEvents(): Promise<number> {
+    try {
+      const res = await pgDb.query(`
+        UPDATE trading_outbox
+        SET status = 'PENDING',
+            attempt_count = 0,
+            next_attempt_at = NOW()
+        WHERE status IN ('FAILED', 'DEAD_LETTER')
+        RETURNING id;
+      `);
+      const count = res.rowCount || 0;
+      if (count > 0) {
+        console.log(`[TransactionalOutbox] Reset ${count} failed/dead-letter outbox events back to PENDING`);
+      }
+      return count;
+    } catch (err: any) {
+      console.warn('[TransactionalOutbox] Reset failed events notice:', err.message);
+      return 0;
+    }
+  }
+
+  /**
+   * Pushes all current clients, orders, and positions to Central Admin.
+   * Ensures that live trading data is synced to https://admin-dashbord-wxcq.onrender.com.
+   */
+  public async syncAllCurrentDataToCentralAdmin(
+    targetTenantId = 'TNT-001'
+  ): Promise<{ clientsCount: number; ordersCount: number; positionsCount: number }> {
+    let clientsCount = 0;
+    let ordersCount = 0;
+    let positionsCount = 0;
+
+    try {
+      // 1. Reset any previously failed/dead-letter events first
+      await this.resetFailedAndDeadLetterEvents();
+
+      // 2. Sync Users / Clients
+      const { db } = await import('../db/database.ts');
+      const allUsers = db.getAllUsers();
+      for (const u of allUsers) {
+        if (u.role === 'CLIENT' || !u.role) {
+          clientsCount++;
+          const tId = u.tenant_id && u.tenant_id !== 'vertex-default' && u.tenant_id !== 'default' ? u.tenant_id : targetTenantId;
+          const clientPayload = {
+            tenantId: tId,
+            tradingUserId: u.user_id,
+            userId: u.user_id,
+            clientId: u.id || u.user_id,
+            clientCode: u.user_id.toUpperCase(),
+            name: u.full_name,
+            fullName: u.full_name,
+            email: u.email || '',
+            phone: u.phone_e164 || u.mobile || '',
+            status: u.status || 'ACTIVE',
+            accountStatus: u.status || 'ACTIVE',
+            kycStatus: u.is_verified ? 'VERIFIED' : 'PENDING',
+            createdAt: u.created_at || new Date().toISOString(),
+          };
+
+          await this.enqueue({
+            eventId: `sync-reg-${u.user_id}`,
+            eventType: 'client.registered',
+            tenantId: tId,
+            payload: clientPayload,
+          }).catch(() => {});
+
+          await this.enqueue({
+            eventId: `sync-act-${u.user_id}`,
+            eventType: 'client.activated',
+            tenantId: tId,
+            payload: { ...clientPayload, clientId: u.id || u.user_id },
+          }).catch(() => {});
+        }
+      }
+
+      // 3. Sync Orders
+      const { postgresOrderRepository } = await import('../repositories/trading/PostgresOrderRepository.ts');
+      const orders = await postgresOrderRepository.getOrders(targetTenantId);
+      const fallbackOrders = await postgresOrderRepository.getOrders('vertex-default');
+      const allOrders = [...orders];
+      const seenOrderIds = new Set(orders.map((o) => o.id));
+      for (const fo of fallbackOrders) {
+        if (!seenOrderIds.has(fo.id)) {
+          seenOrderIds.add(fo.id);
+          allOrders.push(fo);
+        }
+      }
+
+      for (const o of allOrders) {
+        ordersCount++;
+        await this.enqueue({
+          eventId: `sync-ord-${o.id}`,
+          eventType: 'order.created',
+          tenantId: targetTenantId,
+          payload: {
+            tenantId: targetTenantId,
+            orderId: o.id,
+            userId: o.user_id,
+            symbol: o.instrument_id,
+            instrumentId: o.instrument_id,
+            side: o.side,
+            orderType: o.order_type,
+            quantity: o.quantity,
+            price: o.price,
+            status: o.status,
+            filledQuantity: o.filled_quantity,
+            averagePrice: o.average_fill_price,
+            createdAt: o.created_at,
+          },
+        }).catch(() => {});
+      }
+
+      // 4. Sync Positions
+      const { postgresPositionRepository } = await import('../repositories/trading/PostgresPositionRepository.ts');
+      const positions = await postgresPositionRepository.getPositions(targetTenantId);
+      const fallbackPositions = await postgresPositionRepository.getPositions('vertex-default');
+      const allPositions = [...positions];
+      const seenPosIds = new Set(positions.map((p) => p.id));
+      for (const fp of fallbackPositions) {
+        if (!seenPosIds.has(fp.id)) {
+          seenPosIds.add(fp.id);
+          allPositions.push(fp);
+        }
+      }
+
+      for (const p of allPositions) {
+        positionsCount++;
+        await this.enqueue({
+          eventId: `sync-pos-${p.id}`,
+          eventType: 'position.updated',
+          tenantId: targetTenantId,
+          payload: {
+            tenantId: targetTenantId,
+            positionId: p.id,
+            userId: p.user_id,
+            symbol: p.instrument_id,
+            instrumentId: p.instrument_id,
+            quantity: p.quantity,
+            averagePrice: p.average_price,
+            realizedPnl: p.realized_pnl,
+            unrealizedPnl: p.unrealized_pnl,
+            marginUsed: p.margin_used,
+            updatedAt: p.updated_at,
+          },
+        }).catch(() => {});
+      }
+
+      // 5. Immediately trigger batch dispatch
+      this.processBatch(50).catch((err) => {
+        console.warn('[TransactionalOutbox] Immediate sync batch notice:', err.message);
+      });
+
+      console.log(`[TransactionalOutbox] Startup sync queued: ${clientsCount} clients, ${ordersCount} orders, ${positionsCount} positions to Central Admin.`);
+    } catch (err: any) {
+      console.warn('[TransactionalOutbox] syncAllCurrentDataToCentralAdmin notice:', err.message);
+    }
+
+    return { clientsCount, ordersCount, positionsCount };
   }
 
   /**

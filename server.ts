@@ -28,6 +28,7 @@ import { tradingWebSocketServer } from './src/server/websocket/WebSocketServer.t
 import { redisService } from './src/server/redis/RedisService.ts';
 import { transactionalOutboxService } from './src/server/services/TransactionalOutboxService.ts';
 import { pgDb } from './src/server/db/postgres.ts';
+import { postgresClientMappingRepository } from './src/server/repositories/PostgresClientMappingRepository.ts';
 
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -73,8 +74,21 @@ async function startServer() {
     console.error('[DB] Migration error during startup:', migErr.message);
   }
 
+  // Auto-backfill missing client mappings and trading wallets
+  try {
+    const bf = await postgresClientMappingRepository.backfillClientMappingsAndWallets('TNT-001');
+    console.log(`[STARTUP] Auto-backfilled client mappings: ${bf.mappingsCreated} mappings, ${bf.walletsCreated} wallets.`);
+  } catch (backfillErr: any) {
+    console.warn('[STARTUP] Client mappings backfill notice:', backfillErr.message);
+  }
+
   // Start Transactional Outbox background worker
   transactionalOutboxService.startWorker();
+
+  // Startup sync: dispatch pending outbox events and sync current state to Central Admin
+  transactionalOutboxService.syncAllCurrentDataToCentralAdmin('TNT-001').catch((syncErr: any) => {
+    console.warn('[STARTUP] Central admin outbox sync notice:', syncErr.message);
+  });
 
   const app = express();
 

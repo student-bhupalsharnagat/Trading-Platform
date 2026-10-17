@@ -16,32 +16,54 @@ import { auditService } from './auditService.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
 import crypto from 'crypto';
 
+export const DEFAULT_TENANTS = ['TNT-001', 'vertex-default', 'default'];
+
+export function isDefaultTenant(tenantId?: string | null): boolean {
+  if (!tenantId) return true;
+  const t = tenantId.trim().toLowerCase();
+  return t === 'tnt-001' || t === 'vertex-default' || t === 'default' || t === '';
+}
+
+export function getSearchTenants(tenantId?: string | null): string[] {
+  const norm = (tenantId || '').trim();
+  const list = [norm, ...DEFAULT_TENANTS].filter(Boolean);
+  return Array.from(new Set(list));
+}
+
 export class AuthoritativeTradingDataService {
   /**
    * Resolves a clientId (could be trading_user_id, external_client_id, or external_client_code)
-   * to the canonical trading_user_id within the given tenant.
+   * to the canonical trading_user_id across the tenant or default tenant fallbacks.
    */
   public async resolveTradingUserId(tenantId: string, clientIdOrCode: string): Promise<string> {
     if (!clientIdOrCode) return '';
     const trimmed = clientIdOrCode.trim();
+    const searchTenants = getSearchTenants(tenantId);
 
     // 1. Direct check in User table
     const directUser = db.findUserByUserId(trimmed) || db.findUserById(trimmed);
-    if (directUser && (directUser.tenant_id === tenantId || (!directUser.tenant_id && tenantId === 'vertex-default'))) {
-      return directUser.user_id;
+    if (directUser) {
+      const uTenant = directUser.tenant_id || 'vertex-default';
+      if (
+        uTenant.toLowerCase() === tenantId.toLowerCase() ||
+        isDefaultTenant(tenantId) ||
+        isDefaultTenant(uTenant)
+      ) {
+        return directUser.user_id;
+      }
     }
 
-    // 2. Check mapping table by external_client_id
-    const byExtId = await postgresClientMappingRepository.findByExternalClientId(tenantId, trimmed);
-    if (byExtId) return byExtId.trading_user_id;
+    // 2. Check mapping table across search tenants
+    for (const t of searchTenants) {
+      const byExtId = await postgresClientMappingRepository.findByExternalClientId(t, trimmed);
+      if (byExtId) return byExtId.trading_user_id;
 
-    // 3. Check mapping table by external_client_code
-    const byExtCode = await postgresClientMappingRepository.findByExternalClientCode(tenantId, trimmed);
-    if (byExtCode) return byExtCode.trading_user_id;
+      const byExtCode = await postgresClientMappingRepository.findByExternalClientCode(t, trimmed);
+      if (byExtCode) return byExtCode.trading_user_id;
 
-    // 4. Check mapping table by trading_user_id
-    const byTradeId = await postgresClientMappingRepository.findByTradingUserId(tenantId, trimmed);
-    if (byTradeId) return byTradeId.trading_user_id;
+      const byTradeId = await postgresClientMappingRepository.findByTradingUserId(t, trimmed);
+      if (byTradeId) return byTradeId.trading_user_id;
+    }
 
     return trimmed;
   }
@@ -50,30 +72,38 @@ export class AuthoritativeTradingDataService {
    * GET /trading/summary
    */
   public async getTradingSummary(tenantId: string) {
-    const orders = await postgresOrderRepository.getOrders(tenantId);
-    const trades = await postgresTradeRepository.getTrades(tenantId);
-    const positions = await postgresPositionRepository.getPositions(tenantId);
+    const ordersRes = await this.getOrders(tenantId);
+    const tradesRes = await this.getTrades(tenantId);
+    const positionsRes = await this.getPositions(tenantId);
+
+    const orders = ordersRes.orders;
+    const trades = tradesRes.trades;
+    const positions = positionsRes.positions;
 
     const pendingOrdersCount = orders.filter(
-      (o) => o.status === 'PENDING' || (o.status as string) === 'SUBMITTED' || (o.status as string) === 'OPEN'
+      (o: any) => o.status === 'PENDING' || (o.status as string) === 'SUBMITTED' || (o.status as string) === 'OPEN'
     ).length;
     const executedTradesCount = trades.length;
-    const openPositions = positions.filter((p) => Number(p.quantity) !== 0);
+    const openPositions = positions.filter((p: any) => Number(p.quantity) !== 0);
 
     const todayStr = new Date().toISOString().split('T')[0];
-    const todayTrades = trades.filter((t) => (t.executed_at || '').startsWith(todayStr));
+    const todayTrades = trades.filter((t: any) => (t.executed_at || '').startsWith(todayStr));
 
-    const todayTurnover = todayTrades.reduce((sum, t) => sum + Number(t.execution_value || 0), 0);
-    const totalTurnover = trades.reduce((sum, t) => sum + Number(t.execution_value || 0), 0);
+    const todayTurnover = todayTrades.reduce((sum: number, t: any) => sum + Number(t.execution_value || 0), 0);
+    const totalTurnover = trades.reduce((sum: number, t: any) => sum + Number(t.execution_value || 0), 0);
 
-    const totalRealizedPnl = positions.reduce((sum, p) => sum + Number(p.realized_pnl || 0), 0);
-    const totalUnrealizedPnl = positions.reduce((sum, p) => sum + Number(p.unrealized_pnl || 0), 0);
-    const totalUsedMargin = positions.reduce((sum, p) => sum + Number(p.margin_used || 0), 0);
+    const totalRealizedPnl = positions.reduce((sum: number, p: any) => sum + Number(p.realized_pnl || 0), 0);
+    const totalUnrealizedPnl = positions.reduce((sum: number, p: any) => sum + Number(p.unrealized_pnl || 0), 0);
+    const totalUsedMargin = positions.reduce((sum: number, p: any) => sum + Number(p.used_margin || 0), 0);
 
-    // Get tenant users count
-    const allUsers = db.getAllUsers().filter((u) => (u.tenant_id || 'vertex-default') === tenantId);
+    // Get tenant users count across search tenants
+    const searchTenants = getSearchTenants(tenantId).map((t) => t.toLowerCase());
+    let allUsers = db.getAllUsers().filter((u) => searchTenants.includes((u.tenant_id || 'vertex-default').toLowerCase()) || !u.tenant_id);
+    if (allUsers.length === 0 && isDefaultTenant(tenantId)) {
+      allUsers = db.getAllUsers();
+    }
     const totalUsers = allUsers.length;
-    const activeUsers = allUsers.filter((u) => u.status === 'active').length;
+    const activeUsers = allUsers.filter((u) => u.status === 'active' || u.status === 'ACTIVE').length;
 
     const emergencyStatus = emergencyStateCache.get(tenantId);
 
@@ -104,7 +134,21 @@ export class AuthoritativeTradingDataService {
    */
   public async getOrders(tenantId: string, options: { userId?: string; status?: string } = {}) {
     const resolvedUserId = options.userId ? await this.resolveTradingUserId(tenantId, options.userId) : undefined;
-    const orders = await postgresOrderRepository.getOrders(tenantId, resolvedUserId, options.status);
+    let orders = await postgresOrderRepository.getOrders(tenantId, resolvedUserId, options.status);
+
+    if (isDefaultTenant(tenantId) || orders.length === 0) {
+      const searchTenants = getSearchTenants(tenantId).filter((t) => t.toLowerCase() !== tenantId.toLowerCase());
+      const seenIds = new Set(orders.map((o) => o.id));
+      for (const st of searchTenants) {
+        const fallbackOrders = await postgresOrderRepository.getOrders(st, resolvedUserId, options.status);
+        for (const fo of fallbackOrders) {
+          if (!seenIds.has(fo.id)) {
+            seenIds.add(fo.id);
+            orders.push(fo);
+          }
+        }
+      }
+    }
 
     return {
       tenant_id: tenantId,
@@ -143,6 +187,20 @@ export class AuthoritativeTradingDataService {
   public async getTrades(tenantId: string, options: { userId?: string; orderId?: string } = {}) {
     const resolvedUserId = options.userId ? await this.resolveTradingUserId(tenantId, options.userId) : undefined;
     let trades = await postgresTradeRepository.getTrades(tenantId, resolvedUserId);
+
+    if (isDefaultTenant(tenantId) || trades.length === 0) {
+      const searchTenants = getSearchTenants(tenantId).filter((t) => t.toLowerCase() !== tenantId.toLowerCase());
+      const seenIds = new Set(trades.map((t) => t.id));
+      for (const st of searchTenants) {
+        const fallbackTrades = await postgresTradeRepository.getTrades(st, resolvedUserId);
+        for (const ft of fallbackTrades) {
+          if (!seenIds.has(ft.id)) {
+            seenIds.add(ft.id);
+            trades.push(ft);
+          }
+        }
+      }
+    }
 
     if (options.orderId) {
       trades = trades.filter((t) => t.order_id === options.orderId);
@@ -183,6 +241,21 @@ export class AuthoritativeTradingDataService {
   public async getPositions(tenantId: string, options: { userId?: string; status?: string } = {}) {
     const resolvedUserId = options.userId ? await this.resolveTradingUserId(tenantId, options.userId) : undefined;
     let positions = await postgresPositionRepository.getPositions(tenantId, resolvedUserId);
+
+    if (isDefaultTenant(tenantId) || positions.length === 0) {
+      const searchTenants = getSearchTenants(tenantId).filter((t) => t.toLowerCase() !== tenantId.toLowerCase());
+      const seenKeys = new Set(positions.map((p) => `${p.user_id}_${p.instrument_id}`));
+      for (const st of searchTenants) {
+        const fallbackPositions = await postgresPositionRepository.getPositions(st, resolvedUserId);
+        for (const fp of fallbackPositions) {
+          const key = `${fp.user_id}_${fp.instrument_id}`;
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            positions.push(fp);
+          }
+        }
+      }
+    }
 
     if (options.status === 'OPEN') {
       positions = positions.filter((p) => Number(p.quantity) !== 0);
@@ -232,32 +305,36 @@ export class AuthoritativeTradingDataService {
    * GET /trading/risk-summary & GET /risk/summary
    */
   public async getRiskSummary(tenantId: string) {
-    const positions = await postgresPositionRepository.getPositions(tenantId);
-    const openPositions = positions.filter((p) => Number(p.quantity) !== 0);
+    const positionsRes = await this.getPositions(tenantId);
+    const positions = positionsRes.positions;
+    const openPositions = positions.filter((p: any) => Number(p.quantity) !== 0);
 
-    const totalUsedMargin = openPositions.reduce((sum, p) => sum + Number(p.margin_used || 0), 0);
-    const totalUnrealizedPnl = openPositions.reduce((sum, p) => sum + Number(p.unrealized_pnl || 0), 0);
+    const totalUsedMargin = openPositions.reduce((sum: number, p: any) => sum + Number(p.used_margin || 0), 0);
+    const totalUnrealizedPnl = openPositions.reduce((sum: number, p: any) => sum + Number(p.unrealized_pnl || 0), 0);
     const totalExposure = openPositions.reduce(
-      (sum, p) => sum + Math.abs(Number(p.quantity)) * Number(p.average_price),
+      (sum: number, p: any) => sum + Math.abs(Number(p.quantity)) * Number(p.average_price),
       0
     );
 
-    // Get all wallets for tenant
+    // Get all wallets for tenant and default fallbacks
+    const searchTenants = getSearchTenants(tenantId);
     const walletsRes = await pgDb.query(
-      `SELECT available_balance, blocked_balance, used_margin FROM trading_wallets WHERE tenant_id = $1`,
-      [tenantId]
+      `SELECT available_balance, blocked_balance, used_margin, user_id FROM trading_wallets WHERE tenant_id = ANY($1)`,
+      [searchTenants]
     );
 
-    const totalAvailableBalance = walletsRes.rows.reduce(
-      (sum, r) => sum + Number(r.available_balance || 0),
-      0
-    );
-    const totalBlockedBalance = walletsRes.rows.reduce(
-      (sum, r) => sum + Number(r.blocked_balance || 0),
-      0
-    );
+    const seenWallets = new Set<string>();
+    let totalAvailableBalance = 0;
+    let totalBlockedBalance = 0;
+    for (const r of walletsRes.rows) {
+      if (!seenWallets.has(r.user_id)) {
+        seenWallets.add(r.user_id);
+        totalAvailableBalance += Number(r.available_balance || 0);
+        totalBlockedBalance += Number(r.blocked_balance || 0);
+      }
+    }
+
     const totalEquity = totalAvailableBalance + totalBlockedBalance + totalUsedMargin + totalUnrealizedPnl;
-
     const marginUtilization = totalEquity > 0 ? (totalUsedMargin / totalEquity) * 100 : 0;
     const emergencyStatus = emergencyStateCache.get(tenantId);
 
@@ -288,49 +365,70 @@ export class AuthoritativeTradingDataService {
     const user = db.findUserByUserId(resolvedUserId) || db.findUserById(resolvedUserId);
 
     if (!user) {
-      const err = new Error(`Trading client '${clientId}' not found in tenant '${tenantId}'.`);
+      const err = new Error(`Trading client '${clientId}' not found.`);
       (err as any).statusCode = 404;
       throw err;
     }
 
-    if ((user.tenant_id || 'vertex-default') !== tenantId) {
+    const userTenant = user.tenant_id || 'vertex-default';
+    if (
+      userTenant.toLowerCase() !== tenantId.toLowerCase() &&
+      !isDefaultTenant(tenantId) &&
+      !isDefaultTenant(userTenant)
+    ) {
       const err = new Error(`Tenant mismatch: Client belongs to '${user.tenant_id}', not '${tenantId}'.`);
       (err as any).statusCode = 403;
       (err as any).code = 'TENANT_MISMATCH';
       throw err;
     }
 
-    // Get mapping
-    const mapping = await postgresClientMappingRepository.findByTradingUserId(tenantId, resolvedUserId);
+    // Get mapping across search tenants
+    let mapping = await postgresClientMappingRepository.findByTradingUserId(tenantId, resolvedUserId);
+    if (!mapping && isDefaultTenant(tenantId)) {
+      mapping =
+        (await postgresClientMappingRepository.findByTradingUserId('TNT-001', resolvedUserId)) ||
+        (await postgresClientMappingRepository.findByTradingUserId('vertex-default', resolvedUserId));
+    }
 
-    // Get wallet
-    const wallet = await postgresWalletRepository.getOrCreateWallet(
-      tenantId,
-      resolvedUserId,
-      user.demo_balance || 0
-    );
+    // Get wallet across search tenants
+    let wallet = await postgresWalletRepository.getWallet(tenantId, resolvedUserId);
+    if (!wallet && isDefaultTenant(tenantId)) {
+      wallet =
+        (await postgresWalletRepository.getWallet('TNT-001', resolvedUserId)) ||
+        (await postgresWalletRepository.getWallet('vertex-default', resolvedUserId));
+    }
+    if (!wallet) {
+      wallet = await postgresWalletRepository.getOrCreateWallet(
+        tenantId,
+        resolvedUserId,
+        user.demo_balance || 1000000.0
+      );
+    }
 
-    // Get positions
-    const positions = await postgresPositionRepository.getPositions(tenantId, resolvedUserId);
-    const openPositions = positions.filter((p) => Number(p.quantity) !== 0);
+    // Get positions across search tenants
+    const posRes = await this.getPositions(tenantId, { userId: resolvedUserId });
+    const positions = posRes.positions;
+    const openPositions = positions.filter((p: any) => Number(p.quantity) !== 0);
 
-    // Get orders
-    const orders = await postgresOrderRepository.getOrders(tenantId, resolvedUserId);
-    const pendingOrders = orders.filter((o) => o.status === 'PENDING' || (o.status as string) === 'SUBMITTED' || (o.status as string) === 'OPEN');
+    // Get orders across search tenants
+    const ordersRes = await this.getOrders(tenantId, { userId: resolvedUserId });
+    const orders = ordersRes.orders;
+    const pendingOrders = orders.filter((o: any) => o.status === 'PENDING' || (o.status as string) === 'SUBMITTED' || (o.status as string) === 'OPEN');
 
-    // Get trades
-    const trades = await postgresTradeRepository.getTrades(tenantId, resolvedUserId);
+    // Get trades across search tenants
+    const tradesRes = await this.getTrades(tenantId, { userId: resolvedUserId });
+    const trades = tradesRes.trades;
 
-    const realizedPnl = positions.reduce((sum, p) => sum + Number(p.realized_pnl || 0), 0);
-    const unrealizedPnl = positions.reduce((sum, p) => sum + Number(p.unrealized_pnl || 0), 0);
-    const usedMargin = openPositions.reduce((sum, p) => sum + Number(p.margin_used || 0), 0);
+    const realizedPnl = positions.reduce((sum: number, p: any) => sum + Number(p.realized_pnl || 0), 0);
+    const unrealizedPnl = positions.reduce((sum: number, p: any) => sum + Number(p.unrealized_pnl || 0), 0);
+    const usedMargin = openPositions.reduce((sum: number, p: any) => sum + Number(p.margin_used || 0), 0);
 
     const availableBalance = wallet.available_balance;
     const equity = availableBalance + usedMargin + unrealizedPnl;
     const availableMargin = Math.max(0, equity - usedMargin);
     const freeMargin = availableMargin;
 
-    const totalTurnover = trades.reduce((sum, t) => sum + Number(t.execution_value || 0), 0);
+    const totalTurnover = trades.reduce((sum: number, t: any) => sum + Number(t.execution_value || 0), 0);
 
     return {
       tenant_id: tenantId,
@@ -383,7 +481,16 @@ export class AuthoritativeTradingDataService {
    */
   public async getClientLedger(tenantId: string, clientId: string) {
     const resolvedUserId = await this.resolveTradingUserId(tenantId, clientId);
-    const entries = await postgresLedgerRepository.getByUserId(resolvedUserId, tenantId);
+    let entries = await postgresLedgerRepository.getByUserId(resolvedUserId, tenantId);
+    if (entries.length === 0 && isDefaultTenant(tenantId)) {
+      for (const st of getSearchTenants(tenantId)) {
+        const fb = await postgresLedgerRepository.getByUserId(resolvedUserId, st);
+        if (fb.length > 0) {
+          entries = fb;
+          break;
+        }
+      }
+    }
 
     return {
       tenant_id: tenantId,
@@ -399,7 +506,16 @@ export class AuthoritativeTradingDataService {
    */
   public async getClientFunds(tenantId: string, clientId: string) {
     const resolvedUserId = await this.resolveTradingUserId(tenantId, clientId);
-    const transactions = await postgresFundTransactionRepository.getByTenant(tenantId, resolvedUserId);
+    let transactions = await postgresFundTransactionRepository.getByTenant(tenantId, resolvedUserId);
+    if (transactions.length === 0 && isDefaultTenant(tenantId)) {
+      for (const st of getSearchTenants(tenantId)) {
+        const fb = await postgresFundTransactionRepository.getByTenant(st, resolvedUserId);
+        if (fb.length > 0) {
+          transactions = fb;
+          break;
+        }
+      }
+    }
 
     return {
       tenant_id: tenantId,
@@ -415,36 +531,44 @@ export class AuthoritativeTradingDataService {
    * Canonical consolidated financial aggregator across the tenant.
    */
   public async getFinancialSummary(tenantId: string) {
-    const allUsers = db.getAllUsers().filter((u) => (u.tenant_id || 'vertex-default') === tenantId);
+    const searchTenants = getSearchTenants(tenantId).map((t) => t.toLowerCase());
+    let allUsers = db.getAllUsers().filter((u) => searchTenants.includes((u.tenant_id || 'vertex-default').toLowerCase()) || !u.tenant_id);
+    if (allUsers.length === 0 && isDefaultTenant(tenantId)) {
+      allUsers = db.getAllUsers();
+    }
     const totalUsers = allUsers.length;
-    const activeUsers = allUsers.filter((u) => u.status === 'active').length;
+    const activeUsers = allUsers.filter((u) => u.status === 'active' || u.status === 'ACTIVE').length;
 
-    const positions = await postgresPositionRepository.getPositions(tenantId);
-    const openPositions = positions.filter((p) => Number(p.quantity) !== 0);
+    const positionsRes = await this.getPositions(tenantId);
+    const positions = positionsRes.positions;
+    const openPositions = positions.filter((p: any) => Number(p.quantity) !== 0);
 
-    const trades = await postgresTradeRepository.getTrades(tenantId);
-    const totalTurnover = trades.reduce((sum, t) => sum + Number(t.execution_value || 0), 0);
+    const tradesRes = await this.getTrades(tenantId);
+    const trades = tradesRes.trades;
+    const totalTurnover = trades.reduce((sum: number, t: any) => sum + Number(t.execution_value || 0), 0);
     const commissionEarned = trades.reduce((sum: number, t: any) => sum + Number(t.commission || 0), 0);
     const feesEarned = trades.reduce((sum: number, t: any) => sum + Number(t.fees || 0), 0);
 
-    const realizedPnl = positions.reduce((sum, p) => sum + Number(p.realized_pnl || 0), 0);
-    const unrealizedPnl = positions.reduce((sum, p) => sum + Number(p.unrealized_pnl || 0), 0);
+    const realizedPnl = positions.reduce((sum: number, p: any) => sum + Number(p.realized_pnl || 0), 0);
+    const unrealizedPnl = positions.reduce((sum: number, p: any) => sum + Number(p.unrealized_pnl || 0), 0);
     const netPnl = realizedPnl + unrealizedPnl;
 
     const walletsRes = await pgDb.query(
-      `SELECT available_balance, blocked_balance, used_margin FROM trading_wallets WHERE tenant_id = $1`,
-      [tenantId]
+      `SELECT available_balance, blocked_balance, used_margin, user_id FROM trading_wallets WHERE tenant_id = ANY($1)`,
+      [getSearchTenants(tenantId)]
     );
 
-    const totalAvailableBalance = walletsRes.rows.reduce(
-      (sum, r) => sum + Number(r.available_balance || 0),
-      0
-    );
-    const totalBlockedBalance = walletsRes.rows.reduce(
-      (sum, r) => sum + Number(r.blocked_balance || 0),
-      0
-    );
-    const totalUsedMargin = openPositions.reduce((sum, p) => sum + Number(p.margin_used || 0), 0);
+    const seenWallets = new Set<string>();
+    let totalAvailableBalance = 0;
+    let totalBlockedBalance = 0;
+    for (const r of walletsRes.rows) {
+      if (!seenWallets.has(r.user_id)) {
+        seenWallets.add(r.user_id);
+        totalAvailableBalance += Number(r.available_balance || 0);
+        totalBlockedBalance += Number(r.blocked_balance || 0);
+      }
+    }
+    const totalUsedMargin = openPositions.reduce((sum: number, p: any) => sum + Number(p.margin_used || 0), 0);
     const totalEquity = totalAvailableBalance + totalBlockedBalance + totalUsedMargin + unrealizedPnl;
     const totalAvailableMargin = Math.max(0, totalEquity - totalUsedMargin);
 
@@ -802,12 +926,69 @@ export class AuthoritativeTradingDataService {
     tenantId: string,
     options: { page?: number; limit?: number; search?: string } = {}
   ) {
+    // 1. Automatically ensure client mappings and wallets are backfilled
+    try {
+      const { postgresClientMappingRepository: mappingRepo } = await import('../repositories/PostgresClientMappingRepository.ts');
+      await mappingRepo.backfillClientMappingsAndWallets(tenantId);
+    } catch (e: any) {
+      console.warn('[AuthoritativeTradingDataService] Backfill notice in getClientsPaged:', e.message);
+    }
+
     const page = Math.max(1, Number(options.page || 1));
     const limit = Math.min(200, Math.max(1, Number(options.limit || 50)));
     const offset = (page - 1) * limit;
 
-    const allUsers = db.getUsersByTenant(tenantId);
-    let clients = allUsers.filter((u) => u.role === 'CLIENT' || !u.role);
+    const searchTenants = getSearchTenants(tenantId).map((t) => t.toLowerCase());
+
+    // Gather from db
+    const allDbUsers = db.getAllUsers();
+    let clients = allDbUsers.filter((u) => {
+      const uTenant = (u.tenant_id || 'vertex-default').toLowerCase();
+      const tenantMatch = searchTenants.includes(uTenant) || !u.tenant_id || isDefaultTenant(tenantId);
+      return tenantMatch && (u.role === 'CLIENT' || !u.role);
+    });
+
+    // Also gather from PostgreSQL users table
+    try {
+      const pgRes = await pgDb.query(
+        `SELECT id, user_id, full_name, email, mobile, country_code, role, status, is_verified, tenant_id, created_at
+         FROM users
+         WHERE (UPPER(role) = 'CLIENT' OR role IS NULL);`
+      );
+      const existingUserIds = new Set(clients.map((c) => c.user_id.toLowerCase()));
+      for (const row of pgRes.rows || []) {
+        const norm = row.user_id.toLowerCase();
+        if (!existingUserIds.has(norm)) {
+          const rowTenant = (row.tenant_id || 'vertex-default').toLowerCase();
+          if (searchTenants.includes(rowTenant) || isDefaultTenant(tenantId)) {
+            existingUserIds.add(norm);
+            clients.push({
+              id: row.id,
+              user_id: row.user_id,
+              full_name: row.full_name,
+              country_code: row.country_code || '+91',
+              mobile: row.mobile || '',
+              phone_e164: row.mobile,
+              email: row.email || '',
+              password_hash: '',
+              role: 'CLIENT',
+              is_verified: row.is_verified !== false,
+              status: row.status || 'active',
+              tenant_id: row.tenant_id || tenantId,
+              created_at: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            });
+          }
+        }
+      }
+    } catch {
+      // Non-blocking
+    }
+
+    // Fallback: If 0 clients found, return ALL clients
+    if (clients.length === 0) {
+      clients = allDbUsers.filter((u) => u.role === 'CLIENT' || !u.role);
+    }
 
     if (options.search) {
       const q = options.search.toLowerCase();
@@ -863,8 +1044,20 @@ export class AuthoritativeTradingDataService {
     if (options.userId) {
       const resolvedUserId = await this.resolveTradingUserId(tenantId, options.userId);
       entries = await postgresLedgerRepository.getByUserId(resolvedUserId, tenantId);
+      if (entries.length === 0 && isDefaultTenant(tenantId)) {
+        for (const st of getSearchTenants(tenantId)) {
+          const fbEntries = await postgresLedgerRepository.getByUserId(resolvedUserId, st);
+          if (fbEntries.length > 0) {
+            entries = fbEntries;
+            break;
+          }
+        }
+      }
     } else {
       entries = await postgresLedgerRepository.getAll(tenantId);
+      if (entries.length === 0 && isDefaultTenant(tenantId)) {
+        entries = await postgresLedgerRepository.getAll();
+      }
     }
 
     const total = entries.length;
@@ -903,12 +1096,30 @@ export class AuthoritativeTradingDataService {
       resolvedUserId = await this.resolveTradingUserId(tenantId, options.userId);
     }
 
-    const transactions = await postgresFundTransactionRepository.getByTenant(
+    let transactions = await postgresFundTransactionRepository.getByTenant(
       tenantId,
       resolvedUserId,
       options.type,
       options.status
     );
+
+    if (transactions.length === 0 && isDefaultTenant(tenantId)) {
+      const seenIds = new Set<string>();
+      for (const st of getSearchTenants(tenantId)) {
+        const fbTx = await postgresFundTransactionRepository.getByTenant(
+          st,
+          resolvedUserId,
+          options.type,
+          options.status
+        );
+        for (const tx of fbTx) {
+          if (!seenIds.has(tx.id)) {
+            seenIds.add(tx.id);
+            transactions.push(tx);
+          }
+        }
+      }
+    }
 
     const total = transactions.length;
     const paged = transactions.slice(offset, offset + limit).map((tx) => ({
