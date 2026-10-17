@@ -136,6 +136,17 @@ class DatabaseService {
   }
 
   private save() {
+    // In production with DATABASE_URL, authoritative state lives in PostgreSQL
+    if (process.env.DATABASE_URL || process.env.NODE_ENV === 'production') {
+      try {
+        const tempPath = `${DB_FILE}.tmp`;
+        fs.writeFileSync(tempPath, JSON.stringify(this.state, null, 2), 'utf-8');
+        fs.renameSync(tempPath, DB_FILE);
+      } catch {
+        // Ephemeral disk writes in containerized production are non-fatal
+      }
+      return;
+    }
     try {
       const tempPath = `${DB_FILE}.tmp`;
       fs.writeFileSync(tempPath, JSON.stringify(this.state, null, 2), 'utf-8');

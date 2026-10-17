@@ -19,9 +19,9 @@ export function corsMiddleware(req: Request, res: Response, next: NextFunction):
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Requested-With, X-Tenant-ID, X-Dev-Tenant-ID, X-CSRF-Token, Cache-Control'
+      'Content-Type, Authorization, X-Requested-With, X-Tenant-ID, X-Dev-Tenant-ID, X-CSRF-Token, Cache-Control, X-Internal-Timestamp, X-Internal-Nonce, X-Internal-Signature, X-Correlation-ID, X-Idempotency-Key'
     );
-    res.setHeader('Access-Control-Expose-Headers', 'X-Tenant-ID, X-Tenant-Brand');
+    res.setHeader('Access-Control-Expose-Headers', 'X-Tenant-ID, X-Tenant-Brand, X-Correlation-ID, X-Idempotency-Key');
   }
 
   if (req.method === 'OPTIONS') {
@@ -106,7 +106,11 @@ export function csrfProtectionMiddleware(req: Request, res: Response, next: Next
           ];
           const originHost = originUrl.host.toLowerCase();
           const originFull = originUrl.origin.toLowerCase();
-          const isAllowed = allowedOrigins.some((ao) => ao === originHost || ao === originFull || ao === '*');
+          const isAllowed =
+            allowedOrigins.some((ao) => ao === originHost || ao === originFull || ao === '*') ||
+            originHost.endsWith('.onrender.com') ||
+            originHost.includes('localhost') ||
+            originHost.includes('127.0.0.1');
 
           if (!isAllowed) {
             res.status(403).json({

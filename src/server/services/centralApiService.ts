@@ -134,7 +134,7 @@ export class CentralApiService implements ICentralApiService {
   private mockProvider = new MockCentralApiProvider();
 
   private get baseUrl(): string | null {
-    const url = process.env.CENTRAL_API_URL;
+    const url = process.env.CENTRAL_API_URL || process.env.CENTRAL_ADMIN_BASE_URL || process.env.CENTRAL_ADMIN_URL || 'https://admin-dashbord-wxcq.onrender.com';
     return url && url.trim().length > 0 ? url.trim().replace(/\/$/, '') : null;
   }
 

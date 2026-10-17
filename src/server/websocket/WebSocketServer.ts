@@ -301,6 +301,32 @@ export class TradingWebSocketServer {
     role: string;
   } | null {
     try {
+      // 1. Origin verification if provided
+      const origin = req.headers.origin;
+      if (origin) {
+        try {
+          const originUrl = new URL(origin);
+          const originHost = originUrl.host.toLowerCase();
+          const isAllowedDomain =
+            originHost.endsWith('.onrender.com') ||
+            originHost.includes('localhost') ||
+            originHost.includes('127.0.0.1');
+          const configuredOrigins = (process.env.WEBSOCKET_ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS || '')
+            .split(',')
+            .map((s) => s.trim().toLowerCase())
+            .filter(Boolean);
+          const isExplicitlyAllowed = configuredOrigins.some((co) => co === originHost || co === origin.toLowerCase() || co === '*');
+
+          if (!isAllowedDomain && !isExplicitlyAllowed && process.env.NODE_ENV === 'production') {
+            console.warn(`[WebSocket] Blocked origin: ${origin}`);
+            return null;
+          }
+        } catch {
+          // If URL parsing fails, permit upgrade if token is valid
+        }
+      }
+
+      // 2. Token extraction
       const urlParsed = parseUrl(req.url || '', true);
       let token = (urlParsed.query?.token as string) || (urlParsed.query?.auth_token as string);
 
@@ -321,14 +347,16 @@ export class TradingWebSocketServer {
       if (!payload || !payload.id) return null;
 
       const user = db.findUserById(payload.id);
-      if (!user || user.status === 'suspended' || user.is_frozen === true) return null;
+      if (user && (user.status === 'suspended' || user.is_frozen === true)) return null;
 
-      const tenantId = user.tenant_id || payload.tenantId || 'vertex-default';
+      const userId = user ? (user.user_id || user.id) : (payload.userId || payload.id);
+      const tenantId = user?.tenant_id || payload.tenantId || 'vertex-default';
+      const role = user?.role || payload.role || 'CLIENT';
 
       return {
-        userId: user.user_id || user.id,
+        userId,
         tenantId,
-        role: user.role || 'CLIENT',
+        role,
       };
     } catch {
       return null;

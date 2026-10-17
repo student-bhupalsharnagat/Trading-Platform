@@ -44,16 +44,14 @@ export class CentralAdminEventClient {
     const config = getInternalAuthConfig();
 
     if (isProduction) {
-      const centralAdminUrl = process.env.CENTRAL_ADMIN_BASE_URL;
-      if (!centralAdminUrl) {
-        throw new Error('[SECURITY ERROR] CENTRAL_ADMIN_BASE_URL is required in production.');
-      }
+      const centralAdminUrl = process.env.CENTRAL_ADMIN_BASE_URL || process.env.CENTRAL_ADMIN_URL || process.env.CENTRAL_API_URL || 'https://admin-dashbord-wxcq.onrender.com';
+      const tradingPlatformUrl = process.env.TRADING_PLATFORM_BASE_URL || process.env.TRADING_PLATFORM_URL;
       if (
         centralAdminUrl.includes('localhost') ||
         centralAdminUrl.includes('127.0.0.1') ||
-        (process.env.TRADING_PLATFORM_BASE_URL && centralAdminUrl === process.env.TRADING_PLATFORM_BASE_URL)
+        (tradingPlatformUrl && centralAdminUrl === tradingPlatformUrl)
       ) {
-        throw new Error('[SECURITY ERROR] CENTRAL_ADMIN_BASE_URL cannot point to localhost or TRADING_PLATFORM_BASE_URL in production.');
+        throw new Error('[SECURITY ERROR] Central Admin URL cannot point to localhost or trading platform in production.');
       }
       this.baseUrl = centralAdminUrl;
     } else {
@@ -61,6 +59,8 @@ export class CentralAdminEventClient {
         options.baseUrl ||
         options.endpointUrl ||
         process.env.CENTRAL_ADMIN_BASE_URL ||
+        process.env.CENTRAL_ADMIN_URL ||
+        process.env.CENTRAL_API_URL ||
         config.tradingPlatformBaseUrl ||
         'http://localhost:3000';
     }

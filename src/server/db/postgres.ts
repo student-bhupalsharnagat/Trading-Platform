@@ -28,17 +28,13 @@ class PostgresDatabase {
       const isProduction = process.env.NODE_ENV === 'production';
       const databaseUrl = process.env.DATABASE_URL;
 
-      // In production require DATABASE_URL; no PGlite fallback in production
-      if (isProduction) {
-        if (!databaseUrl) {
-          throw new Error('[FATAL DATABASE ERROR] DATABASE_URL is required in production. Embedded PGlite fallback is not permitted in production.');
-        }
-
+      // When DATABASE_URL is provided, strictly connect to external PostgreSQL and disallow PGlite fallback
+      if (databaseUrl && databaseUrl.trim().length > 0) {
         const useSsl = isProduction || Boolean(process.env.PG_SSL === 'true' || databaseUrl.includes('sslmode=') || databaseUrl.includes('render.com') || databaseUrl.includes('supabase.co') || databaseUrl.includes('neon.tech'));
         try {
           const poolConfig: PoolConfig = {
             connectionString: databaseUrl,
-            connectionTimeoutMillis: parseInt(process.env.PG_CONNECTION_TIMEOUT_MS || '5000', 10),
+            connectionTimeoutMillis: parseInt(process.env.PG_CONNECTION_TIMEOUT_MS || '10000', 10),
             idleTimeoutMillis: parseInt(process.env.PG_IDLE_TIMEOUT_MS || '30000', 10),
             max: parseInt(process.env.PG_MAX_POOL_SIZE || '20', 10),
             min: parseInt(process.env.PG_MIN_POOL_SIZE || '2', 10),
@@ -53,43 +49,12 @@ class PostgresDatabase {
           this.isPgLite = false;
           console.log('[Postgres] Connected to external PostgreSQL pool');
         } catch (err: any) {
-          throw new Error(`[FATAL DATABASE ERROR] External PostgreSQL connection failed in production: ${err.message}. PGlite fallback is not permitted in production.`);
-        }
-
-        this.initialized = true;
-        return;
-      }
-
-      // Check if external PostgreSQL server is explicitly configured and not default local placeholder
-      const hasExplicitPgUrl =
-        Boolean(databaseUrl) &&
-        !databaseUrl?.includes('localhost:5432/vertex_db') &&
-        !databaseUrl?.includes('127.0.0.1:5432/vertex_db');
-
-      if (hasExplicitPgUrl && databaseUrl) {
-        const useSsl = Boolean(process.env.PG_SSL === 'true' || databaseUrl.includes('sslmode=') || databaseUrl.includes('render.com') || databaseUrl.includes('supabase.co') || databaseUrl.includes('neon.tech'));
-        try {
-          const poolConfig: PoolConfig = {
-            connectionString: databaseUrl,
-            connectionTimeoutMillis: parseInt(process.env.PG_CONNECTION_TIMEOUT_MS || '5000', 10),
-            idleTimeoutMillis: parseInt(process.env.PG_IDLE_TIMEOUT_MS || '30000', 10),
-            max: parseInt(process.env.PG_MAX_POOL_SIZE || '20', 10),
-            min: parseInt(process.env.PG_MIN_POOL_SIZE || '2', 10),
-            ...(useSsl && !databaseUrl.includes('localhost') && !databaseUrl.includes('127.0.0.1') ? { ssl: { rejectUnauthorized: false } } : {}),
-          };
-
-          const testPool = new Pool(poolConfig);
-          // Verify connectivity
-          const client = await testPool.connect();
-          client.release();
-          this.pool = testPool;
-          this.isPgLite = false;
-          console.log('[Postgres] Connected to external PostgreSQL pool');
-        } catch (err: any) {
-          console.warn('[Postgres] External pool connection failed, using high-performance PGlite:', err.message);
-          await this.initPgLite();
+          throw new Error(`[FATAL DATABASE ERROR] External PostgreSQL connection failed: ${err.message}. PGlite fallback (.vertex_pg_data) is strictly disallowed when DATABASE_URL is configured.`);
         }
       } else {
+        if (isProduction) {
+          throw new Error('[FATAL DATABASE ERROR] DATABASE_URL is required in production. Embedded PGlite fallback is not permitted in production.');
+        }
         await this.initPgLite();
       }
 
@@ -100,8 +65,8 @@ class PostgresDatabase {
   }
 
   private async initPgLite(): Promise<void> {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('[FATAL DATABASE ERROR] Embedded PGlite fallback is not permitted in production. DATABASE_URL must be configured.');
+    if (process.env.NODE_ENV === 'production' || process.env.DATABASE_URL) {
+      throw new Error('[FATAL DATABASE ERROR] Embedded PGlite fallback is not permitted when DATABASE_URL is configured or in production. External PostgreSQL must be used.');
     }
     const dataDir = path.join(process.cwd(), '.vertex_pg_data');
     if (!fs.existsSync(dataDir)) {
