@@ -16,12 +16,19 @@ import { auditService } from './auditService.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
 import crypto from 'crypto';
 
-export const DEFAULT_TENANTS = ['TNT-001', 'vertex-default', 'default'];
+export const DEFAULT_TENANTS = ['TNT-001', 'TNT-002', 'TNT-003', 'vertex-default', 'default'];
 
 export function isDefaultTenant(tenantId?: string | null): boolean {
   if (!tenantId) return true;
   const t = tenantId.trim().toLowerCase();
-  return t === 'tnt-001' || t === 'vertex-default' || t === 'default' || t === '';
+  return (
+    t === 'tnt-001' ||
+    t === 'tnt-002' ||
+    t === 'tnt-003' ||
+    t === 'vertex-default' ||
+    t === 'default' ||
+    t === ''
+  );
 }
 
 export function getSearchTenants(tenantId?: string | null): string[] {
@@ -385,17 +392,19 @@ export class AuthoritativeTradingDataService {
     // Get mapping across search tenants
     let mapping = await postgresClientMappingRepository.findByTradingUserId(tenantId, resolvedUserId);
     if (!mapping && isDefaultTenant(tenantId)) {
-      mapping =
-        (await postgresClientMappingRepository.findByTradingUserId('TNT-001', resolvedUserId)) ||
-        (await postgresClientMappingRepository.findByTradingUserId('vertex-default', resolvedUserId));
+      for (const st of getSearchTenants(tenantId)) {
+        mapping = await postgresClientMappingRepository.findByTradingUserId(st, resolvedUserId);
+        if (mapping) break;
+      }
     }
 
     // Get wallet across search tenants
     let wallet = await postgresWalletRepository.getWallet(tenantId, resolvedUserId);
     if (!wallet && isDefaultTenant(tenantId)) {
-      wallet =
-        (await postgresWalletRepository.getWallet('TNT-001', resolvedUserId)) ||
-        (await postgresWalletRepository.getWallet('vertex-default', resolvedUserId));
+      for (const st of getSearchTenants(tenantId)) {
+        wallet = await postgresWalletRepository.getWallet(st, resolvedUserId);
+        if (wallet) break;
+      }
     }
     if (!wallet) {
       wallet = await postgresWalletRepository.getOrCreateWallet(

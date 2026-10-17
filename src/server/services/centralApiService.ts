@@ -214,12 +214,15 @@ export class CentralApiService implements ICentralApiService {
   private readonly CACHE_TTL_MS = 60000; // 60s cache TTL to avoid outbound HTTP request on every internal API call
 
   private get baseUrl(): string | null {
-    const url =
+    const raw =
       process.env.CENTRAL_API_URL ||
       process.env.CENTRAL_ADMIN_BASE_URL ||
       process.env.CENTRAL_ADMIN_URL ||
       'https://admin-dashbord-wxcq.onrender.com';
-    return url && url.trim().length > 0 ? url.trim().replace(/\/$/, '') : null;
+    if (!raw || raw.trim().length === 0) return null;
+    let url = raw.trim().replace(/\/+$/, '');
+    url = url.replace(/\/api$/i, '');
+    return url.replace(/\/+$/, '');
   }
 
   /**

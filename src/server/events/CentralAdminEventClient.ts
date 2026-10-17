@@ -32,6 +32,13 @@ export interface WebhookDeliveryResult {
   retriesAttempted?: number;
 }
 
+export function cleanBaseAdminUrl(rawUrl?: string): string {
+  if (!rawUrl) return '';
+  let url = rawUrl.trim().replace(/\/+$/, '');
+  url = url.replace(/\/api$/i, '');
+  return url.replace(/\/+$/, '');
+}
+
 export class CentralAdminEventClient {
   private baseUrl: string;
   private secret: string;
@@ -53,16 +60,17 @@ export class CentralAdminEventClient {
       ) {
         throw new Error('[SECURITY ERROR] Central Admin URL cannot point to localhost or trading platform in production.');
       }
-      this.baseUrl = centralAdminUrl;
+      this.baseUrl = cleanBaseAdminUrl(centralAdminUrl);
     } else {
-      this.baseUrl =
+      this.baseUrl = cleanBaseAdminUrl(
         options.baseUrl ||
         options.endpointUrl ||
         process.env.CENTRAL_ADMIN_BASE_URL ||
         process.env.CENTRAL_ADMIN_URL ||
         process.env.CENTRAL_API_URL ||
         config.tradingPlatformBaseUrl ||
-        'http://localhost:3000';
+        'http://localhost:3000'
+      );
     }
     this.secret = options.secret || options.hmacSecret || config.internalCommunicationSecret;
     this.timeoutMs = options.timeoutMs ?? (process.env.INTERNAL_REQUEST_TIMEOUT_MS ? parseInt(process.env.INTERNAL_REQUEST_TIMEOUT_MS, 10) : 3000);
@@ -83,7 +91,7 @@ export class CentralAdminEventClient {
         throw new Error('[SECURITY ERROR] CentralAdminEventClient base URL cannot point to localhost or TRADING_PLATFORM_BASE_URL in production.');
       }
     }
-    this.baseUrl = url;
+    this.baseUrl = cleanBaseAdminUrl(url);
   }
 
   public setSecret(secret: string): void {
@@ -123,8 +131,9 @@ export class CentralAdminEventClient {
    * Uses exponential backoff retry for idempotent webhook events.
    */
   public async sendEvent(event: InternalEvent, retryCount = 0): Promise<WebhookDeliveryResult> {
+    const cleanBase = cleanBaseAdminUrl(this.baseUrl);
     const path = this.getEndpointPath(event.eventType);
-    const url = `${this.baseUrl.replace(/\/$/, '')}${path}`;
+    const url = `${cleanBase}${path.startsWith('/') ? path : '/' + path}`;
     const method = 'POST';
 
     const headers = generateInternalHeaders({
