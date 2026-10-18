@@ -1093,13 +1093,15 @@ export class AuthoritativeTradingDataService {
   ) {
     const cleanTenant = sanitizeTenant(tenantId) || 'TNT-001';
     const isDefault = isDefaultTenant(cleanTenant);
-    // 1. Automatically ensure client mappings and wallets are backfilled
-    try {
-      const { postgresClientMappingRepository: mappingRepo } = await import('../repositories/PostgresClientMappingRepository.ts');
-      await mappingRepo.backfillClientMappingsAndWallets(cleanTenant);
-    } catch (e: any) {
-      console.warn('[AuthoritativeTradingDataService] Backfill notice in getClientsPaged:', e.message);
-    }
+    // 1. Automatically ensure client mappings and wallets are backfilled in background without blocking
+    setImmediate(async () => {
+      try {
+        const { postgresClientMappingRepository: mappingRepo } = await import('../repositories/PostgresClientMappingRepository.ts');
+        await mappingRepo.backfillClientMappingsAndWallets(cleanTenant);
+      } catch (e: any) {
+        // Non-blocking background notice
+      }
+    });
 
     const page = Math.max(1, Number(options.page || 1));
     const limit = Math.min(1000, Math.max(1, Number(options.limit || 250)));
