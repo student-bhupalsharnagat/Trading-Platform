@@ -176,6 +176,13 @@ export class AuthService {
       tenantId: tenantId || 'vertex-default',
     });
 
+    // Immediately create client_mappings, client_identity_mappings, and trading_wallets in PostgreSQL
+    try {
+      await postgresClientMappingRepository.createClientMappingAndWallet(user, user.tenant_id);
+    } catch (createErr: any) {
+      console.warn('[Signup] Notice: Immediate client mapping & wallet creation notice:', createErr.message);
+    }
+
     // Generate JWT session token
     const token = this.generateToken(user);
 

@@ -21,7 +21,7 @@ async function run() {
     userId: testUserId,
     fullName: 'Fallback Test User',
     countryCode: '+91',
-    mobile: '9876500001',
+    mobile: `98${Math.floor(10000000 + Math.random() * 90000000)}`,
     passwordHash: 'dummy',
     status: 'active',
     isVerified: true,

@@ -74,13 +74,15 @@ async function startServer() {
     console.error('[DB] Migration error during startup:', migErr.message);
   }
 
-  // Auto-backfill missing client mappings and trading wallets
-  try {
-    const bf = await postgresClientMappingRepository.backfillClientMappingsAndWallets('TNT-001');
-    console.log(`[STARTUP] Auto-backfilled client mappings: ${bf.mappingsCreated} mappings, ${bf.walletsCreated} wallets.`);
-  } catch (backfillErr: any) {
-    console.warn('[STARTUP] Client mappings backfill notice:', backfillErr.message);
-  }
+  // Auto-backfill missing client mappings and trading wallets in background
+  postgresClientMappingRepository
+    .backfillClientMappingsAndWallets('TNT-001')
+    .then((bf) => {
+      console.log(`[STARTUP] Auto-backfilled client mappings: ${bf.mappingsCreated} mappings, ${bf.walletsCreated} wallets.`);
+    })
+    .catch((backfillErr: any) => {
+      console.warn('[STARTUP] Client mappings backfill notice:', backfillErr.message);
+    });
 
   // Start Transactional Outbox background worker
   transactionalOutboxService.startWorker();
