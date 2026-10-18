@@ -24,6 +24,16 @@ export interface InternalAuthorizedRequest extends Request {
   correlationId?: string;
 }
 
+/**
+ * Sanitizes incoming tenant ID by splitting on comma and taking the first trimmed value.
+ * Handles comma-separated duplicate values like "TNT-001, TNT-001".
+ */
+export function sanitizeTenantId(raw?: string | string[] | null | unknown): string {
+  if (!raw) return '';
+  const str = Array.isArray(raw) ? raw[0] : String(raw);
+  return str.split(',')[0].trim();
+}
+
 // ============================================================================
 // Nonce Store Abstraction (Replay Protection)
 // ============================================================================
@@ -203,11 +213,12 @@ export function generateInternalHeaders(params: {
   const bodyString = serializeRequestBody(params.body);
   const payload = buildSignaturePayload(timestamp, params.method, params.path, bodyString);
   const signature = generateInternalHmac(params.secret, payload);
+  const tenantId = sanitizeTenantId(params.tenantId) || 'TNT-001';
 
   return {
     'X-Internal-Timestamp': timestamp,
     'X-Internal-Signature': signature,
-    'X-Tenant-ID': params.tenantId,
+    'X-Tenant-ID': tenantId,
     'X-Internal-Nonce': nonce,
     'X-Correlation-ID': correlationId,
   };
@@ -223,7 +234,8 @@ export function logInternalSecurityRejection(
   meta?: Record<string, unknown>
 ): void {
   const ip = (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress || 'unknown';
-  const tenantId = (req.headers['x-tenant-id'] as string) || 'none';
+  const rawTenant = (req.headers['x-tenant-id'] as string) || (req.headers['x-tenant'] as string);
+  const tenantId = sanitizeTenantId(rawTenant) || 'none';
   const path = req.originalUrl || req.url;
 
   // Safe structured logging - NEVER log secret, raw signature, passwords, or cookies
@@ -258,11 +270,12 @@ const tradingWarningThrottle = new Map<string, number>();
 
 export function logTradingPermissiveNotice(req: Request, reason: string): void {
   const path = req.originalUrl || req.url || '';
-  const tenantId =
+  const rawTenant =
     (req.headers['x-tenant-id'] as string) ||
     (req.headers['x-tenant'] as string) ||
     (req.query?.tenant_id as string) ||
-    'none';
+    (req.query?.tenantId as string);
+  const tenantId = sanitizeTenantId(rawTenant) || 'none';
   const key = `${reason}:${path.split('?')[0]}:${tenantId}`;
   const now = Date.now();
   const lastTime = tradingWarningThrottle.get(key) || 0;
@@ -317,9 +330,10 @@ export function requireInternalAuth(
     (req.headers['x-internal-signature'] as string) ||
     (req.headers['x-signature'] as string) ||
     (req.headers['x-hmac-signature'] as string);
-  const tenantId =
+  const rawTenantHeader =
     (req.headers['x-tenant-id'] as string) ||
     (req.headers['x-tenant'] as string);
+  const tenantId = sanitizeTenantId(rawTenantHeader);
   const nonce =
     (req.headers['x-internal-nonce'] as string) ||
     (req.headers['x-nonce'] as string);
@@ -329,10 +343,12 @@ export function requireInternalAuth(
     logTradingPermissiveNotice(req, category);
     const effectiveTenantId =
       tenantId ||
-      (req.headers['x-tenant-id'] as string) ||
-      (req.headers['x-tenant'] as string) ||
-      (req.query?.tenant_id as string) ||
-      (req.query?.tenantId as string) ||
+      sanitizeTenantId(
+        (req.headers['x-tenant-id'] as string) ||
+        (req.headers['x-tenant'] as string) ||
+        (req.query?.tenant_id as string) ||
+        (req.query?.tenantId as string)
+      ) ||
       'TNT-001';
     const effectiveCorrelationId =
       (req.headers['x-correlation-id'] as string) ||
@@ -600,15 +616,17 @@ export function requireInternalAuth(
       }
 
       // Ensure caller is not attempting to target a different tenant in body or params
-      const bodyTenantId = req.body?.tenantId || req.body?.tenant_id || req.body?.tenant?.id || req.body?.id;
-      const queryTenantId = (req.query?.tenant_id as string) || (req.query?.tenantId as string);
-      const paramTenantId = req.params?.tenantId;
+      const bodyTenantId = sanitizeTenantId(req.body?.tenantId || req.body?.tenant_id || req.body?.tenant?.id || req.body?.id);
+      const queryTenantId = sanitizeTenantId((req.query?.tenant_id as string) || (req.query?.tenantId as string));
+      const paramTenantId = sanitizeTenantId(req.params?.tenantId);
 
       const isCompatibleTenant = (t1?: string, t2?: string): boolean => {
-        if (!t1 || !t2) return true;
-        if (t1.toLowerCase() === t2.toLowerCase()) return true;
+        const s1 = sanitizeTenantId(t1).toLowerCase();
+        const s2 = sanitizeTenantId(t2).toLowerCase();
+        if (!s1 || !s2) return true;
+        if (s1 === s2) return true;
         const defaults = ['tnt-001', 'tnt-002', 'tnt-003', 'vertex-default', 'default', ''];
-        return defaults.includes(t1.toLowerCase()) && defaults.includes(t2.toLowerCase());
+        return defaults.includes(s1) && defaults.includes(s2);
       };
 
       if (

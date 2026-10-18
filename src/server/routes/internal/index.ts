@@ -28,17 +28,19 @@ const router = Router();
 router.use(requireInternalAuth);
 
 /**
- * Helper to extract and validate the authoritative tenant ID from internalContext
+ * Helper to extract and validate the authoritative tenant ID from internalContext.
+ * Sanitizes comma-separated duplicate tenant values (e.g. "TNT-001, TNT-001").
  */
 function getInternalTenantId(req: InternalAuthorizedRequest): string {
-  const tenantId =
+  const raw =
     req.internalContext?.tenantId ||
     (req.headers['x-tenant-id'] as string) ||
     (req.headers['x-tenant'] as string) ||
     (req.query?.tenant_id as string) ||
     (req.query?.tenantId as string) ||
     'TNT-001';
-  return tenantId;
+  const str = Array.isArray(raw) ? raw[0] : String(raw);
+  return str.split(',')[0].trim() || 'TNT-001';
 }
 
 /**
@@ -1894,7 +1896,8 @@ router.get('/trading/orders', async (req: InternalAuthorizedRequest, res: Respon
     const tenantId = getInternalTenantId(req);
     const userId = req.query.userId as string;
     const status = req.query.status as string;
-    const orders = await authoritativeTradingDataService.getOrders(tenantId, { userId, status });
+    const limit = parseInt(req.query.limit as string, 10) || 250;
+    const orders = await authoritativeTradingDataService.getOrders(tenantId, { userId, status, limit });
     res.json({ success: true, ...orders });
   } catch (err: any) {
     res.status(err.statusCode || 500).json({
@@ -1914,7 +1917,8 @@ router.get('/trading/trades', async (req: InternalAuthorizedRequest, res: Respon
     const tenantId = getInternalTenantId(req);
     const userId = req.query.userId as string;
     const orderId = req.query.orderId as string;
-    const trades = await authoritativeTradingDataService.getTrades(tenantId, { userId, orderId });
+    const limit = parseInt(req.query.limit as string, 10) || 250;
+    const trades = await authoritativeTradingDataService.getTrades(tenantId, { userId, orderId, limit });
     res.json({ success: true, ...trades });
   } catch (err: any) {
     res.status(err.statusCode || 500).json({
@@ -1934,12 +1938,31 @@ router.get('/trading/positions', async (req: InternalAuthorizedRequest, res: Res
     const tenantId = getInternalTenantId(req);
     const userId = req.query.userId as string;
     const status = req.query.status as string;
-    const positions = await authoritativeTradingDataService.getPositions(tenantId, { userId, status });
+    const limit = parseInt(req.query.limit as string, 10) || 250;
+    const positions = await authoritativeTradingDataService.getPositions(tenantId, { userId, status, limit });
     res.json({ success: true, ...positions });
   } catch (err: any) {
     res.status(err.statusCode || 500).json({
       success: false,
       error: err.message || 'Failed to retrieve positions',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/wallets
+ * Authoritative list of tenant trading wallets.
+ */
+router.get('/trading/wallets', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const wallets = await authoritativeTradingDataService.getWallets(tenantId);
+    res.json({ success: true, ...wallets });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve wallets',
       code: err.code,
     });
   }
@@ -1989,7 +2012,7 @@ router.get('/trading/clients', async (req: InternalAuthorizedRequest, res: Respo
   try {
     const tenantId = getInternalTenantId(req);
     const page = parseInt(req.query.page as string, 10) || 1;
-    const limit = parseInt(req.query.limit as string, 10) || 50;
+    const limit = parseInt(req.query.limit as string, 10) || 250;
     const search = req.query.search as string;
 
     const result = await authoritativeTradingDataService.getClientsPaged(tenantId, { page, limit, search });
@@ -2011,7 +2034,7 @@ router.get('/trading/ledger', async (req: InternalAuthorizedRequest, res: Respon
   try {
     const tenantId = getInternalTenantId(req);
     const page = parseInt(req.query.page as string, 10) || 1;
-    const limit = parseInt(req.query.limit as string, 10) || 50;
+    const limit = parseInt(req.query.limit as string, 10) || 250;
     const userId = req.query.userId as string;
 
     const result = await authoritativeTradingDataService.getLedgerPaged(tenantId, { page, limit, userId });
@@ -2033,7 +2056,7 @@ router.get('/trading/funds', async (req: InternalAuthorizedRequest, res: Respons
   try {
     const tenantId = getInternalTenantId(req);
     const page = parseInt(req.query.page as string, 10) || 1;
-    const limit = parseInt(req.query.limit as string, 10) || 50;
+    const limit = parseInt(req.query.limit as string, 10) || 250;
     const userId = req.query.userId as string;
     const type = req.query.type as 'DEPOSIT' | 'WITHDRAWAL';
     const status = req.query.status as string;
