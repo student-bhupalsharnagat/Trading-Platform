@@ -20,6 +20,7 @@ async function run() {
     userId: signupUserId,
     mobile: signupMobile,
     password: 'Password123!',
+    confirmPassword: 'Password123!',
     countryCode: '+91',
   }, 'TNT-001');
 

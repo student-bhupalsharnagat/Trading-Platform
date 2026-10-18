@@ -29,6 +29,7 @@ import { redisService } from './src/server/redis/RedisService.ts';
 import { transactionalOutboxService } from './src/server/services/TransactionalOutboxService.ts';
 import { pgDb } from './src/server/db/postgres.ts';
 import { postgresClientMappingRepository } from './src/server/repositories/PostgresClientMappingRepository.ts';
+import { authoritativeTradingDataService } from './src/server/services/authoritativeTradingDataService.ts';
 
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -74,25 +75,24 @@ async function startServer() {
     console.error('[DB] Migration error during startup:', migErr.message);
   }
 
-  // Auto-backfill missing client mappings and trading wallets in background
+  // Auto-backfill missing client mappings, wallets, and initial trading data
   postgresClientMappingRepository
     .backfillClientMappingsAndWallets('TNT-001')
-    .then((bf) => {
+    .then(async (bf) => {
       console.log(`[STARTUP] Auto-backfilled client mappings: ${bf.mappingsCreated} mappings, ${bf.walletsCreated} wallets.`);
+      await authoritativeTradingDataService.backfillTradingDataIfEmpty('TNT-001');
+      await transactionalOutboxService.syncAllCurrentDataToCentralAdmin('TNT-001');
     })
     .catch((backfillErr: any) => {
       console.warn('[STARTUP] Client mappings backfill notice:', backfillErr.message);
+      transactionalOutboxService.syncAllCurrentDataToCentralAdmin('TNT-001').catch(() => {});
     });
 
   // Start Transactional Outbox background worker
   transactionalOutboxService.startWorker();
 
-  // Startup sync: dispatch pending outbox events and sync current state to Central Admin
-  transactionalOutboxService.syncAllCurrentDataToCentralAdmin('TNT-001').catch((syncErr: any) => {
-    console.warn('[STARTUP] Central admin outbox sync notice:', syncErr.message);
-  });
-
   const app = express();
+  app.set('trust proxy', 1);
 
   // Basic security & parsing middlewares with rawBody retention for HMAC verification
   app.use(

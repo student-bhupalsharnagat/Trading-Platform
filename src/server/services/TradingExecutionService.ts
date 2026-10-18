@@ -12,7 +12,21 @@ import { transactionalOutboxService } from './TransactionalOutboxService.ts';
 import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
 import { tenantConfigCache } from '../cache/TenantConfigCache.ts';
 import { emergencyStateCache } from '../cache/EmergencyStateCache.ts';
-import { INSTRUMENTS, findInstrument, getTenantWallet, setTenantWallet, getTenantPositions, setTenantPositions, getTenantOrders } from '../trading/tradingStore.ts';
+import {
+  INSTRUMENTS,
+  findInstrument,
+  getTenantWallet,
+  setTenantWallet,
+  getTenantPositions,
+  setTenantPositions,
+  getTenantOrders,
+  addTenantOrder,
+  addTenantTrade,
+  addTenantLedgerEntry,
+  closeSinglePosition,
+} from '../trading/tradingStore.ts';
+import { postgresLedgerRepository } from '../repositories/trading/PostgresLedgerRepository.ts';
+import { jsonLedgerRepository } from '../repositories/JsonLedgerRepository.ts';
 import { TradingOrder } from '../repositories/trading/ITradingOrderRepository.ts';
 import { TradingTrade } from '../repositories/trading/ITradingTradeRepository.ts';
 import { TradingPosition } from '../repositories/trading/ITradingPositionRepository.ts';
@@ -204,8 +218,7 @@ export class TradingExecutionService {
         memWallet.availableBalance = pendingResult.updatedWallet.available_balance;
         memWallet.blockedBalance = pendingResult.updatedWallet.blocked_balance;
 
-        const memOrders = getTenantOrders(tenantId);
-        memOrders.unshift({
+        const memOrder = {
           id: pendingResult.newOrder.id,
           symbol: pendingResult.newOrder.instrument_id,
           type: pendingResult.newOrder.side as 'BUY' | 'SELL',
@@ -215,12 +228,16 @@ export class TradingExecutionService {
           qty,
           lotSize: inst.lotSize,
           price: pendingResult.newOrder.price,
-          status: 'PENDING',
+          status: 'PENDING' as any,
           time: new Date().toTimeString().split(' ')[0],
           date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
           userId,
           tenantId,
-        });
+        };
+        addTenantOrder(tenantId, memOrder);
+        if (tenantId !== 'TNT-001') {
+          addTenantOrder('TNT-001', memOrder);
+        }
       } catch {
         // Ignore fallback errors
       }
@@ -456,6 +473,25 @@ export class TradingExecutionService {
         client
       );
 
+      // 5. Create immutable ledger entry for realized PnL if any
+      if (realizedPnL !== 0) {
+        await postgresLedgerRepository.createEntry(
+          {
+            tenant_id: tenantId,
+            user_id: userId,
+            transaction_id: newTrade.id,
+            type: realizedPnL >= 0 ? 'CREDIT' : 'DEBIT',
+            category: 'TRADE_PNL',
+            amount: Math.abs(realizedPnL),
+            balance_before: wallet.available_balance,
+            balance_after: updatedWallet.available_balance,
+            reference: `Trade PnL for ${inst.symbol}`,
+            created_by: 'SYSTEM',
+          },
+          client
+        );
+      }
+
       // 6. Record order event
       await postgresOrderEventRepository.recordEvent(
         {
@@ -610,8 +646,7 @@ export class TradingExecutionService {
       memWallet.usedMargin = result.updatedWallet.used_margin;
       memWallet.totalPnL = result.updatedWallet.realized_pnl;
 
-      const memOrders = getTenantOrders(tenantId);
-      memOrders.unshift({
+      const memOrder = {
         id: result.newOrder.id,
         symbol: result.newOrder.instrument_id,
         type: result.newOrder.side as 'BUY' | 'SELL',
@@ -621,12 +656,44 @@ export class TradingExecutionService {
         qty,
         lotSize: inst.lotSize,
         price: result.newOrder.price,
-        status: 'EXECUTED',
+        status: 'EXECUTED' as any,
         time: new Date().toTimeString().split(' ')[0],
         date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
         userId,
         tenantId,
-      });
+      };
+      addTenantOrder(tenantId, memOrder);
+      if (tenantId !== 'TNT-001') {
+        addTenantOrder('TNT-001', memOrder);
+      }
+
+      // Synchronize in-memory trade
+      if (result.newTrade) {
+        addTenantTrade(tenantId, result.newTrade);
+        if (tenantId !== 'TNT-001') {
+          addTenantTrade('TNT-001', result.newTrade);
+        }
+      }
+
+      // Synchronize in-memory ledger entry for realized PnL
+      if (result.newTrade?.realized_pnl && Number(result.newTrade.realized_pnl) !== 0) {
+        const pnlNum = Number(result.newTrade.realized_pnl);
+        const ledgerItem: any = {
+          id: `ledger-${result.newTrade.id}`,
+          tenant_id: tenantId,
+          user_id: userId,
+          transaction_id: result.newTrade.id,
+          type: (pnlNum >= 0 ? 'CREDIT' : 'DEBIT') as 'CREDIT' | 'DEBIT',
+          category: 'TRADE_PNL',
+          amount: Math.abs(pnlNum),
+          balance_before: result.updatedWallet.available_balance - pnlNum,
+          balance_after: result.updatedWallet.available_balance,
+          reference: `Trade PnL for ${inst.symbol}`,
+          created_by: 'SYSTEM',
+        };
+        addTenantLedgerEntry(tenantId, ledgerItem);
+        jsonLedgerRepository.createEntry(ledgerItem).catch(() => {});
+      }
 
       // Synchronize in-memory positions list
       const memPositions = getTenantPositions(tenantId);
@@ -813,19 +880,142 @@ export class TradingExecutionService {
         client
       );
 
+      // Create square-off order and trade records
+      const soOrderId = `ORD-SO-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const soSide = (pos.quantity > 0 ? 'SELL' : 'BUY') as 'BUY' | 'SELL';
+      const soQty = Math.abs(pos.quantity);
+      const soPrice = inst?.lastPrice || pos.average_price;
+
+      const closeOrder = await postgresOrderRepository.create(
+        {
+          id: soOrderId,
+          tenant_id: tenantId,
+          user_id: userId,
+          instrument_id: pos.instrument_id,
+          side: soSide,
+          order_type: 'MARKET',
+          quantity: soQty,
+          price: soPrice,
+          trigger_price: null,
+          status: 'EXECUTED',
+          filled_quantity: soQty,
+          remaining_quantity: 0,
+          average_fill_price: soPrice,
+          time_in_force: 'DAY',
+        },
+        client
+      );
+
+      const soTradeId = `TRD-SO-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const closeTrade = await postgresTradeRepository.create(
+        {
+          id: soTradeId,
+          tenant_id: tenantId,
+          order_id: closeOrder.id,
+          user_id: userId,
+          instrument_id: pos.instrument_id,
+          side: soSide,
+          quantity: soQty,
+          execution_price: soPrice,
+          execution_value: soQty * soPrice,
+          realized_pnl: realizedPnL,
+          executed_at: new Date().toISOString(),
+        },
+        client
+      );
+
+      // Record immutable ledger entry for closing PnL if any
+      if (realizedPnL !== 0) {
+        await postgresLedgerRepository.createEntry(
+          {
+            tenant_id: tenantId,
+            user_id: userId,
+            transaction_id: closeTrade.id,
+            type: realizedPnL >= 0 ? 'CREDIT' : 'DEBIT',
+            category: 'TRADE_PNL',
+            amount: Math.abs(realizedPnL),
+            balance_before: wallet.available_balance,
+            balance_after: updatedWallet.available_balance,
+            reference: `Position square-off ${pos.instrument_id} PnL`,
+            created_by: 'SYSTEM',
+          },
+          client
+        );
+      }
+
       return {
         pos,
         updatedWallet,
+        closeOrder,
+        closeTrade,
         closedPositionPayload,
         walletPayload,
       };
     });
+
+    // Post-commit side effects: Synchronize in-memory tradingStore
+    try {
+      closeSinglePosition(tenantId, positionId);
+      if (tenantId !== 'TNT-001') {
+        closeSinglePosition('TNT-001', positionId);
+      }
+
+      const inst = findInstrument(result.pos.instrument_id);
+      const memOrder = {
+        id: result.closeOrder.id,
+        symbol: result.pos.instrument_id,
+        type: (result.pos.quantity > 0 ? 'SELL' : 'BUY') as 'BUY' | 'SELL',
+        orderType: 'MARKET' as any,
+        product: 'INTRADAY' as any,
+        lots: Math.max(1, Math.round(Math.abs(result.pos.quantity) / (inst?.lotSize || 1))),
+        qty: Math.abs(result.pos.quantity),
+        lotSize: inst?.lotSize || 1,
+        price: inst?.lastPrice || result.pos.average_price,
+        status: 'EXECUTED' as any,
+        time: new Date().toTimeString().split(' ')[0],
+        date: new Date().toLocaleDateString('en-GB'),
+        userId,
+        tenantId,
+      };
+      addTenantOrder(tenantId, memOrder);
+      if (tenantId !== 'TNT-001') {
+        addTenantOrder('TNT-001', memOrder);
+      }
+
+      if (result.closeTrade) {
+        addTenantTrade(tenantId, result.closeTrade);
+        if (tenantId !== 'TNT-001') {
+          addTenantTrade('TNT-001', result.closeTrade);
+        }
+      }
+
+      const pnlNum = Number(result.closeTrade?.realized_pnl || 0);
+      if (pnlNum !== 0) {
+        const ledgerItem: any = {
+          id: `ledger-${result.closeTrade.id}`,
+          tenant_id: tenantId,
+          user_id: userId,
+          transaction_id: result.closeTrade.id,
+          type: (pnlNum >= 0 ? 'CREDIT' : 'DEBIT') as 'CREDIT' | 'DEBIT',
+          category: 'TRADE_PNL',
+          amount: Math.abs(pnlNum),
+          balance_before: result.updatedWallet.available_balance - pnlNum,
+          balance_after: result.updatedWallet.available_balance,
+          reference: `Position square-off ${result.pos.instrument_id} PnL`,
+          created_by: 'SYSTEM',
+        };
+        addTenantLedgerEntry(tenantId, ledgerItem);
+        jsonLedgerRepository.createEntry(ledgerItem).catch(() => {});
+      }
+    } catch {}
 
     // Broadcast WebSocket events
     const isPrivileged = (role: string) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(role);
     const target = { targetUserId: userId };
     tradingWebSocketServer.broadcastToTenant(tenantId, 'position.updated', { ...result.pos, quantity: 0 }, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
     tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', result.updatedWallet, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'order.created', result.closeOrder, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'trade.executed', result.closeTrade, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
 
     // Dispatch Central Admin events
     internalEventDispatcher.dispatchPositionUpdated(result.closedPositionPayload).catch((e) =>
@@ -925,6 +1115,22 @@ export class TradingExecutionService {
 
       return { order: updated!, updatedWallet };
     });
+
+    // Synchronize in-memory tradingStore order cancellation
+    try {
+      const memOrders = getTenantOrders(tenantId);
+      const ord = memOrders.find((o) => o.id === orderId);
+      if (ord) {
+        ord.status = 'CANCELLED' as any;
+      }
+      if (tenantId !== 'TNT-001') {
+        const tntOrders = getTenantOrders('TNT-001');
+        const tntOrd = tntOrders.find((o) => o.id === orderId);
+        if (tntOrd) {
+          tntOrd.status = 'CANCELLED' as any;
+        }
+      }
+    } catch {}
 
     const isPrivileged = (role: string) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(role);
     tradingWebSocketServer.broadcastToTenant(tenantId, 'order.cancelled', result.order, (ws) => ws.userId === userId || isPrivileged(ws.role));

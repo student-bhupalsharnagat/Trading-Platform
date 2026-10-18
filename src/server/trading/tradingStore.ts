@@ -64,12 +64,27 @@ export const initialOrders: Order[] = [];
 // In-memory collections scoped by tenant
 const tenantWallets: Record<string, WalletFunds> = {
   'vertex-default': JSON.parse(JSON.stringify(initialWallet)),
+  'TNT-001': JSON.parse(JSON.stringify(initialWallet)),
 };
 const tenantPositions: Record<string, Position[]> = {
   'vertex-default': JSON.parse(JSON.stringify(initialPositions)),
+  'TNT-001': JSON.parse(JSON.stringify(initialPositions)),
 };
 const tenantOrders: Record<string, Order[]> = {
   'vertex-default': JSON.parse(JSON.stringify(initialOrders)),
+  'TNT-001': JSON.parse(JSON.stringify(initialOrders)),
+};
+const tenantTrades: Record<string, any[]> = {
+  'vertex-default': [],
+  'TNT-001': [],
+};
+const tenantFundTransactions: Record<string, any[]> = {
+  'vertex-default': [],
+  'TNT-001': [],
+};
+const tenantLedgerEntries: Record<string, any[]> = {
+  'vertex-default': [],
+  'TNT-001': [],
 };
 const tenantTickets: Record<string, SupportTicket[]> = {
   'vertex-default': [],
@@ -119,7 +134,140 @@ export function setTenantOrders(tenantId: string, orders: Order[]): void {
 
 export function addTenantOrder(tenantId: string, order: Order): void {
   const orders = getTenantOrders(tenantId);
-  orders.unshift(order);
+  const exists = orders.some((o) => o.id === order.id);
+  if (!exists) {
+    orders.unshift(order);
+  }
+}
+
+export function getTenantTrades(tenantId: string): any[] {
+  const normTenant = tenantId || 'vertex-default';
+  if (!tenantTrades[normTenant]) {
+    tenantTrades[normTenant] = [];
+  }
+  return tenantTrades[normTenant];
+}
+
+export function setTenantTrades(tenantId: string, trades: any[]): void {
+  const normTenant = tenantId || 'vertex-default';
+  tenantTrades[normTenant] = trades;
+}
+
+export function addTenantTrade(tenantId: string, trade: any): void {
+  const trades = getTenantTrades(tenantId);
+  const exists = trades.some((t) => t.id === trade.id);
+  if (!exists) {
+    trades.unshift(trade);
+  }
+}
+
+export function getTenantFundTransactions(tenantId: string): any[] {
+  const normTenant = tenantId || 'vertex-default';
+  if (!tenantFundTransactions[normTenant]) {
+    tenantFundTransactions[normTenant] = [];
+  }
+  return tenantFundTransactions[normTenant];
+}
+
+export function addTenantFundTransaction(tenantId: string, tx: any): void {
+  const txs = getTenantFundTransactions(tenantId);
+  const idx = txs.findIndex((t) => t.id === tx.id || t.transactionId === tx.id);
+  if (idx !== -1) {
+    txs[idx] = { ...txs[idx], ...tx };
+  } else {
+    txs.unshift(tx);
+  }
+}
+
+export function getTenantLedger(tenantId: string): any[] {
+  const normTenant = tenantId || 'vertex-default';
+  if (!tenantLedgerEntries[normTenant]) {
+    tenantLedgerEntries[normTenant] = [];
+  }
+  return tenantLedgerEntries[normTenant];
+}
+
+export function addTenantLedgerEntry(tenantId: string, entry: any): void {
+  const ledger = getTenantLedger(tenantId);
+  const exists = ledger.some((e) => e.id === entry.id || (e.transaction_id && e.transaction_id === entry.transaction_id));
+  if (!exists) {
+    ledger.unshift(entry);
+  }
+}
+
+export function getAllTenantOrders(): { tenantId: string; order: Order }[] {
+  const results: { tenantId: string; order: Order }[] = [];
+  const seen = new Set<string>();
+  for (const [tId, orders] of Object.entries(tenantOrders)) {
+    for (const o of orders) {
+      if (!seen.has(o.id)) {
+        seen.add(o.id);
+        results.push({ tenantId: tId, order: o });
+      }
+    }
+  }
+  return results;
+}
+
+export function getAllTenantPositions(): { tenantId: string; position: Position }[] {
+  const results: { tenantId: string; position: Position }[] = [];
+  const seen = new Set<string>();
+  for (const [tId, positions] of Object.entries(tenantPositions)) {
+    for (const p of positions) {
+      if (!seen.has(p.id)) {
+        seen.add(p.id);
+        results.push({ tenantId: tId, position: p });
+      }
+    }
+  }
+  return results;
+}
+
+export function getAllTenantTrades(): { tenantId: string; trade: any }[] {
+  const results: { tenantId: string; trade: any }[] = [];
+  const seen = new Set<string>();
+  for (const [tId, trades] of Object.entries(tenantTrades)) {
+    for (const tr of trades) {
+      if (!seen.has(tr.id)) {
+        seen.add(tr.id);
+        results.push({ tenantId: tId, trade: tr });
+      }
+    }
+  }
+  return results;
+}
+
+export function getAllTenantFundTransactions(): { tenantId: string; tx: any }[] {
+  const results: { tenantId: string; tx: any }[] = [];
+  const seen = new Set<string>();
+  for (const [tId, txs] of Object.entries(tenantFundTransactions)) {
+    for (const t of txs) {
+      const id = t.id || t.transactionId;
+      if (!seen.has(id)) {
+        seen.add(id);
+        results.push({ tenantId: tId, tx: t });
+      }
+    }
+  }
+  return results;
+}
+
+export function getAllTenantLedger(): { tenantId: string; entry: any }[] {
+  const results: { tenantId: string; entry: any }[] = [];
+  const seen = new Set<string>();
+  for (const [tId, entries] of Object.entries(tenantLedgerEntries)) {
+    for (const e of entries) {
+      if (!seen.has(e.id)) {
+        seen.add(e.id);
+        results.push({ tenantId: tId, entry: e });
+      }
+    }
+  }
+  return results;
+}
+
+export function getAllTenantWallets(): Record<string, WalletFunds> {
+  return { ...tenantWallets };
 }
 
 export function getTenantTickets(tenantId: string): SupportTicket[] {

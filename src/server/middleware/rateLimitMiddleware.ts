@@ -4,6 +4,7 @@ import rateLimit from 'express-rate-limit';
 export const registerLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // max 10 registration attempts per IP per 15 min
+  validate: { xForwardedForHeader: false },
   message: {
     success: false,
     message: 'Too many registration requests from this IP. Please try again in 15 minutes.',
@@ -16,6 +17,7 @@ export const registerLimiter = rateLimit({
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 15, // max 15 attempts
+  validate: { xForwardedForHeader: false },
   message: {
     success: false,
     message: 'Too many login attempts. Please try again after 15 minutes.',
@@ -28,6 +30,7 @@ export const loginLimiter = rateLimit({
 export const otpLimiter = rateLimit({
   windowMs: 10 * 60 * 1000, // 10 minutes
   max: 10, // max 10 requests per 10 min
+  validate: { xForwardedForHeader: false },
   message: {
     success: false,
     message: 'Too many OTP requests. Please wait a few minutes before trying again.',

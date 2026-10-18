@@ -172,17 +172,9 @@ export class TransactionalOutboxService {
       }
 
       // 3. Sync Orders
-      const { postgresOrderRepository } = await import('../repositories/trading/PostgresOrderRepository.ts');
-      const orders = await postgresOrderRepository.getOrders(targetTenantId);
-      const fallbackOrders = await postgresOrderRepository.getOrders('vertex-default');
-      const allOrders = [...orders];
-      const seenOrderIds = new Set(orders.map((o) => o.id));
-      for (const fo of fallbackOrders) {
-        if (!seenOrderIds.has(fo.id)) {
-          seenOrderIds.add(fo.id);
-          allOrders.push(fo);
-        }
-      }
+      const { authoritativeTradingDataService } = await import('./authoritativeTradingDataService.ts');
+      const ordersRes = await authoritativeTradingDataService.getOrders(targetTenantId);
+      const allOrders = ordersRes.orders || [];
 
       for (const o of allOrders) {
         ordersCount++;
@@ -194,8 +186,8 @@ export class TransactionalOutboxService {
             tenantId: targetTenantId,
             orderId: o.id,
             userId: o.user_id,
-            symbol: o.instrument_id,
-            instrumentId: o.instrument_id,
+            symbol: o.symbol || o.instrument_id,
+            instrumentId: o.instrument_id || o.symbol,
             side: o.side,
             orderType: o.order_type,
             quantity: o.quantity,
@@ -209,17 +201,8 @@ export class TransactionalOutboxService {
       }
 
       // 4. Sync Positions
-      const { postgresPositionRepository } = await import('../repositories/trading/PostgresPositionRepository.ts');
-      const positions = await postgresPositionRepository.getPositions(targetTenantId);
-      const fallbackPositions = await postgresPositionRepository.getPositions('vertex-default');
-      const allPositions = [...positions];
-      const seenPosIds = new Set(positions.map((p) => p.id));
-      for (const fp of fallbackPositions) {
-        if (!seenPosIds.has(fp.id)) {
-          seenPosIds.add(fp.id);
-          allPositions.push(fp);
-        }
-      }
+      const posRes = await authoritativeTradingDataService.getPositions(targetTenantId);
+      const allPositions = posRes.positions || [];
 
       for (const p of allPositions) {
         positionsCount++;
@@ -231,9 +214,9 @@ export class TransactionalOutboxService {
             tenantId: targetTenantId,
             positionId: p.id,
             userId: p.user_id,
-            symbol: p.instrument_id,
-            instrumentId: p.instrument_id,
-            quantity: p.quantity,
+            symbol: p.symbol || p.instrument_id,
+            instrumentId: p.instrument_id || p.symbol,
+            quantity: p.raw_quantity !== undefined ? p.raw_quantity : p.quantity,
             averagePrice: p.average_price,
             realizedPnl: p.realized_pnl,
             unrealizedPnl: p.unrealized_pnl,
@@ -243,7 +226,39 @@ export class TransactionalOutboxService {
         }).catch(() => {});
       }
 
-      // 5. Immediately trigger batch dispatch
+      // 5. Sync Funds
+      const fundsRes = await authoritativeTradingDataService.getFundsPaged(targetTenantId);
+      const allFunds = fundsRes.funds || [];
+      for (const f of allFunds) {
+        const evType = f.type === 'DEPOSIT'
+          ? (f.status === 'APPROVED' ? 'deposit.approved' : 'deposit.created')
+          : (f.status === 'APPROVED' ? 'withdrawal.approved' : 'withdrawal.created');
+        await this.enqueue({
+          eventId: `sync-fund-${f.id}`,
+          eventType: evType as any,
+          tenantId: targetTenantId,
+          payload: {
+            id: f.id,
+            transactionId: f.id,
+            clientCode: (f.userId || '').toUpperCase(),
+            tenantId: targetTenantId,
+            userId: f.userId,
+            clientId: f.userId,
+            tradingUserId: f.userId,
+            amount: Number(f.amount),
+            type: f.type,
+            status: f.status,
+            method: f.paymentMethod || 'BANK_TRANSFER',
+            paymentMethod: f.paymentMethod || 'BANK_TRANSFER',
+            reference: f.reference || f.id,
+            referenceId: f.referenceId,
+            createdAt: f.createdAt,
+            timestamp: f.createdAt,
+          },
+        }).catch(() => {});
+      }
+
+      // 6. Immediately trigger batch dispatch
       this.processBatch(50).catch((err) => {
         console.warn('[TransactionalOutbox] Immediate sync batch notice:', err.message);
       });
