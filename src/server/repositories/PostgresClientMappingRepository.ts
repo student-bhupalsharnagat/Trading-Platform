@@ -387,7 +387,19 @@ export class PostgresClientMappingRepository {
 
     try {
       const { db } = await import('../db/database.ts');
-      const allDbUsers = db.getAllUsers();
+      const allDbUsers = db.getAllUsers().filter((u) => {
+        const uid = (u.user_id || '').toLowerCase().trim();
+        const email = (u.email || '').toLowerCase().trim();
+        const name = (u.full_name || '').toLowerCase().trim();
+        if (['superadmin', 'master_alpha', 'master_zenith', 'broker_metro', 'subbroker_kalyan'].includes(uid)) return true;
+        if (email.includes('@test.') || email.includes('@demo.') || email.includes('@example.') || email.includes('audit.trader') || email.includes('@vertex.trade')) return false;
+        if (name.includes('persist audit') || name.includes('test') || name.includes('demo') || name.includes('audit')) return false;
+        if (['aarav mehta', 'ananya iyer', 'arjun verma', 'diya kapoor', 'ishita singh', 'kabir rao', 'meera nair', 'vivaan shah', 'ravi kumar', 'rahul sharma', 'priya patel', 'amit verma', 'demo trader'].includes(name)) return false;
+        if (uid.startsWith('vtx') || uid.startsWith('demo') || uid.startsWith('test') || uid.includes('audit')) return false;
+        if (uid.startsWith('trd_17') || uid.startsWith('admin_sync_') || uid.startsWith('client_17') || uid.startsWith('trader_17') || uid.startsWith('ub_trader_') || uid.startsWith('user_fall_') || uid.startsWith('fast_user_') || uid.startsWith('master_5j_') || uid.startsWith('broker_5j_') || uid.startsWith('trader_5j_') || uid.startsWith('trader-')) return false;
+        if (['demo-trader', 'vtx_demo', 'test_demo_trader_01', 'vtx999', 'vtx123', 'vtx456', 'vtx101'].includes(uid)) return false;
+        return true;
+      });
       processed = allDbUsers.length;
 
       // 1. Ensure all memory/store users exist in PostgreSQL users table
@@ -439,6 +451,30 @@ export class PostgresClientMappingRepository {
         }
       }
 
+      const dummyFilter = `
+        AND NOT (
+          COALESCE(u.email, '') ILIKE '%@test.%'
+          OR COALESCE(u.email, '') ILIKE '%@demo.%'
+          OR COALESCE(u.email, '') ILIKE '%@example.%'
+          OR COALESCE(u.email, '') ILIKE '%audit.trader%'
+          OR COALESCE(u.email, '') ILIKE '%@vertex.trade%'
+          OR u.full_name ILIKE '%Persist Audit%'
+          OR u.full_name ILIKE '%test%'
+          OR u.full_name ILIKE '%demo%'
+          OR u.full_name ILIKE '%User Broker Tester%'
+          OR u.full_name ILIKE '%Fallback Test User%'
+          OR u.full_name ILIKE '%Immediate Signup User%'
+          OR u.full_name ILIKE '%Integration Trader%'
+          OR u.full_name ILIKE '%Production Trader One%'
+          OR u.full_name ILIKE '%Verification Test Trader%'
+          OR u.user_id ILIKE 'vtx%'
+          OR u.user_id ILIKE 'demo%'
+          OR u.user_id ILIKE 'test%'
+          OR u.user_id ILIKE '%audit%'
+          OR u.full_name IN ('Aarav Mehta', 'Ananya Iyer', 'Arjun Verma', 'Diya Kapoor', 'Ishita Singh', 'Kabir Rao', 'Meera Nair', 'Vivaan Shah', 'Rahul Sharma', 'Priya Patel', 'Amit Verma', 'Demo Trader')
+        )
+      `;
+
       // 2. High-performance set-based backfill for client_mappings (target tenant & native tenant)
       const cmTarget = await pgDb.query(
         `INSERT INTO client_mappings (
@@ -456,6 +492,7 @@ export class PostgresClientMappingRepository {
           NOW(),
           NOW()
         FROM users u
+        WHERE 1=1 ${dummyFilter}
         ORDER BY u.user_id, u.created_at DESC
         ON CONFLICT (tenant_id, user_id) DO NOTHING
         RETURNING id;`,
@@ -479,7 +516,7 @@ export class PostgresClientMappingRepository {
           NOW(),
           NOW()
         FROM users u
-        WHERE u.tenant_id != $1
+        WHERE u.tenant_id != $1 ${dummyFilter}
         ORDER BY u.tenant_id, u.user_id, u.created_at DESC
         ON CONFLICT (tenant_id, user_id) DO NOTHING
         RETURNING id;`,
@@ -501,6 +538,7 @@ export class PostgresClientMappingRepository {
           NOW(),
           NOW()
         FROM users u
+        WHERE 1=1 ${dummyFilter}
         ORDER BY u.user_id, u.created_at DESC
         ON CONFLICT (tenant_id, trading_user_id) DO UPDATE SET
           external_client_id = COALESCE(EXCLUDED.external_client_id, client_identity_mappings.external_client_id),
@@ -524,6 +562,7 @@ export class PostgresClientMappingRepository {
           0,
           NOW()
         FROM users u
+        WHERE 1=1 ${dummyFilter}
         ORDER BY u.user_id, u.created_at DESC
         ON CONFLICT (tenant_id, user_id) DO NOTHING
         RETURNING id;`,
@@ -545,7 +584,7 @@ export class PostgresClientMappingRepository {
           0,
           NOW()
         FROM users u
-        WHERE u.tenant_id != $1
+        WHERE u.tenant_id != $1 ${dummyFilter}
         ORDER BY u.tenant_id, u.user_id, u.created_at DESC
         ON CONFLICT (tenant_id, user_id) DO NOTHING
         RETURNING id;`,

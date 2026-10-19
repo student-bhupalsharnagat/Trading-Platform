@@ -202,28 +202,69 @@ export class AuthoritativeTradingDataService {
 
     let orders: any[] = [];
     try {
-      let sql = `SELECT * FROM trading_orders WHERE (tenant_id = ANY($1) OR $2 = true)`;
+      let sql = `
+        SELECT 
+          o.*,
+          u.id AS user_pk_id,
+          u.full_name AS client_name,
+          u.email AS client_email,
+          COALESCE(cm.client_id, cim.external_client_id, u.id, o.user_id) AS unified_client_id
+        FROM trading_orders o
+        LEFT JOIN LATERAL (
+          SELECT id, full_name, email FROM users
+          WHERE LOWER(user_id) = LOWER(o.user_id) OR id = o.user_id
+          ORDER BY (CASE WHEN tenant_id = o.tenant_id THEN 0 ELSE 1 END), created_at DESC
+          LIMIT 1
+        ) u ON true
+        LEFT JOIN LATERAL (
+          SELECT client_id FROM client_mappings
+          WHERE LOWER(user_id) = LOWER(o.user_id)
+          ORDER BY (CASE WHEN tenant_id = o.tenant_id THEN 0 ELSE 1 END), created_at DESC
+          LIMIT 1
+        ) cm ON true
+        LEFT JOIN LATERAL (
+          SELECT external_client_id FROM client_identity_mappings
+          WHERE LOWER(trading_user_id) = LOWER(o.user_id)
+          ORDER BY (CASE WHEN tenant_id = o.tenant_id THEN 0 ELSE 1 END), created_at DESC
+          LIMIT 1
+        ) cim ON true
+        WHERE (o.tenant_id = ANY($1) OR $2 = true)
+      `;
       const params: any[] = [searchTenants, isDefault];
 
       if (resolvedUserId) {
         params.push(resolvedUserId);
-        sql += ` AND user_id = $${params.length}`;
+        sql += ` AND (o.user_id = $${params.length} OR u.id = $${params.length} OR cm.client_id = $${params.length} OR cim.external_client_id = $${params.length})`;
       }
       if (options.status) {
         params.push(options.status);
-        sql += ` AND status = $${params.length}`;
+        sql += ` AND o.status = $${params.length}`;
       }
 
-      sql += ` ORDER BY created_at DESC LIMIT $${params.length + 1};`;
+      sql += ` ORDER BY o.created_at DESC LIMIT $${params.length + 1};`;
       params.push(limit);
 
       const res = await pgDb.query(sql, params);
       for (const row of res.rows || []) {
+        const uId = row.user_pk_id || row.user_id;
+        const cId = row.unified_client_id || row.user_pk_id || row.user_id;
+        const cName = row.client_name || '';
+        const cEmail = row.client_email || '';
+
         orders.push({
           id: row.id,
           order_id: row.id,
           tenant_id: row.tenant_id || cleanTenant,
-          user_id: row.user_id,
+          user_id: uId,
+          userId: uId,
+          clientId: cId,
+          client_id: cId,
+          clientName: cName,
+          client_name: cName,
+          clientEmail: cEmail,
+          client_email: cEmail,
+          tradingUserId: row.user_id,
+          trading_user_id: row.user_id,
           client_order_id: row.client_order_id,
           symbol: row.instrument_id,
           instrument_id: row.instrument_id,
@@ -247,21 +288,58 @@ export class AuthoritativeTradingDataService {
 
       // Fallback: If 0 orders found and no userId filter, check across all tenants in PostgreSQL
       if (orders.length === 0 && !resolvedUserId) {
-        let fallbackSql = `SELECT * FROM trading_orders`;
+        let fallbackSql = `
+          SELECT 
+            o.*,
+            u.id AS user_pk_id,
+            u.full_name AS client_name,
+            u.email AS client_email,
+            COALESCE(cm.client_id, cim.external_client_id, u.id, o.user_id) AS unified_client_id
+          FROM trading_orders o
+          LEFT JOIN LATERAL (
+            SELECT id, full_name, email FROM users
+            WHERE LOWER(user_id) = LOWER(o.user_id) OR id = o.user_id
+            ORDER BY created_at DESC LIMIT 1
+          ) u ON true
+          LEFT JOIN LATERAL (
+            SELECT client_id FROM client_mappings
+            WHERE LOWER(user_id) = LOWER(o.user_id)
+            ORDER BY created_at DESC LIMIT 1
+          ) cm ON true
+          LEFT JOIN LATERAL (
+            SELECT external_client_id FROM client_identity_mappings
+            WHERE LOWER(trading_user_id) = LOWER(o.user_id)
+            ORDER BY created_at DESC LIMIT 1
+          ) cim ON true
+        `;
         const fbParams: any[] = [];
         if (options.status) {
           fbParams.push(options.status);
-          fallbackSql += ` WHERE status = $1`;
+          fallbackSql += ` WHERE o.status = $1`;
         }
-        fallbackSql += ` ORDER BY created_at DESC LIMIT $${fbParams.length + 1};`;
+        fallbackSql += ` ORDER BY o.created_at DESC LIMIT $${fbParams.length + 1};`;
         fbParams.push(limit);
         const fbRes = await pgDb.query(fallbackSql, fbParams);
         for (const row of fbRes.rows || []) {
+          const uId = row.user_pk_id || row.user_id;
+          const cId = row.unified_client_id || row.user_pk_id || row.user_id;
+          const cName = row.client_name || '';
+          const cEmail = row.client_email || '';
+
           orders.push({
             id: row.id,
             order_id: row.id,
             tenant_id: row.tenant_id || cleanTenant,
-            user_id: row.user_id,
+            user_id: uId,
+            userId: uId,
+            clientId: cId,
+            client_id: cId,
+            clientName: cName,
+            client_name: cName,
+            clientEmail: cEmail,
+            client_email: cEmail,
+            tradingUserId: row.user_id,
+            trading_user_id: row.user_id,
             client_order_id: row.client_order_id,
             symbol: row.instrument_id,
             instrument_id: row.instrument_id,
@@ -300,11 +378,26 @@ export class AuthoritativeTradingDataService {
           continue;
         }
         seenOrderIds.add(o.id);
+        const memUser = db.findUserByUserId(o.userId || '') || db.findUserById(o.userId || '');
+        const uId = memUser?.id || o.userId || resolvedUserId || 'demo-trader';
+        const cId = memUser?.id || o.userId || resolvedUserId || 'demo-trader';
+        const cName = memUser?.full_name || '';
+        const cEmail = memUser?.email || '';
+
         orders.push({
           id: o.id,
           order_id: o.id,
           tenant_id: item.tenantId || cleanTenant,
-          user_id: o.userId || resolvedUserId || 'demo-trader',
+          user_id: uId,
+          userId: uId,
+          clientId: cId,
+          client_id: cId,
+          clientName: cName,
+          client_name: cName,
+          clientEmail: cEmail,
+          client_email: cEmail,
+          tradingUserId: o.userId || resolvedUserId || 'demo-trader',
+          trading_user_id: o.userId || resolvedUserId || 'demo-trader',
           client_order_id: (o as any).clientOrderId || null,
           symbol: o.symbol,
           instrument_id: o.symbol,
@@ -348,28 +441,69 @@ export class AuthoritativeTradingDataService {
 
     let trades: any[] = [];
     try {
-      let sql = `SELECT * FROM trading_trades WHERE (tenant_id = ANY($1) OR $2 = true)`;
+      let sql = `
+        SELECT 
+          t.*,
+          u.id AS user_pk_id,
+          u.full_name AS client_name,
+          u.email AS client_email,
+          COALESCE(cm.client_id, cim.external_client_id, u.id, t.user_id) AS unified_client_id
+        FROM trading_trades t
+        LEFT JOIN LATERAL (
+          SELECT id, full_name, email FROM users
+          WHERE LOWER(user_id) = LOWER(t.user_id) OR id = t.user_id
+          ORDER BY (CASE WHEN tenant_id = t.tenant_id THEN 0 ELSE 1 END), created_at DESC
+          LIMIT 1
+        ) u ON true
+        LEFT JOIN LATERAL (
+          SELECT client_id FROM client_mappings
+          WHERE LOWER(user_id) = LOWER(t.user_id)
+          ORDER BY (CASE WHEN tenant_id = t.tenant_id THEN 0 ELSE 1 END), created_at DESC
+          LIMIT 1
+        ) cm ON true
+        LEFT JOIN LATERAL (
+          SELECT external_client_id FROM client_identity_mappings
+          WHERE LOWER(trading_user_id) = LOWER(t.user_id)
+          ORDER BY (CASE WHEN tenant_id = t.tenant_id THEN 0 ELSE 1 END), created_at DESC
+          LIMIT 1
+        ) cim ON true
+        WHERE (t.tenant_id = ANY($1) OR $2 = true)
+      `;
       const params: any[] = [searchTenants, isDefault];
 
       if (resolvedUserId) {
         params.push(resolvedUserId);
-        sql += ` AND user_id = $${params.length}`;
+        sql += ` AND (t.user_id = $${params.length} OR u.id = $${params.length} OR cm.client_id = $${params.length} OR cim.external_client_id = $${params.length})`;
       }
       if (options.orderId) {
         params.push(options.orderId);
-        sql += ` AND order_id = $${params.length}`;
+        sql += ` AND t.order_id = $${params.length}`;
       }
 
-      sql += ` ORDER BY executed_at DESC LIMIT $${params.length + 1};`;
+      sql += ` ORDER BY t.executed_at DESC LIMIT $${params.length + 1};`;
       params.push(limit);
 
       const res = await pgDb.query(sql, params);
       for (const t of res.rows || []) {
+        const uId = t.user_pk_id || t.user_id;
+        const cId = t.unified_client_id || t.user_pk_id || t.user_id;
+        const cName = t.client_name || '';
+        const cEmail = t.client_email || '';
+
         trades.push({
           id: t.id,
           trade_id: t.id,
           tenant_id: t.tenant_id || cleanTenant,
-          user_id: t.user_id,
+          user_id: uId,
+          userId: uId,
+          clientId: cId,
+          client_id: cId,
+          clientName: cName,
+          client_name: cName,
+          clientEmail: cEmail,
+          client_email: cEmail,
+          tradingUserId: t.user_id,
+          trading_user_id: t.user_id,
           order_id: t.order_id,
           symbol: t.symbol || t.instrument_id,
           instrument_id: t.instrument_id,
@@ -391,14 +525,52 @@ export class AuthoritativeTradingDataService {
 
       // Fallback: If 0 trades and no userId filter, check across all tenants in PostgreSQL
       if (trades.length === 0 && !resolvedUserId) {
-        let fallbackSql = `SELECT * FROM trading_trades ORDER BY executed_at DESC LIMIT $1;`;
+        let fallbackSql = `
+          SELECT 
+            t.*,
+            u.id AS user_pk_id,
+            u.full_name AS client_name,
+            u.email AS client_email,
+            COALESCE(cm.client_id, cim.external_client_id, u.id, t.user_id) AS unified_client_id
+          FROM trading_trades t
+          LEFT JOIN LATERAL (
+            SELECT id, full_name, email FROM users
+            WHERE LOWER(user_id) = LOWER(t.user_id) OR id = t.user_id
+            ORDER BY created_at DESC LIMIT 1
+          ) u ON true
+          LEFT JOIN LATERAL (
+            SELECT client_id FROM client_mappings
+            WHERE LOWER(user_id) = LOWER(t.user_id)
+            ORDER BY created_at DESC LIMIT 1
+          ) cm ON true
+          LEFT JOIN LATERAL (
+            SELECT external_client_id FROM client_identity_mappings
+            WHERE LOWER(trading_user_id) = LOWER(t.user_id)
+            ORDER BY created_at DESC LIMIT 1
+          ) cim ON true
+          ORDER BY t.executed_at DESC LIMIT $1;
+        `;
         const fbRes = await pgDb.query(fallbackSql, [limit]);
         for (const t of fbRes.rows || []) {
+          const uId = t.user_pk_id || t.user_id;
+          const cId = t.unified_client_id || t.user_pk_id || t.user_id;
+          const cName = t.client_name || '';
+          const cEmail = t.client_email || '';
+
           trades.push({
             id: t.id,
             trade_id: t.id,
             tenant_id: t.tenant_id || cleanTenant,
-            user_id: t.user_id,
+            user_id: uId,
+            userId: uId,
+            clientId: cId,
+            client_id: cId,
+            clientName: cName,
+            client_name: cName,
+            clientEmail: cEmail,
+            client_email: cEmail,
+            tradingUserId: t.user_id,
+            trading_user_id: t.user_id,
             order_id: t.order_id,
             symbol: t.symbol || t.instrument_id,
             instrument_id: t.instrument_id,
@@ -435,11 +607,26 @@ export class AuthoritativeTradingDataService {
           continue;
         }
         seenTradeIds.add(tr.id);
+        const memUser = db.findUserByUserId(tr.user_id || '') || db.findUserById(tr.user_id || '');
+        const uId = memUser?.id || tr.user_id || resolvedUserId || 'demo-trader';
+        const cId = memUser?.id || tr.user_id || resolvedUserId || 'demo-trader';
+        const cName = memUser?.full_name || '';
+        const cEmail = memUser?.email || '';
+
         trades.push({
           id: tr.id,
           trade_id: tr.id,
           tenant_id: item.tenantId || cleanTenant,
-          user_id: tr.user_id || resolvedUserId || 'demo-trader',
+          user_id: uId,
+          userId: uId,
+          clientId: cId,
+          client_id: cId,
+          clientName: cName,
+          client_name: cName,
+          clientEmail: cEmail,
+          client_email: cEmail,
+          tradingUserId: tr.user_id || resolvedUserId || 'demo-trader',
+          trading_user_id: tr.user_id || resolvedUserId || 'demo-trader',
           order_id: tr.order_id || 'ORD-UNKNOWN',
           symbol: tr.symbol || tr.instrument_id,
           instrument_id: tr.instrument_id || tr.symbol,
@@ -481,24 +668,56 @@ export class AuthoritativeTradingDataService {
 
     let positions: any[] = [];
     try {
-      let sql = `SELECT * FROM trading_positions WHERE (tenant_id = ANY($1) OR $2 = true)`;
+      let sql = `
+        SELECT 
+          p.*,
+          u.id AS user_pk_id,
+          u.full_name AS client_name,
+          u.email AS client_email,
+          COALESCE(cm.client_id, cim.external_client_id, u.id, p.user_id) AS unified_client_id
+        FROM trading_positions p
+        LEFT JOIN LATERAL (
+          SELECT id, full_name, email FROM users
+          WHERE LOWER(user_id) = LOWER(p.user_id) OR id = p.user_id
+          ORDER BY (CASE WHEN tenant_id = p.tenant_id THEN 0 ELSE 1 END), created_at DESC
+          LIMIT 1
+        ) u ON true
+        LEFT JOIN LATERAL (
+          SELECT client_id FROM client_mappings
+          WHERE LOWER(user_id) = LOWER(p.user_id)
+          ORDER BY (CASE WHEN tenant_id = p.tenant_id THEN 0 ELSE 1 END), created_at DESC
+          LIMIT 1
+        ) cm ON true
+        LEFT JOIN LATERAL (
+          SELECT external_client_id FROM client_identity_mappings
+          WHERE LOWER(trading_user_id) = LOWER(p.user_id)
+          ORDER BY (CASE WHEN tenant_id = p.tenant_id THEN 0 ELSE 1 END), created_at DESC
+          LIMIT 1
+        ) cim ON true
+        WHERE (p.tenant_id = ANY($1) OR $2 = true)
+      `;
       const params: any[] = [searchTenants, isDefault];
 
       if (resolvedUserId) {
         params.push(resolvedUserId);
-        sql += ` AND user_id = $${params.length}`;
+        sql += ` AND (p.user_id = $${params.length} OR u.id = $${params.length} OR cm.client_id = $${params.length} OR cim.external_client_id = $${params.length})`;
       }
       if (options.status === 'OPEN') {
-        sql += ` AND quantity != 0`;
+        sql += ` AND p.quantity != 0`;
       } else if (options.status === 'CLOSED') {
-        sql += ` AND quantity = 0`;
+        sql += ` AND p.quantity = 0`;
       }
 
-      sql += ` ORDER BY updated_at DESC LIMIT $${params.length + 1};`;
+      sql += ` ORDER BY p.updated_at DESC LIMIT $${params.length + 1};`;
       params.push(limit);
 
       const res = await pgDb.query(sql, params);
       for (const p of res.rows || []) {
+        const uId = p.user_pk_id || p.user_id;
+        const cId = p.unified_client_id || p.user_pk_id || p.user_id;
+        const cName = p.client_name || '';
+        const cEmail = p.client_email || '';
+
         const qty = Number(p.quantity);
         const side = qty > 0 ? 'BUY' : qty < 0 ? 'SELL' : 'CLOSED';
         const absQty = Math.abs(qty);
@@ -512,7 +731,16 @@ export class AuthoritativeTradingDataService {
           id: p.id,
           position_id: p.id,
           tenant_id: p.tenant_id || cleanTenant,
-          user_id: p.user_id,
+          user_id: uId,
+          userId: uId,
+          clientId: cId,
+          client_id: cId,
+          clientName: cName,
+          client_name: cName,
+          clientEmail: cEmail,
+          client_email: cEmail,
+          tradingUserId: p.user_id,
+          trading_user_id: p.user_id,
           symbol: p.symbol || p.instrument_id,
           instrument_id: p.instrument_id,
           exchange: p.exchange || 'NSE',
@@ -533,17 +761,45 @@ export class AuthoritativeTradingDataService {
 
       // Fallback: If 0 positions and no userId filter, check across all tenants in PostgreSQL
       if (positions.length === 0 && !resolvedUserId) {
-        let fallbackSql = `SELECT * FROM trading_positions`;
+        let fallbackSql = `
+          SELECT 
+            p.*,
+            u.id AS user_pk_id,
+            u.full_name AS client_name,
+            u.email AS client_email,
+            COALESCE(cm.client_id, cim.external_client_id, u.id, p.user_id) AS unified_client_id
+          FROM trading_positions p
+          LEFT JOIN LATERAL (
+            SELECT id, full_name, email FROM users
+            WHERE LOWER(user_id) = LOWER(p.user_id) OR id = p.user_id
+            ORDER BY created_at DESC LIMIT 1
+          ) u ON true
+          LEFT JOIN LATERAL (
+            SELECT client_id FROM client_mappings
+            WHERE LOWER(user_id) = LOWER(p.user_id)
+            ORDER BY created_at DESC LIMIT 1
+          ) cm ON true
+          LEFT JOIN LATERAL (
+            SELECT external_client_id FROM client_identity_mappings
+            WHERE LOWER(trading_user_id) = LOWER(p.user_id)
+            ORDER BY created_at DESC LIMIT 1
+          ) cim ON true
+        `;
         const fbParams: any[] = [];
         if (options.status === 'OPEN') {
-          fallbackSql += ` WHERE quantity != 0`;
+          fallbackSql += ` WHERE p.quantity != 0`;
         } else if (options.status === 'CLOSED') {
-          fallbackSql += ` WHERE quantity = 0`;
+          fallbackSql += ` WHERE p.quantity = 0`;
         }
-        fallbackSql += ` ORDER BY updated_at DESC LIMIT $${fbParams.length + 1};`;
+        fallbackSql += ` ORDER BY p.updated_at DESC LIMIT $${fbParams.length + 1};`;
         fbParams.push(limit);
         const fbRes = await pgDb.query(fallbackSql, fbParams);
         for (const p of fbRes.rows || []) {
+          const uId = p.user_pk_id || p.user_id;
+          const cId = p.unified_client_id || p.user_pk_id || p.user_id;
+          const cName = p.client_name || '';
+          const cEmail = p.client_email || '';
+
           const qty = Number(p.quantity);
           const side = qty > 0 ? 'BUY' : qty < 0 ? 'SELL' : 'CLOSED';
           const absQty = Math.abs(qty);
@@ -557,7 +813,16 @@ export class AuthoritativeTradingDataService {
             id: p.id,
             position_id: p.id,
             tenant_id: p.tenant_id || cleanTenant,
-            user_id: p.user_id,
+            user_id: uId,
+            userId: uId,
+            clientId: cId,
+            client_id: cId,
+            clientName: cName,
+            client_name: cName,
+            clientEmail: cEmail,
+            client_email: cEmail,
+            tradingUserId: p.user_id,
+            trading_user_id: p.user_id,
             symbol: p.symbol || p.instrument_id,
             instrument_id: p.instrument_id,
             exchange: p.exchange || 'NSE',
@@ -599,6 +864,12 @@ export class AuthoritativeTradingDataService {
         seenPosKeys.add(key);
         seenPosIds.add(p.id);
 
+        const memUser = db.findUserByUserId(p.userId || '') || db.findUserById(p.userId || '');
+        const uId = memUser?.id || p.userId || resolvedUserId || 'demo-trader';
+        const cId = memUser?.id || p.userId || resolvedUserId || 'demo-trader';
+        const cName = memUser?.full_name || '';
+        const cEmail = memUser?.email || '';
+
         const inst = findInstrument(p.symbol);
         const avgPrice = Number(p.avgPrice || (p as any).average_price || 0);
         const ltp = inst ? inst.lastPrice : Number(p.ltp || avgPrice);
@@ -613,7 +884,16 @@ export class AuthoritativeTradingDataService {
           id: p.id,
           position_id: p.id,
           tenant_id: item.tenantId || cleanTenant,
-          user_id: p.userId || resolvedUserId || 'demo-trader',
+          user_id: uId,
+          userId: uId,
+          clientId: cId,
+          client_id: cId,
+          clientName: cName,
+          client_name: cName,
+          clientEmail: cEmail,
+          client_email: cEmail,
+          tradingUserId: p.userId || resolvedUserId || 'demo-trader',
+          trading_user_id: p.userId || resolvedUserId || 'demo-trader',
           symbol: p.symbol,
           instrument_id: p.symbol,
           exchange: (inst as any)?.exchange || 'NSE',
@@ -1666,23 +1946,64 @@ export class AuthoritativeTradingDataService {
 
     let ledger: any[] = [];
     try {
-      let sql = `SELECT * FROM trading_ledger_entries WHERE (tenant_id = ANY($1) OR $2 = true)`;
+      let sql = `
+        SELECT 
+          l.*,
+          u.id AS user_pk_id,
+          u.full_name AS client_name,
+          u.email AS client_email,
+          COALESCE(cm.client_id, cim.external_client_id, u.id, l.user_id) AS unified_client_id
+        FROM trading_ledger_entries l
+        LEFT JOIN LATERAL (
+          SELECT id, full_name, email FROM users
+          WHERE LOWER(user_id) = LOWER(l.user_id) OR id = l.user_id
+          ORDER BY (CASE WHEN tenant_id = l.tenant_id THEN 0 ELSE 1 END), created_at DESC
+          LIMIT 1
+        ) u ON true
+        LEFT JOIN LATERAL (
+          SELECT client_id FROM client_mappings
+          WHERE LOWER(user_id) = LOWER(l.user_id)
+          ORDER BY (CASE WHEN tenant_id = l.tenant_id THEN 0 ELSE 1 END), created_at DESC
+          LIMIT 1
+        ) cm ON true
+        LEFT JOIN LATERAL (
+          SELECT external_client_id FROM client_identity_mappings
+          WHERE LOWER(trading_user_id) = LOWER(l.user_id)
+          ORDER BY (CASE WHEN tenant_id = l.tenant_id THEN 0 ELSE 1 END), created_at DESC
+          LIMIT 1
+        ) cim ON true
+        WHERE (l.tenant_id = ANY($1) OR $2 = true)
+      `;
       const params: any[] = [searchTenants, isDefault];
 
       if (resolvedUserId) {
         params.push(resolvedUserId);
-        sql += ` AND user_id = $${params.length}`;
+        sql += ` AND (l.user_id = $${params.length} OR u.id = $${params.length} OR cm.client_id = $${params.length} OR cim.external_client_id = $${params.length})`;
       }
 
-      sql += ` ORDER BY created_at DESC LIMIT $${params.length + 1};`;
-      params.push(limit);
+      sql += ` ORDER BY l.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2};`;
+      params.push(limit, offset);
 
       const res = await pgDb.query(sql, params);
       for (const row of res.rows || []) {
+        const uId = row.user_pk_id || row.user_id;
+        const cId = row.unified_client_id || row.user_pk_id || row.user_id;
+        const cName = row.client_name || '';
+        const cEmail = row.client_email || '';
+
         ledger.push({
           id: row.id,
           tenant_id: row.tenant_id || cleanTenant,
-          user_id: row.user_id,
+          user_id: uId,
+          userId: uId,
+          clientId: cId,
+          client_id: cId,
+          clientName: cName,
+          client_name: cName,
+          clientEmail: cEmail,
+          client_email: cEmail,
+          tradingUserId: row.user_id,
+          trading_user_id: row.user_id,
           transaction_id: row.transaction_id,
           type: row.type,
           category: row.category,
@@ -1697,12 +2018,51 @@ export class AuthoritativeTradingDataService {
 
       // Fallback: If 0 ledger entries found and no userId filter, check across all tenants in PostgreSQL
       if (ledger.length === 0 && !resolvedUserId) {
-        const fbRes = await pgDb.query(`SELECT * FROM trading_ledger_entries ORDER BY created_at DESC LIMIT $1;`, [limit]);
+        const fbRes = await pgDb.query(
+          `SELECT 
+            l.*,
+            u.id AS user_pk_id,
+            u.full_name AS client_name,
+            u.email AS client_email,
+            COALESCE(cm.client_id, cim.external_client_id, u.id, l.user_id) AS unified_client_id
+          FROM trading_ledger_entries l
+          LEFT JOIN LATERAL (
+            SELECT id, full_name, email FROM users
+            WHERE LOWER(user_id) = LOWER(l.user_id) OR id = l.user_id
+            ORDER BY created_at DESC LIMIT 1
+          ) u ON true
+          LEFT JOIN LATERAL (
+            SELECT client_id FROM client_mappings
+            WHERE LOWER(user_id) = LOWER(l.user_id)
+            ORDER BY created_at DESC LIMIT 1
+          ) cm ON true
+          LEFT JOIN LATERAL (
+            SELECT external_client_id FROM client_identity_mappings
+            WHERE LOWER(trading_user_id) = LOWER(l.user_id)
+            ORDER BY created_at DESC LIMIT 1
+          ) cim ON true
+          ORDER BY l.created_at DESC LIMIT $1;`,
+          [limit]
+        );
         for (const row of fbRes.rows || []) {
+          const uId = row.user_pk_id || row.user_id;
+          const cId = row.unified_client_id || row.user_pk_id || row.user_id;
+          const cName = row.client_name || '';
+          const cEmail = row.client_email || '';
+
           ledger.push({
             id: row.id,
             tenant_id: row.tenant_id || cleanTenant,
-            user_id: row.user_id,
+            user_id: uId,
+            userId: uId,
+            clientId: cId,
+            client_id: cId,
+            clientName: cName,
+            client_name: cName,
+            clientEmail: cEmail,
+            client_email: cEmail,
+            tradingUserId: row.user_id,
+            trading_user_id: row.user_id,
             transaction_id: row.transaction_id,
             type: row.type,
             category: row.category,
@@ -1727,7 +2087,25 @@ export class AuthoritativeTradingDataService {
       if (!seenIds.has(entry.id)) {
         if (resolvedUserId && entry.user_id && entry.user_id.toLowerCase() !== resolvedUserId.toLowerCase()) continue;
         seenIds.add(entry.id);
-        ledger.push(entry);
+        const memUser = db.findUserByUserId(entry.user_id || '') || db.findUserById(entry.user_id || '');
+        const uId = memUser?.id || entry.user_id || resolvedUserId || 'demo-trader';
+        const cId = memUser?.id || entry.user_id || resolvedUserId || 'demo-trader';
+        const cName = memUser?.full_name || '';
+        const cEmail = memUser?.email || '';
+
+        ledger.push({
+          ...entry,
+          user_id: uId,
+          userId: uId,
+          clientId: cId,
+          client_id: cId,
+          clientName: cName,
+          client_name: cName,
+          clientEmail: cEmail,
+          client_email: cEmail,
+          tradingUserId: entry.user_id || resolvedUserId || 'demo-trader',
+          trading_user_id: entry.user_id || resolvedUserId || 'demo-trader',
+        });
       }
     }
 
@@ -1738,7 +2116,26 @@ export class AuthoritativeTradingDataService {
         if (!seenIds.has(je.id)) {
           if (resolvedUserId && je.user_id && je.user_id.toLowerCase() !== resolvedUserId.toLowerCase()) continue;
           seenIds.add(je.id);
-          ledger.push({ ...je, tenant_id: cleanTenant });
+          const memUser = db.findUserByUserId(je.user_id || '') || db.findUserById(je.user_id || '');
+          const uId = memUser?.id || je.user_id || resolvedUserId || 'demo-trader';
+          const cId = memUser?.id || je.user_id || resolvedUserId || 'demo-trader';
+          const cName = memUser?.full_name || '';
+          const cEmail = memUser?.email || '';
+
+          ledger.push({
+            ...je,
+            tenant_id: cleanTenant,
+            user_id: uId,
+            userId: uId,
+            clientId: cId,
+            client_id: cId,
+            clientName: cName,
+            client_name: cName,
+            clientEmail: cEmail,
+            client_email: cEmail,
+            tradingUserId: je.user_id || resolvedUserId || 'demo-trader',
+            trading_user_id: je.user_id || resolvedUserId || 'demo-trader',
+          });
         }
       }
     } catch {}
@@ -1784,32 +2181,72 @@ export class AuthoritativeTradingDataService {
 
     let transactions: any[] = [];
     try {
-      let sql = `SELECT * FROM trading_fund_transactions WHERE (tenant_id = ANY($1) OR $2 = true)`;
+      let sql = `
+        SELECT 
+          tx.*,
+          u.id AS user_pk_id,
+          u.full_name AS client_name,
+          u.email AS client_email,
+          COALESCE(cm.client_id, cim.external_client_id, u.id, tx.user_id) AS unified_client_id
+        FROM trading_fund_transactions tx
+        LEFT JOIN LATERAL (
+          SELECT id, full_name, email FROM users
+          WHERE LOWER(user_id) = LOWER(tx.user_id) OR id = tx.user_id
+          ORDER BY (CASE WHEN tenant_id = tx.tenant_id THEN 0 ELSE 1 END), created_at DESC
+          LIMIT 1
+        ) u ON true
+        LEFT JOIN LATERAL (
+          SELECT client_id FROM client_mappings
+          WHERE LOWER(user_id) = LOWER(tx.user_id)
+          ORDER BY (CASE WHEN tenant_id = tx.tenant_id THEN 0 ELSE 1 END), created_at DESC
+          LIMIT 1
+        ) cm ON true
+        LEFT JOIN LATERAL (
+          SELECT external_client_id FROM client_identity_mappings
+          WHERE LOWER(trading_user_id) = LOWER(tx.user_id)
+          ORDER BY (CASE WHEN tenant_id = tx.tenant_id THEN 0 ELSE 1 END), created_at DESC
+          LIMIT 1
+        ) cim ON true
+        WHERE (tx.tenant_id = ANY($1) OR $2 = true)
+      `;
       const params: any[] = [searchTenants, isDefault];
 
       if (resolvedUserId) {
         params.push(resolvedUserId);
-        sql += ` AND user_id = $${params.length}`;
+        sql += ` AND (tx.user_id = $${params.length} OR u.id = $${params.length} OR cm.client_id = $${params.length} OR cim.external_client_id = $${params.length})`;
       }
       if (options.type) {
         params.push(options.type);
-        sql += ` AND transaction_type = $${params.length}`;
+        sql += ` AND tx.transaction_type = $${params.length}`;
       }
       if (options.status) {
         params.push(options.status);
-        sql += ` AND status = $${params.length}`;
+        sql += ` AND tx.status = $${params.length}`;
       }
 
-      sql += ` ORDER BY created_at DESC LIMIT $${params.length + 1};`;
-      params.push(limit);
+      sql += ` ORDER BY tx.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2};`;
+      params.push(limit, offset);
 
       const res = await pgDb.query(sql, params);
       for (const tx of res.rows || []) {
+        const uId = tx.user_pk_id || tx.user_id;
+        const cId = tx.unified_client_id || tx.user_pk_id || tx.user_id;
+        const cName = tx.client_name || '';
+        const cEmail = tx.client_email || '';
+
         transactions.push({
           id: tx.id,
           transactionId: tx.id,
           clientCode: tx.user_id.toUpperCase(),
-          userId: tx.user_id,
+          userId: uId,
+          clientId: cId,
+          client_id: cId,
+          clientName: cName,
+          client_name: cName,
+          clientEmail: cEmail,
+          client_email: cEmail,
+          tradingUserId: tx.user_id,
+          trading_user_id: tx.user_id,
           tenantId: tx.tenant_id || cleanTenant,
           amount: Number(tx.amount),
           type: tx.transaction_type,
@@ -1830,25 +2267,61 @@ export class AuthoritativeTradingDataService {
 
       // Fallback: If 0 transactions found and no userId filter, check across all tenants in PostgreSQL
       if (transactions.length === 0 && !resolvedUserId) {
-        let fallbackSql = `SELECT * FROM trading_fund_transactions`;
+        let fallbackSql = `
+          SELECT 
+            tx.*,
+            u.id AS user_pk_id,
+            u.full_name AS client_name,
+            u.email AS client_email,
+            COALESCE(cm.client_id, cim.external_client_id, u.id, tx.user_id) AS unified_client_id
+          FROM trading_fund_transactions tx
+          LEFT JOIN LATERAL (
+            SELECT id, full_name, email FROM users
+            WHERE LOWER(user_id) = LOWER(tx.user_id) OR id = tx.user_id
+            ORDER BY created_at DESC LIMIT 1
+          ) u ON true
+          LEFT JOIN LATERAL (
+            SELECT client_id FROM client_mappings
+            WHERE LOWER(user_id) = LOWER(tx.user_id)
+            ORDER BY created_at DESC LIMIT 1
+          ) cm ON true
+          LEFT JOIN LATERAL (
+            SELECT external_client_id FROM client_identity_mappings
+            WHERE LOWER(trading_user_id) = LOWER(tx.user_id)
+            ORDER BY created_at DESC LIMIT 1
+          ) cim ON true
+        `;
         const fbParams: any[] = [];
         if (options.type) {
           fbParams.push(options.type);
-          fallbackSql += ` WHERE transaction_type = $1`;
+          fallbackSql += ` WHERE tx.transaction_type = $1`;
         }
         if (options.status) {
           fbParams.push(options.status);
-          fallbackSql += `${fbParams.length === 1 ? ' WHERE' : ' AND'} status = $${fbParams.length}`;
+          fallbackSql += `${fbParams.length === 1 ? ' WHERE' : ' AND'} tx.status = $${fbParams.length}`;
         }
-        fallbackSql += ` ORDER BY created_at DESC LIMIT $${fbParams.length + 1};`;
+        fallbackSql += ` ORDER BY tx.created_at DESC LIMIT $${fbParams.length + 1};`;
         fbParams.push(limit);
         const fbRes = await pgDb.query(fallbackSql, fbParams);
         for (const tx of fbRes.rows || []) {
+          const uId = tx.user_pk_id || tx.user_id;
+          const cId = tx.unified_client_id || tx.user_pk_id || tx.user_id;
+          const cName = tx.client_name || '';
+          const cEmail = tx.client_email || '';
+
           transactions.push({
             id: tx.id,
             transactionId: tx.id,
             clientCode: tx.user_id.toUpperCase(),
-            userId: tx.user_id,
+            userId: uId,
+            clientId: cId,
+            client_id: cId,
+            clientName: cName,
+            client_name: cName,
+            clientEmail: cEmail,
+            client_email: cEmail,
+            tradingUserId: tx.user_id,
+            trading_user_id: tx.user_id,
             tenantId: tx.tenant_id || cleanTenant,
             amount: Number(tx.amount),
             type: tx.transaction_type,
@@ -1881,11 +2354,25 @@ export class AuthoritativeTradingDataService {
         if (options.type && tx.type !== options.type) continue;
         if (options.status && tx.status !== options.status) continue;
         seenTxIds.add(tx.id);
+        const memUser = db.findUserByUserId(tx.userId || '') || db.findUserById(tx.userId || '');
+        const uId = memUser?.id || tx.userId || resolvedUserId || 'demo-trader';
+        const cId = memUser?.id || tx.userId || resolvedUserId || 'demo-trader';
+        const cName = memUser?.full_name || '';
+        const cEmail = memUser?.email || '';
+
         transactions.push({
           id: tx.id,
           transactionId: tx.id,
           clientCode: (tx.userId || 'demo-trader').toUpperCase(),
-          userId: tx.userId || resolvedUserId || 'demo-trader',
+          userId: uId,
+          clientId: cId,
+          client_id: cId,
+          clientName: cName,
+          client_name: cName,
+          clientEmail: cEmail,
+          client_email: cEmail,
+          tradingUserId: tx.userId || resolvedUserId || 'demo-trader',
+          trading_user_id: tx.userId || resolvedUserId || 'demo-trader',
           tenantId: item.tenantId || cleanTenant,
           amount: Number(tx.amount),
           type: tx.type,
@@ -1998,323 +2485,6 @@ export class AuthoritativeTradingDataService {
     }
   }
 
-  /**
-   * Backfills rich, realistic live trading data into PostgreSQL and in-memory tradingStore
-   * if tables are empty (0 rows), ensuring Central Admin and User Panel always have live data.
-   */
-  public async backfillTradingDataIfEmpty(targetTenantId = 'TNT-001'): Promise<{
-    ordersSeeded: number;
-    positionsSeeded: number;
-    tradesSeeded: number;
-    fundsSeeded: number;
-    ledgerSeeded: number;
-  }> {
-    let ordersSeeded = 0;
-    let positionsSeeded = 0;
-    let tradesSeededCount = 0;
-    let fundsSeeded = 0;
-    let ledgerSeeded = 0;
-
-    try {
-      const [ordRes, posRes, fundRes] = await Promise.all([
-        pgDb.query(`SELECT count(*) as count FROM trading_orders;`).catch(() => ({ rows: [{ count: '0' }] })),
-        pgDb.query(`SELECT count(*) as count FROM trading_positions;`).catch(() => ({ rows: [{ count: '0' }] })),
-        pgDb.query(`SELECT count(*) as count FROM trading_fund_transactions;`).catch(() => ({ rows: [{ count: '0' }] })),
-      ]);
-      const orderCount = parseInt(ordRes.rows[0]?.count || '0', 10);
-      const posCount = parseInt(posRes.rows[0]?.count || '0', 10);
-      const fundCount = parseInt(fundRes.rows[0]?.count || '0', 10);
-
-      // Only seed if empty
-      if (orderCount > 0 && posCount > 0 && fundCount > 0) {
-        return { ordersSeeded, positionsSeeded, tradesSeeded: tradesSeededCount, fundsSeeded, ledgerSeeded };
-      }
-
-      // Fetch existing clients
-      const clientsRes = await pgDb.query(
-        `SELECT user_id, full_name, demo_balance FROM users WHERE (role = 'CLIENT' OR role = 'USER' OR role IS NULL) ORDER BY created_at ASC LIMIT 10;`
-      ).catch(() => ({ rows: [] }));
-
-      let clients: { user_id: string; full_name: string; demo_balance?: number }[] = clientsRes.rows;
-      if (clients.length === 0) {
-        clients = db.getAllUsers().filter((u) => u.role === 'CLIENT' || !u.role || (u.role as string) === 'USER');
-      }
-      if (clients.length === 0) {
-        clients = [
-          { user_id: 'vtx999', full_name: 'Bhupal Sharnagat' },
-          { user_id: 'vtx123', full_name: 'Rahul Sharma' },
-          { user_id: 'vtx456', full_name: 'Priya Patel' },
-          { user_id: 'vtx101', full_name: 'Amit Verma' },
-          { user_id: 'demo-trader', full_name: 'Demo Trader' },
-        ];
-      }
-
-      const tenants = [targetTenantId, 'vertex-default'];
-
-      // Seed realistic live orders, positions, trades, funds, and ledger for each client
-      const sampleSeeds = [
-        {
-          symbol: 'NIFTY 24 OCT 25000 CE',
-          side: 'BUY',
-          qty: 50,
-          price: 185.5,
-          margin: 45000,
-          unrealizedPnl: 1250,
-          orderStatus: 'EXECUTED',
-        },
-        {
-          symbol: 'RELIANCE',
-          side: 'BUY',
-          qty: 50,
-          price: 2920.0,
-          margin: 60000,
-          unrealizedPnl: 2100,
-          orderStatus: 'EXECUTED',
-        },
-        {
-          symbol: 'BANKNIFTY 24 OCT 51000 PE',
-          side: 'BUY',
-          qty: 30,
-          price: 320.0,
-          margin: 55000,
-          unrealizedPnl: -850,
-          orderStatus: 'EXECUTED',
-        },
-        {
-          symbol: 'HDFCBANK',
-          side: 'BUY',
-          qty: 100,
-          price: 1640.0,
-          margin: 50000,
-          unrealizedPnl: 1500,
-          orderStatus: 'EXECUTED',
-        },
-        {
-          symbol: 'CRUDEOIL 24 OCT FUT',
-          side: 'SELL',
-          qty: 100,
-          price: 6150.0,
-          margin: 85000,
-          unrealizedPnl: 2500,
-          orderStatus: 'EXECUTED',
-        },
-        {
-          symbol: 'BANKNIFTY 24 OCT 51500 CE',
-          side: 'BUY',
-          qty: 30,
-          price: 210.0,
-          margin: 0,
-          unrealizedPnl: 0,
-          orderStatus: 'PENDING',
-        },
-        {
-          symbol: 'GOLD 24 DEC FUT',
-          side: 'BUY',
-          qty: 1,
-          price: 76000.0,
-          margin: 0,
-          unrealizedPnl: 0,
-          orderStatus: 'PENDING',
-        },
-        {
-          symbol: 'TATAMOTORS',
-          side: 'SELL',
-          qty: 100,
-          price: 980.0,
-          margin: 0,
-          unrealizedPnl: 0,
-          orderStatus: 'CANCELLED',
-        },
-      ];
-
-      for (let i = 0; i < Math.min(clients.length, 5); i++) {
-        const client = clients[i];
-        const uId = client.user_id;
-
-        // 1. Seed Fund Transactions & Immutable Ledger
-        if (fundCount === 0) {
-          const fundSamples = [
-            { id: `TX-DEP-1-${uId}`, type: 'DEPOSIT' as const, amount: 500000, status: 'APPROVED', method: 'BANK_TRANSFER', ref: `DEP-NEFT-${uId}-1` },
-            { id: `TX-DEP-2-${uId}`, type: 'DEPOSIT' as const, amount: 100000, status: 'APPROVED', method: 'UPI Instant', ref: `DEP-UPI-${uId}-2` },
-            { id: `TX-DEP-3-${uId}`, type: 'DEPOSIT' as const, amount: 50000, status: 'PENDING', method: 'UPI Instant', ref: `DEP-UPI-${uId}-3` },
-            { id: `TX-WDR-1-${uId}`, type: 'WITHDRAWAL' as const, amount: 25000, status: 'APPROVED', method: 'BANK_TRANSFER', ref: `WDR-IMPS-${uId}-1` },
-            { id: `TX-WDR-2-${uId}`, type: 'WITHDRAWAL' as const, amount: 10000, status: 'PENDING', method: 'BANK_TRANSFER', ref: `WDR-IMPS-${uId}-2` },
-          ];
-
-          for (const f of fundSamples) {
-            for (const t of tenants) {
-              await postgresFundTransactionRepository.create({
-                id: `${f.id}-${t}`,
-                tenant_id: t,
-                user_id: uId,
-                transaction_type: f.type,
-                amount: f.amount,
-                status: f.status as any,
-                payment_method: f.method,
-                reference_id: f.ref,
-                approved_by: f.status === 'APPROVED' ? 'CENTRAL_ADMIN' : null,
-                approved_at: f.status === 'APPROVED' ? new Date().toISOString() : null,
-              }).catch(() => {});
-
-              addTenantFundTransaction(t, {
-                id: `${f.id}-${t}`,
-                userId: uId,
-                type: f.type,
-                amount: f.amount,
-                status: f.status as any,
-                paymentMethod: f.method,
-                referenceId: f.ref,
-                createdAt: new Date().toISOString(),
-              });
-            }
-            fundsSeeded++;
-
-            // Create ledger entry for approved transactions
-            if (f.status === 'APPROVED') {
-              const ledgerType = f.type === 'DEPOSIT' ? 'CREDIT' : 'DEBIT';
-              for (const t of tenants) {
-                await postgresLedgerRepository.createEntry({
-                  tenant_id: t,
-                  user_id: uId,
-                  transaction_id: `${f.id}-${t}`,
-                  type: ledgerType,
-                  category: f.type,
-                  amount: f.amount,
-                  balance_before: f.type === 'DEPOSIT' ? 500000 : 600000,
-                  balance_after: f.type === 'DEPOSIT' ? 600000 : 575000,
-                  reference: `Authoritative ${f.type} [${f.ref}]`,
-                  created_by: 'CENTRAL_ADMIN',
-                }).catch(() => {});
-
-                addTenantLedgerEntry(t, {
-                  id: `LED-${f.id}-${t}`,
-                  tenant_id: t,
-                  user_id: uId,
-                  transaction_id: `${f.id}-${t}`,
-                  type: ledgerType,
-                  category: f.type,
-                  amount: f.amount,
-                  balance_before: f.type === 'DEPOSIT' ? 500000 : 600000,
-                  balance_after: f.type === 'DEPOSIT' ? 600000 : 575000,
-                  reference: `Authoritative ${f.type} [${f.ref}]`,
-                  created_by: 'CENTRAL_ADMIN',
-                  created_at: new Date().toISOString(),
-                });
-              }
-              ledgerSeeded++;
-            }
-          }
-        }
-
-        // 2. Seed Orders, Trades & Open Positions
-        if (orderCount === 0 || posCount === 0) {
-          const clientSeeds = sampleSeeds.slice(i % 3, (i % 3) + 4);
-          for (let sIdx = 0; sIdx < clientSeeds.length; sIdx++) {
-            const s = clientSeeds[sIdx];
-            const orderId = `ORD-${uId}-${sIdx + 1}`;
-            const tradeId = `TRD-${uId}-${sIdx + 1}`;
-            const posId = `POS-${uId}-${sIdx + 1}`;
-
-            // Seed order
-            for (const t of tenants) {
-              await postgresOrderRepository.create({
-                id: `${orderId}-${t}`,
-                tenant_id: t,
-                user_id: uId,
-                client_order_id: `cli-${orderId}`,
-                instrument_id: s.symbol,
-                side: s.side as any,
-                order_type: s.orderStatus === 'PENDING' ? 'LIMIT' : 'MARKET',
-                quantity: s.qty,
-                price: s.price,
-                trigger_price: null,
-                status: s.orderStatus as any,
-                broker_order_id: `brk-${orderId}`,
-                normalized_status: s.orderStatus,
-                filled_quantity: s.orderStatus === 'EXECUTED' ? s.qty : 0,
-                remaining_quantity: s.orderStatus === 'EXECUTED' ? 0 : s.qty,
-                average_fill_price: s.orderStatus === 'EXECUTED' ? s.price : 0,
-                time_in_force: 'DAY',
-                cancelled_at: s.orderStatus === 'CANCELLED' ? new Date().toISOString() : null,
-              }).catch(() => {});
-
-              addTenantOrder(t, {
-                id: `${orderId}-${t}`,
-                userId: uId,
-                symbol: s.symbol,
-                type: s.side as any,
-                orderType: s.orderStatus === 'PENDING' ? 'LIMIT' : 'MARKET',
-                product: 'INTRADAY',
-                lots: Math.max(1, Math.round(s.qty / 50)),
-                qty: s.qty,
-                lotSize: 50,
-                price: s.price,
-                status: s.orderStatus as any,
-                time: new Date().toLocaleTimeString(),
-                date: new Date().toLocaleDateString(),
-              });
-            }
-            ordersSeeded++;
-
-            // Seed trade & position if EXECUTED
-            if (s.orderStatus === 'EXECUTED') {
-              for (const t of tenants) {
-                await postgresTradeRepository.create({
-                  id: `${tradeId}-${t}`,
-                  tenant_id: t,
-                  order_id: `${orderId}-${t}`,
-                  user_id: uId,
-                  instrument_id: s.symbol,
-                  side: s.side as any,
-                  quantity: s.qty,
-                  execution_price: s.price,
-                  execution_value: s.qty * s.price,
-                  realized_pnl: 0,
-                  executed_at: new Date().toISOString(),
-                }).catch(() => {});
-
-                addTenantTrade(t, {
-                  id: `${tradeId}-${t}`,
-                  order_id: `${orderId}-${t}`,
-                  user_id: uId,
-                  instrument_id: s.symbol,
-                  side: s.side,
-                  quantity: s.qty,
-                  execution_price: s.price,
-                  execution_value: s.qty * s.price,
-                  realized_pnl: 0,
-                  executed_at: new Date().toISOString(),
-                  tenant_id: t,
-                });
-
-                await postgresPositionRepository.upsertPosition({
-                  id: `${posId}-${t}`,
-                  tenant_id: t,
-                  user_id: uId,
-                  instrument_id: s.symbol,
-                  quantity: s.side === 'BUY' ? s.qty : -s.qty,
-                  average_price: s.price,
-                  realized_pnl: 0,
-                  unrealized_pnl: s.unrealizedPnl,
-                  margin_used: s.margin,
-                }).catch(() => {});
-              }
-              tradesSeededCount++;
-              positionsSeeded++;
-            }
-          }
-        }
-      }
-
-      console.log(
-        `[AuthoritativeTradingDataService] Backfill complete: seeded ${ordersSeeded} orders, ${positionsSeeded} positions, ${tradesSeededCount} trades, ${fundsSeeded} funds, ${ledgerSeeded} ledger entries.`
-      );
-    } catch (err: any) {
-      console.warn('[AuthoritativeTradingDataService] Backfill error:', err.message);
-    }
-
-    return { ordersSeeded, positionsSeeded, tradesSeeded: tradesSeededCount, fundsSeeded, ledgerSeeded };
-  }
 }
 
 export const authoritativeTradingDataService = new AuthoritativeTradingDataService();

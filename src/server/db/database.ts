@@ -157,6 +157,19 @@ class DatabaseService {
   }
 
   // --- Users Operations ---
+  public purgeUsers(predicate: (u: UserRecord) => boolean): number {
+    const beforeCount = this.state.users.length;
+    this.state.users = this.state.users.filter((u) => !predicate(u));
+    this.state.otp_verifications = this.state.otp_verifications.filter(
+      (o) => !predicate({ user_id: o.user_id, id: o.id } as any)
+    );
+    const purged = beforeCount - this.state.users.length;
+    if (purged > 0) {
+      this.save();
+    }
+    return purged;
+  }
+
   public findUserById(id: string): UserRecord | undefined {
     if (!id) return undefined;
     const normalized = id.trim().toLowerCase();

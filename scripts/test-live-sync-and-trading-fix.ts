@@ -41,13 +41,10 @@ async function runVerification() {
   console.log('✓ PASS: Trust proxy and rate limiter work seamlessly with X-Forwarded-For headers!');
   server.close();
 
-  // Step 3: Backfill client mappings, wallets & trading data
-  console.log('\n3. Testing client mappings, wallet, and trading data auto-backfill...');
+  // Step 3: Backfill client mappings & wallets
+  console.log('\n3. Testing client mappings and wallet auto-backfill...');
   const bfClients = await postgresClientMappingRepository.backfillClientMappingsAndWallets('TNT-001');
   console.log(`   Client backfill: ${bfClients.mappingsCreated} mappings, ${bfClients.walletsCreated} wallets.`);
-
-  const bfTrading = await authoritativeTradingDataService.backfillTradingDataIfEmpty('TNT-001');
-  console.log(`   Trading backfill: ${bfTrading.ordersSeeded} orders, ${bfTrading.positionsSeeded} positions, ${bfTrading.tradesSeeded} trades, ${bfTrading.fundsSeeded} funds, ${bfTrading.ledgerSeeded} ledger entries.`);
 
   // Step 4: Verify Authoritative queries return > 0 counts for TNT-001
   console.log('\n4. Verifying /api/internal/v1/trading/* Authoritative queries NEVER return 0...');

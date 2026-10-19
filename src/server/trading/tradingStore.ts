@@ -270,6 +270,34 @@ export function getAllTenantWallets(): Record<string, WalletFunds> {
   return { ...tenantWallets };
 }
 
+export function clearDummyTradingStoreRecords(isDummyPredicate: (userIdOrId: string) => boolean): void {
+  for (const tenantId of Object.keys(tenantOrders)) {
+    tenantOrders[tenantId] = (tenantOrders[tenantId] || []).filter(
+      (o) => !o.id.startsWith('ORD-vtx') && !o.id.startsWith('ORD-demo') && !isDummyPredicate(o.userId || '')
+    );
+  }
+  for (const tenantId of Object.keys(tenantPositions)) {
+    tenantPositions[tenantId] = (tenantPositions[tenantId] || []).filter(
+      (p) => !p.id.startsWith('POS-vtx') && !p.id.startsWith('POS-demo') && !isDummyPredicate(p.userId || '')
+    );
+  }
+  for (const tenantId of Object.keys(tenantTrades)) {
+    tenantTrades[tenantId] = (tenantTrades[tenantId] || []).filter(
+      (t) => !t.id.startsWith('TRD-vtx') && !t.id.startsWith('TRD-demo') && !isDummyPredicate(t.user_id || t.userId || '')
+    );
+  }
+  for (const tenantId of Object.keys(tenantFundTransactions)) {
+    tenantFundTransactions[tenantId] = (tenantFundTransactions[tenantId] || []).filter(
+      (tx) => !tx.id.startsWith('TX-DEP-') && !tx.id.startsWith('TX-WDR-') && !isDummyPredicate(tx.userId || tx.user_id || '')
+    );
+  }
+  for (const tenantId of Object.keys(tenantLedgerEntries)) {
+    tenantLedgerEntries[tenantId] = (tenantLedgerEntries[tenantId] || []).filter(
+      (l) => !l.id.startsWith('LED-TX-') && !isDummyPredicate(l.user_id || l.userId || '')
+    );
+  }
+}
+
 export function getTenantTickets(tenantId: string): SupportTicket[] {
   const normTenant = tenantId || 'vertex-default';
   if (!tenantTickets[normTenant]) {
