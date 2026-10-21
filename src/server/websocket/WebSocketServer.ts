@@ -309,6 +309,9 @@ export class TradingWebSocketServer {
           const originHost = originUrl.host.toLowerCase();
           const isAllowedDomain =
             originHost.endsWith('.onrender.com') ||
+            originHost.includes('admin-dashbord') ||
+            originHost.includes('user-panel') ||
+            originHost.includes('trading-platform') ||
             originHost.includes('localhost') ||
             originHost.includes('127.0.0.1');
           const configuredOrigins = (process.env.WEBSOCKET_ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS || '')

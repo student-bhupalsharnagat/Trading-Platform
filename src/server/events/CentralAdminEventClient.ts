@@ -9,7 +9,7 @@
  * - Never uses browser JWT
  */
 
-import { getInternalAuthConfig } from '../config/internalConfig.ts';
+import { getInternalAuthConfig, resolveInternalRenderUrl } from '../config/internalConfig.ts';
 import { generateInternalHeaders } from '../auth/internalAuth.ts';
 import { InternalEvent } from './types.ts';
 
@@ -41,6 +41,7 @@ export function cleanBaseAdminUrl(rawUrl?: string): string {
 
 export class CentralAdminEventClient {
   private baseUrl: string;
+  private fallbackUrl: string;
   private secret: string;
   private timeoutMs: number;
   private maxRetries: number;
@@ -50,27 +51,35 @@ export class CentralAdminEventClient {
     const isProduction = process.env.NODE_ENV === 'production';
     const config = getInternalAuthConfig();
 
+    const publicAdminUrl =
+      process.env.CENTRAL_ADMIN_BASE_URL ||
+      process.env.CENTRAL_ADMIN_URL ||
+      process.env.CENTRAL_API_URL ||
+      'https://admin-dashbord-wxcq.onrender.com';
+    const candidateAdminUrl =
+      options.baseUrl ||
+      options.endpointUrl ||
+      process.env.CENTRAL_ADMIN_INTERNAL_URL ||
+      resolveInternalRenderUrl(publicAdminUrl);
+
     if (isProduction) {
-      const centralAdminUrl = process.env.CENTRAL_ADMIN_BASE_URL || process.env.CENTRAL_ADMIN_URL || process.env.CENTRAL_API_URL || 'https://admin-dashbord-wxcq.onrender.com';
       const tradingPlatformUrl = process.env.TRADING_PLATFORM_BASE_URL || process.env.TRADING_PLATFORM_URL;
       if (
-        centralAdminUrl.includes('localhost') ||
-        centralAdminUrl.includes('127.0.0.1') ||
-        (tradingPlatformUrl && centralAdminUrl === tradingPlatformUrl)
+        candidateAdminUrl.includes('localhost') ||
+        candidateAdminUrl.includes('127.0.0.1') ||
+        (tradingPlatformUrl && candidateAdminUrl === tradingPlatformUrl)
       ) {
         throw new Error('[SECURITY ERROR] Central Admin URL cannot point to localhost or trading platform in production.');
       }
-      this.baseUrl = cleanBaseAdminUrl(centralAdminUrl);
+      this.baseUrl = cleanBaseAdminUrl(candidateAdminUrl);
+      this.fallbackUrl = cleanBaseAdminUrl(publicAdminUrl);
     } else {
       this.baseUrl = cleanBaseAdminUrl(
-        options.baseUrl ||
-        options.endpointUrl ||
-        process.env.CENTRAL_ADMIN_BASE_URL ||
-        process.env.CENTRAL_ADMIN_URL ||
-        process.env.CENTRAL_API_URL ||
+        candidateAdminUrl ||
         config.tradingPlatformBaseUrl ||
         'http://localhost:3000'
       );
+      this.fallbackUrl = cleanBaseAdminUrl(publicAdminUrl || this.baseUrl);
     }
     this.secret = options.secret || options.hmacSecret || config.internalCommunicationSecret;
     this.timeoutMs = options.timeoutMs ?? (process.env.INTERNAL_REQUEST_TIMEOUT_MS ? parseInt(process.env.INTERNAL_REQUEST_TIMEOUT_MS, 10) : 3000);
@@ -86,7 +95,8 @@ export class CentralAdminEventClient {
       if (
         url.includes('localhost') ||
         url.includes('127.0.0.1') ||
-        (process.env.TRADING_PLATFORM_BASE_URL && url === process.env.TRADING_PLATFORM_BASE_URL)
+        (process.env.TRADING_PLATFORM_BASE_URL && url === process.env.TRADING_PLATFORM_BASE_URL) ||
+        (process.env.TRADING_PLATFORM_INTERNAL_URL && url === process.env.TRADING_PLATFORM_INTERNAL_URL)
       ) {
         throw new Error('[SECURITY ERROR] CentralAdminEventClient base URL cannot point to localhost or TRADING_PLATFORM_BASE_URL in production.');
       }
@@ -197,6 +207,31 @@ export class CentralAdminEventClient {
     } catch (err: any) {
       clearTimeout(timeoutId);
       const isTimeout = err.name === 'AbortError';
+
+      // If internal URL failed with connection/network error, seamlessly fallback to public admin URL
+      if (this.baseUrl !== this.fallbackUrl && (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.message?.includes('fetch failed'))) {
+        try {
+          const fallbackClean = cleanBaseAdminUrl(this.fallbackUrl);
+          const fallbackFullUrl = `${fallbackClean}${path.startsWith('/') ? path : '/' + path}`;
+          const fallbackResp = await fetch(fallbackFullUrl, {
+            method,
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify(event),
+            signal: AbortSignal.timeout(this.timeoutMs),
+          });
+          if (fallbackResp.ok) {
+            const fallbackData = await fallbackResp.json().catch(() => null);
+            return {
+              success: true,
+              statusCode: fallbackResp.status,
+              data: fallbackData,
+              retriesAttempted: retryCount,
+            };
+          }
+        } catch {
+          // Continue to standard retry
+        }
+      }
 
       // If network or timeout error and we have retries remaining, retry with exponential backoff
       if (retryCount < this.maxRetries) {

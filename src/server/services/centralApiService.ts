@@ -6,6 +6,7 @@ import {
 } from '../../types/tenant.ts';
 import { tenantRepository } from '../repositories/JsonTenantRepository.ts';
 import { postgresTenantConfigRepository } from '../repositories/trading/PostgresTenantConfigRepository.ts';
+import { resolveInternalRenderUrl } from '../config/internalConfig.ts';
 
 export interface TenantResolutionData {
   tenant: Tenant;
@@ -215,12 +216,13 @@ export class CentralApiService implements ICentralApiService {
 
   private get baseUrl(): string | null {
     const raw =
+      process.env.CENTRAL_ADMIN_INTERNAL_URL ||
       process.env.CENTRAL_API_URL ||
       process.env.CENTRAL_ADMIN_BASE_URL ||
       process.env.CENTRAL_ADMIN_URL ||
       'https://admin-dashbord-wxcq.onrender.com';
     if (!raw || raw.trim().length === 0) return null;
-    let url = raw.trim().replace(/\/+$/, '');
+    let url = resolveInternalRenderUrl(raw.trim()).replace(/\/+$/, '');
     url = url.replace(/\/api$/i, '');
     return url.replace(/\/+$/, '');
   }

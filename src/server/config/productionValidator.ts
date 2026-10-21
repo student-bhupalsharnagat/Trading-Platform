@@ -106,18 +106,25 @@ export class ProductionValidator {
       warnings.push('BROKER_SANDBOX_API_SECRET uses an insecure placeholder.');
     }
 
-    // 6. S2S Base URLs check (CentralAdminEventClient base URL = CENTRAL_ADMIN_BASE_URL only)
-    const centralAdminBaseUrl = env.CENTRAL_ADMIN_BASE_URL || env.CENTRAL_ADMIN_URL || env.CENTRAL_API_URL;
+    // 6. S2S Base URLs check (CentralAdminEventClient base URL = CENTRAL_ADMIN_INTERNAL_URL or CENTRAL_ADMIN_BASE_URL)
+    const centralAdminBaseUrl =
+      env.CENTRAL_ADMIN_INTERNAL_URL ||
+      env.CENTRAL_ADMIN_BASE_URL ||
+      env.CENTRAL_ADMIN_URL ||
+      env.CENTRAL_API_URL;
     if (isProd) {
       if (!centralAdminBaseUrl) {
-        errors.push('CENTRAL_ADMIN_BASE_URL is required in production.');
+        errors.push('CENTRAL_ADMIN_BASE_URL (or CENTRAL_ADMIN_INTERNAL_URL) is required in production.');
       } else if (centralAdminBaseUrl.includes('localhost') || centralAdminBaseUrl.includes('127.0.0.1')) {
         errors.push('CENTRAL_ADMIN_BASE_URL cannot point to localhost in production.');
-      } else if (env.TRADING_PLATFORM_BASE_URL && centralAdminBaseUrl === env.TRADING_PLATFORM_BASE_URL) {
+      } else if (
+        (env.TRADING_PLATFORM_BASE_URL && centralAdminBaseUrl === env.TRADING_PLATFORM_BASE_URL) ||
+        (env.TRADING_PLATFORM_INTERNAL_URL && centralAdminBaseUrl === env.TRADING_PLATFORM_INTERNAL_URL)
+      ) {
         errors.push('CENTRAL_ADMIN_BASE_URL cannot match TRADING_PLATFORM_BASE_URL in production.');
       }
     }
-    const tradingPlatformBaseUrl = env.TRADING_PLATFORM_BASE_URL;
+    const tradingPlatformBaseUrl = env.TRADING_PLATFORM_INTERNAL_URL || env.TRADING_PLATFORM_BASE_URL;
     if (isProd && !tradingPlatformBaseUrl) {
       warnings.push('TRADING_PLATFORM_BASE_URL is unset in production.');
     }
@@ -153,8 +160,8 @@ export class ProductionValidator {
       INTERNAL_COMMUNICATION_SECRET: redact(env.INTERNAL_COMMUNICATION_SECRET),
       DATABASE_URL: env.DATABASE_URL ? '[CONFIGURED]' : '[PGlite Embedded]',
       REDIS_URL: env.REDIS_URL ? '[CONFIGURED]' : '[In-Memory Coordinator]',
-      CENTRAL_ADMIN_BASE_URL: env.CENTRAL_ADMIN_BASE_URL || '[UNSET - Default Localhost]',
-      TRADING_PLATFORM_BASE_URL: env.TRADING_PLATFORM_BASE_URL || '[UNSET - Default Localhost]',
+      CENTRAL_ADMIN_BASE_URL: env.CENTRAL_ADMIN_INTERNAL_URL || env.CENTRAL_ADMIN_BASE_URL || '[UNSET - Default Localhost]',
+      TRADING_PLATFORM_BASE_URL: env.TRADING_PLATFORM_INTERNAL_URL || env.TRADING_PLATFORM_BASE_URL || '[UNSET - Default Localhost]',
       CORS_ALLOWED_ORIGINS: env.CORS_ALLOWED_ORIGINS || '[CONFIGURED DEFAULT]',
       WEBSOCKET_ALLOWED_ORIGINS: env.WEBSOCKET_ALLOWED_ORIGINS || '[CONFIGURED DEFAULT]',
       BROKER_SANDBOX_API_KEY: redact(env.BROKER_SANDBOX_API_KEY),

@@ -109,6 +109,9 @@ export function csrfProtectionMiddleware(req: Request, res: Response, next: Next
           const isAllowed =
             allowedOrigins.some((ao) => ao === originHost || ao === originFull || ao === '*') ||
             originHost.endsWith('.onrender.com') ||
+            originHost.includes('admin-dashbord') ||
+            originHost.includes('user-panel') ||
+            originHost.includes('trading-platform') ||
             originHost.includes('localhost') ||
             originHost.includes('127.0.0.1');
 

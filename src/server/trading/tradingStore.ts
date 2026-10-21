@@ -395,7 +395,9 @@ export function resetTenantTradingState(tenantId: string): void {
   tenantOrders[normTenant] = JSON.parse(JSON.stringify(initialOrders));
 }
 
-// Background tick simulator - generates real-time market ticks and recalculates MTM PnL
+// Background tick simulator - throttled to 3s (configurable) to prevent excessive bandwidth usage
+const TICK_INTERVAL_MS = Math.max(1000, parseInt(process.env.WS_TICK_INTERVAL_MS || '3000', 10));
+
 const tickTimer = setInterval(() => {
   INSTRUMENTS = INSTRUMENTS.map((inst) => {
     const volatilityPct = 0.0006;
@@ -423,6 +425,8 @@ const tickTimer = setInterval(() => {
       trend: change >= 0 ? 'up' : 'down',
     };
   });
+
+  const totalClients = tradingWebSocketServer.getConnectedClientsCount();
 
   // Recalculate live PnL dynamically across active tenant portfolios
   const activeTenants = new Set(['vertex-default', ...Object.keys(tenantPositions)]);
@@ -452,42 +456,46 @@ const tickTimer = setInterval(() => {
     wallet.todayPnL = Number((500 + livePnL).toFixed(2));
     wallet.totalPnL = Number((34000 + livePnL).toFixed(2));
 
-    // Broadcast live MTM portfolio update to the tenant's connected clients
+    // Only broadcast portfolio.mtm if there are active connected clients for this tenant
+    if (tradingWebSocketServer.getConnectedClientsCount(tenantId) > 0) {
+      try {
+        tradingWebSocketServer.broadcastToTenant(tenantId, 'portfolio.mtm', {
+          positions: tenantPositions[tenantId],
+          wallet,
+          unrealizedPnL: Number(livePnL.toFixed(2)),
+          timestamp: new Date().toISOString(),
+        });
+      } catch {
+        // Ignore websocket broadcast during initial boot
+      }
+    }
+  }
+
+  // Only broadcast market ticks if clients are connected to receive them
+  if (totalClients > 0) {
     try {
-      tradingWebSocketServer.broadcastToTenant(tenantId, 'portfolio.mtm', {
-        positions: tenantPositions[tenantId],
-        wallet,
-        unrealizedPnL: Number(livePnL.toFixed(2)),
+      const ticks = INSTRUMENTS.map((i) => ({
+        id: i.id,
+        symbol: i.symbol,
+        lastPrice: i.lastPrice,
+        change: i.change,
+        changePercent: i.changePercent,
+        ask: i.ask,
+        bid: i.bid,
+        highPrice: i.highPrice,
+        lowPrice: i.lowPrice,
+        trend: i.trend,
+      }));
+      tradingWebSocketServer.broadcastToAll('market.ticks', {
+        instruments: INSTRUMENTS,
+        ticks,
         timestamp: new Date().toISOString(),
       });
     } catch {
       // Ignore websocket broadcast during initial boot
     }
   }
-
-  // Broadcast market ticks to all connected clients
-  try {
-    const ticks = INSTRUMENTS.map((i) => ({
-      id: i.id,
-      symbol: i.symbol,
-      lastPrice: i.lastPrice,
-      change: i.change,
-      changePercent: i.changePercent,
-      ask: i.ask,
-      bid: i.bid,
-      highPrice: i.highPrice,
-      lowPrice: i.lowPrice,
-      trend: i.trend,
-    }));
-    tradingWebSocketServer.broadcastToAll('market.ticks', {
-      instruments: INSTRUMENTS,
-      ticks,
-      timestamp: new Date().toISOString(),
-    });
-  } catch {
-    // Ignore websocket broadcast during initial boot
-  }
-}, 1000);
+}, TICK_INTERVAL_MS);
 
 if (tickTimer.unref) {
   tickTimer.unref();

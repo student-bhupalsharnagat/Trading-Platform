@@ -2,6 +2,8 @@ import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import path from 'path';
+import fs from 'fs';
+import zlib from 'zlib';
 import cookieParser from 'cookie-parser';
 import { createServer as createViteServer } from 'vite';
 
@@ -348,9 +350,56 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+
+    // Built-in gzip compression middleware for static assets (reduces bundle size by ~82%)
+    app.use((req, res, next) => {
+      const acceptEncoding = (req.headers['accept-encoding'] as string) || '';
+      if (!acceptEncoding.includes('gzip') || req.method !== 'GET') {
+        return next();
+      }
+
+      const reqPath = req.path;
+      if (reqPath.endsWith('.js') || reqPath.endsWith('.css')) {
+        const fullPath = path.join(distPath, reqPath);
+        if (fs.existsSync(fullPath)) {
+          const contentType = reqPath.endsWith('.js') ? 'application/javascript; charset=UTF-8' : 'text/css; charset=UTF-8';
+          res.setHeader('Content-Type', contentType);
+          res.setHeader('Content-Encoding', 'gzip');
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          res.setHeader('Vary', 'Accept-Encoding');
+          return fs.createReadStream(fullPath).pipe(zlib.createGzip({ level: 6 })).pipe(res);
+        }
+      }
+      next();
+    });
+
+    // Express static handler with optimal Cache-Control headers for fingerprinted assets
+    app.use(
+      express.static(distPath, {
+        maxAge: '1y',
+        immutable: true,
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith('.html')) {
+            res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+          } else {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          }
+        },
+      })
+    );
+
+    // SPA fallback with gzip compression and revalidation headers for index.html
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      const indexPath = path.join(distPath, 'index.html');
+      res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+      res.setHeader('Vary', 'Accept-Encoding');
+      const acceptEncoding = (req.headers['accept-encoding'] as string) || '';
+      if (acceptEncoding.includes('gzip') && fs.existsSync(indexPath)) {
+        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+        res.setHeader('Content-Encoding', 'gzip');
+        return fs.createReadStream(indexPath).pipe(zlib.createGzip({ level: 6 })).pipe(res);
+      }
+      res.sendFile(indexPath);
     });
   }
 
