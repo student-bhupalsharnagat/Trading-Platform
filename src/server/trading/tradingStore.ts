@@ -368,12 +368,20 @@ export function closeSinglePosition(
   const pos = positions[posIndex];
   const wallet = getTenantWallet(tenantId);
   const inst = findInstrument(pos.symbol);
-  const releasedMargin = (inst?.intraday || 30000) * pos.lots;
+  const releasedMargin = (inst?.intraday || 30000) * (pos.lots || 1);
+  const ltp = inst?.lastPrice ? Number(inst.lastPrice) : Number(pos.ltp ?? pos.avgPrice);
+  const exitPnL = pos.type === 'BUY'
+    ? (ltp - pos.avgPrice) * pos.qty
+    : (pos.avgPrice - ltp) * pos.qty;
+  const closedPnL = Number(exitPnL.toFixed(2));
 
-  wallet.availableBalance += releasedMargin + pos.pnl;
-  wallet.usedMargin = Math.max(0, wallet.usedMargin - releasedMargin);
-  wallet.todayPnL = Number((wallet.todayPnL + pos.pnl).toFixed(2));
-  wallet.totalPnL = Number((wallet.totalPnL + pos.pnl).toFixed(2));
+  wallet.availableBalance = Number((wallet.availableBalance + releasedMargin + closedPnL).toFixed(2));
+  wallet.usedMargin = Math.max(0, Number((wallet.usedMargin - releasedMargin).toFixed(2)));
+  const existingRealized = (wallet as any).realizedPnL ?? wallet.todayPnL ?? 0;
+  const newRealized = Number((existingRealized + closedPnL).toFixed(2));
+  wallet.todayPnL = newRealized;
+  wallet.totalPnL = newRealized;
+  (wallet as any).realizedPnL = newRealized;
 
   positions.splice(posIndex, 1);
 
@@ -381,7 +389,7 @@ export function closeSinglePosition(
     success: true,
     closedPosition: pos,
     releasedMargin,
-    pnl: pos.pnl,
+    pnl: closedPnL,
   };
 }
 
@@ -453,8 +461,9 @@ const tickTimer = setInterval(() => {
     });
 
     const wallet = getTenantWallet(tenantId);
-    wallet.todayPnL = Number((500 + livePnL).toFixed(2));
-    wallet.totalPnL = Number((34000 + livePnL).toFixed(2));
+    const realizedPnL = (wallet as any).realizedPnL ?? wallet.todayPnL ?? 0;
+    wallet.todayPnL = Number(realizedPnL.toFixed(2));
+    wallet.totalPnL = Number((realizedPnL + livePnL).toFixed(2));
 
     // Only broadcast portfolio.mtm if there are active connected clients for this tenant
     if (tradingWebSocketServer.getConnectedClientsCount(tenantId) > 0) {

@@ -81,10 +81,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   // Market & Portfolio Data
   const [instruments, setInstruments] = useState<Instrument[]>(DEFAULT_INSTRUMENTS);
   const [portfolio, setPortfolio] = useState<PortfolioData | null>(null);
-  const [favorites, setFavorites] = useState<Record<string, boolean>>({
-    gold_fut: true,
-    silver_fut: true,
-    btc_usdt: true,
+  const [favorites, setFavorites] = useState<Record<string, boolean>>(() => {
+    const saved = localStorage.getItem('vtx_watchlist_favorites');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return {
+      gold_fut: true,
+      silver_fut: true,
+      btc_usdt: true,
+    };
   });
   const [isWalletDrawerOpen, setIsWalletDrawerOpen] = useState(false);
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
@@ -318,7 +326,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   const toggleFavorite = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setFavorites((prev) => ({ ...prev, [id]: !prev[id] }));
+    setFavorites((prev) => {
+      const nextVal = !prev[id];
+      const next = { ...prev, [id]: nextVal };
+      try {
+        localStorage.setItem('vtx_watchlist_favorites', JSON.stringify(next));
+      } catch {}
+      showToast({
+        type: 'info',
+        title: nextVal ? 'Added to Favorites' : 'Removed from Favorites',
+        description: `${id.toUpperCase()} has been ${nextVal ? 'added to' : 'removed from'} your watchlist favorites.`,
+      });
+      return next;
+    });
   };
 
   const handleOpenOrder = (inst: Instrument, type: 'BUY' | 'SELL' = 'BUY') => {
@@ -606,7 +626,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     : 0;
   const isProfit = totalUnrealizedPnL >= 0;
 
-  const todayRealizedPnL = portfolio?.wallet?.todayPnL || 0;
+  const todayRealizedPnL = Number(
+    (
+      portfolio?.wallet?.todayPnL ??
+      (portfolio?.wallet as any)?.realizedPnl ??
+      (portfolio?.wallet as any)?.realized_pnl ??
+      0
+    ).toFixed(2)
+  );
   const isTodayProfit = todayRealizedPnL >= 0;
   const netPnL = Number((todayRealizedPnL + totalUnrealizedPnL).toFixed(2));
   const isNetProfit = netPnL >= 0;
@@ -654,6 +681,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           <OrderWindow
             instrument={orderWindowInstrument}
             initialType={orderWindowInitialType}
+            availableBalance={portfolio?.wallet?.availableBalance ?? 0}
             marketClosedOverride={marketClosedOverride}
             onClose={() => setOrderWindowInstrument(null)}
             onOpenLiveChart={(inst) => {
@@ -661,6 +689,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               setSelectedChartInstrument(inst);
             }}
             onOrderPlaced={handleOrderPlaced}
+            onOpenWallet={() => {
+              setOrderWindowInstrument(null);
+              setIsWalletModalOpen(true);
+            }}
           />
         )}
 
@@ -1254,12 +1286,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                                   type="button"
                                   onClick={(e) => toggleFavorite(inst.id, e)}
                                   className="text-amber-500 hover:scale-110 transition-transform cursor-pointer"
+                                  title={isFav ? 'Remove from favorites' : 'Add to favorites'}
                                 >
                                   <Star
-                                    className={`w-4 h-4 ${
+                                    className={`w-4 h-4 transition-colors ${
                                       isFav
                                         ? 'fill-amber-500 text-amber-500'
-                                        : 'fill-amber-500/80 text-amber-500'
+                                        : 'fill-transparent text-slate-400 hover:text-amber-400'
                                     }`}
                                   />
                                 </button>
@@ -2793,6 +2826,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             setSelectedChartInstrument(inst);
           }}
           onOrderPlaced={handleOrderPlaced}
+          onOpenWallet={() => {
+            setOrderWindowInstrument(null);
+            setIsWalletModalOpen(true);
+          }}
         />
       )}
 

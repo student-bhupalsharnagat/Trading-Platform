@@ -807,13 +807,21 @@ export class TradingExecutionService {
       }
 
       const inst = findInstrument(pos.instrument_id);
-      const releasedMargin = pos.margin_used || (inst?.intraday || 30000);
-      const realizedPnL = pos.realized_pnl || 0;
+      const releasedMargin = Number(pos.margin_used) || (inst?.intraday || 30000);
+      const posQty = Number(pos.quantity);
+      const entryAvg = Number(pos.average_price);
+      const exitPrice = inst?.lastPrice ? Number(inst.lastPrice) : entryAvg;
 
-      // Credit wallet
-      const newAvailable = wallet.available_balance + releasedMargin + realizedPnL;
-      const newUsed = Math.max(0, wallet.used_margin - releasedMargin);
-      const newRealized = wallet.realized_pnl + realizedPnL;
+      // QA-037: calculate trade exit PnL: (exitPrice - entryAvgPrice) * closedQty for long, (entryAvgPrice - exitPrice) * closedQty for short
+      const tradeExitPnL = posQty > 0
+        ? (exitPrice - entryAvg) * Math.abs(posQty)
+        : (entryAvg - exitPrice) * Math.abs(posQty);
+      const realizedPnL = Number(((pos.realized_pnl || 0) + tradeExitPnL).toFixed(2));
+
+      // Credit wallet: release blocked margin and permanently add/deduct realizedPnL
+      const newAvailable = Number((wallet.available_balance + releasedMargin + realizedPnL).toFixed(2));
+      const newUsed = Math.max(0, Number((wallet.used_margin - releasedMargin).toFixed(2)));
+      const newRealized = Number((wallet.realized_pnl + realizedPnL).toFixed(2));
 
       const updatedWallet = await postgresWalletRepository.updateWallet(
         tenantId,
@@ -958,6 +966,15 @@ export class TradingExecutionService {
       closeSinglePosition(tenantId, positionId);
       if (tenantId !== 'TNT-001') {
         closeSinglePosition('TNT-001', positionId);
+      }
+
+      for (const t of [tenantId, 'TNT-001', 'vertex-default']) {
+        const memW = getTenantWallet(t);
+        memW.availableBalance = Number(result.updatedWallet.available_balance);
+        memW.usedMargin = Number(result.updatedWallet.used_margin);
+        memW.todayPnL = Number(result.updatedWallet.realized_pnl);
+        memW.totalPnL = Number(result.updatedWallet.realized_pnl);
+        (memW as any).realizedPnL = Number(result.updatedWallet.realized_pnl);
       }
 
       const inst = findInstrument(result.pos.instrument_id);

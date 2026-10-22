@@ -482,7 +482,7 @@ export const SupportTicketsSection: React.FC<SupportTicketsSectionProps> = ({ on
   // ==========================================
   if (currentView === 'LIST') {
     return (
-      <div className="w-full max-w-xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-4 animate-fadeIn">
+      <div className="w-full max-w-xl mx-auto px-3 sm:px-4 pt-3 sm:pt-4 pb-16 space-y-4 animate-fadeIn relative z-10">
         {/* Header matching Screenshot 1 */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">

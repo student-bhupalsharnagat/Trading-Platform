@@ -37,6 +37,7 @@ interface OrderWindowProps {
   onClose: () => void;
   onOpenLiveChart?: (instrument: Instrument) => void;
   onOrderPlaced?: (result?: any) => void;
+  onOpenWallet?: () => void;
 }
 
 export const OrderWindow: React.FC<OrderWindowProps> = ({
@@ -48,6 +49,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
   onClose,
   onOpenLiveChart,
   onOrderPlaced,
+  onOpenWallet,
 }) => {
   const { showToast } = useAuth();
   const { isTradingEnabled, isOptionsEnabled, branding } = useTenant();
@@ -103,7 +105,8 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
   const [submitting, setSubmitting] = useState(false);
 
   // Dynamic calculations
-  const effectiveLots = inputMode === 'LOTS' ? lots : Math.max(1, Math.round(quantity / (instrument.lotSize || 1)));
+  const lotSize = Math.max(1, instrument.lotSize || 1);
+  const effectiveLots = inputMode === 'LOTS' ? lots : Number((quantity / lotSize).toFixed(2));
   const currentPrice =
     orderType === 'MARKET' || orderType === 'SL-M' ? instrument.lastPrice : limitPrice;
 
@@ -111,8 +114,8 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
   const intradayMarginPerLot = instrument.intraday || Math.round(instrument.lastPrice * 0.2);
   const holdingMarginPerLot = instrument.holding || Math.round(instrument.lastPrice * 1.67);
 
-  const totalIntradayMargin = intradayMarginPerLot * effectiveLots;
-  const totalHoldingMargin = holdingMarginPerLot * effectiveLots;
+  const totalIntradayMargin = Math.round(intradayMarginPerLot * effectiveLots);
+  const totalHoldingMargin = Math.round(holdingMarginPerLot * effectiveLots);
   const selectedMargin = productType === 'INTRADAY' ? totalIntradayMargin : totalHoldingMargin;
 
   const isMarginShortfall = availableBalance !== undefined && availableBalance < selectedMargin;
@@ -149,22 +152,25 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
   const handleLotChange = (newLots: number) => {
     const clamped = Math.min(Math.max(1, newLots), instrument.maxLots || 1000);
     setLots(clamped);
-    setQuantity(clamped * (instrument.lotSize || 1));
+    setQuantity(clamped * lotSize);
   };
 
   const handleQtyChange = (newQty: number) => {
     const clamped = Math.max(1, newQty);
     setQuantity(clamped);
-    setLots(Math.max(1, Math.round(clamped / (instrument.lotSize || 1))));
+    const calculatedLots = Number((clamped / lotSize).toFixed(2));
+    setLots(Math.max(1, Math.round(calculatedLots)));
   };
 
   const toggleInputMode = () => {
     if (inputMode === 'LOTS') {
       setInputMode('QTY');
-      setQuantity(lots * (instrument.lotSize || 1));
+      setQuantity(lots * lotSize);
     } else {
       setInputMode('LOTS');
-      setLots(Math.max(1, Math.round(quantity / (instrument.lotSize || 1))));
+      const calculatedLots = Math.max(1, Math.round(quantity / lotSize));
+      setLots(calculatedLots);
+      setQuantity(calculatedLots * lotSize);
     }
   };
 
@@ -567,17 +573,32 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => handleLotChange(lots - 1)}
+                    onClick={() => {
+                      if (inputMode === 'LOTS') {
+                        handleLotChange(lots - 1);
+                      } else {
+                        handleQtyChange(Math.max(1, quantity - lotSize));
+                      }
+                    }}
                     className="w-8 h-8 rounded-lg bg-slate-200 dark:bg-[#142032] hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-white font-bold text-sm flex items-center justify-center transition-colors cursor-pointer"
                   >
                     -
                   </button>
-                  <div className="text-center font-mono font-bold text-xs text-slate-700 dark:text-slate-200 px-1 min-w-[50px]">
+                  <div className="text-center font-mono font-bold text-xs text-slate-700 dark:text-slate-200 px-1 min-w-[65px]">
                     {effectiveLots} {effectiveLots === 1 ? 'LOT' : 'LOTS'}
+                    {inputMode === 'QTY' && (
+                      <span className="block text-[10px] text-slate-400 font-normal">({quantity} Qty)</span>
+                    )}
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleLotChange(lots + 1)}
+                    onClick={() => {
+                      if (inputMode === 'LOTS') {
+                        handleLotChange(lots + 1);
+                      } else {
+                        handleQtyChange(quantity + lotSize);
+                      }
+                    }}
                     className="w-8 h-8 rounded-lg bg-slate-200 dark:bg-[#142032] hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-white font-bold text-sm flex items-center justify-center transition-colors cursor-pointer"
                   >
                     +
@@ -774,7 +795,17 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
                 <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                 <span>Margin shortfall: ₹{marginShortfallAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
               </div>
-              <span className="text-[10px] underline font-bold cursor-pointer">Add Funds</span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onOpenWallet) {
+                    onOpenWallet();
+                  }
+                }}
+                className="text-[10px] underline font-bold cursor-pointer text-rose-500 dark:text-rose-400 hover:text-rose-600 dark:hover:text-rose-300 transition-colors"
+              >
+                + Add Funds
+              </button>
             </div>
           )}
 

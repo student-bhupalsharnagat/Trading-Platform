@@ -63,11 +63,46 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loadingNotifs, setLoadingNotifs] = useState(false);
 
-  // Settings state
-  const [orderConfirmation, setOrderConfirmation] = useState(true);
-  const [soundEffects, setSoundEffects] = useState(true);
-  const [twoFactorAuth, setTwoFactorAuth] = useState(true);
-  const [hapticFeedback, setHapticFeedback] = useState(true);
+  // Settings state persisted in localStorage
+  const [orderConfirmation, setOrderConfirmation] = useState(() => {
+    const saved = localStorage.getItem('vtx_pref_order_confirmation');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [soundEffects, setSoundEffects] = useState(() => {
+    const saved = localStorage.getItem('vtx_pref_sound_alerts');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [twoFactorAuth, setTwoFactorAuth] = useState(() => {
+    const saved = localStorage.getItem('vtx_pref_two_factor');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [hapticFeedback, setHapticFeedback] = useState(() => {
+    const saved = localStorage.getItem('vtx_pref_haptic');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  const toggleSoundEffects = () => {
+    const next = !soundEffects;
+    setSoundEffects(next);
+    localStorage.setItem('vtx_pref_sound_alerts', String(next));
+    showToast({
+      type: 'info',
+      title: 'Sound & Audio Alerts',
+      description: `Audio alerts turned ${next ? 'ON' : 'OFF'}.`,
+    });
+  };
+
+  const toggleOrderConfirmation = () => {
+    const next = !orderConfirmation;
+    setOrderConfirmation(next);
+    localStorage.setItem('vtx_pref_order_confirmation', String(next));
+  };
+
+  const toggleTwoFactor = () => {
+    const next = !twoFactorAuth;
+    setTwoFactorAuth(next);
+    localStorage.setItem('vtx_pref_two_factor', String(next));
+  };
 
   const openTicketsModal = async () => {
     setActiveModal('TICKETS');
@@ -489,7 +524,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
 
       {/* 4. Support Tickets Section matching all 5 screenshots */}
       {activeModal === 'TICKETS' && (
-        <div className="fixed inset-0 z-50 bg-[#060B13] overflow-y-auto custom-scrollbar animate-fadeIn">
+        <div className="fixed inset-0 z-50 bg-[#060B13] overflow-y-auto custom-scrollbar animate-fadeIn pt-16 sm:pt-20 pb-12">
           <SupportTicketsSection onBack={() => setActiveModal('NONE')} />
         </div>
       )}
@@ -519,7 +554,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setOrderConfirmation(!orderConfirmation)}
+                  onClick={toggleOrderConfirmation}
                   className={`w-10 h-5 rounded-full transition-colors relative cursor-pointer ${
                     orderConfirmation ? 'bg-indigo-500' : 'bg-slate-700'
                   }`}
@@ -535,7 +570,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setSoundEffects(!soundEffects)}
+                  onClick={toggleSoundEffects}
                   className={`w-10 h-5 rounded-full transition-colors relative cursor-pointer ${
                     soundEffects ? 'bg-indigo-500' : 'bg-slate-700'
                   }`}
@@ -551,7 +586,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setTwoFactorAuth(!twoFactorAuth)}
+                  onClick={toggleTwoFactor}
                   className={`w-10 h-5 rounded-full transition-colors relative cursor-pointer ${
                     twoFactorAuth ? 'bg-indigo-500' : 'bg-slate-700'
                   }`}

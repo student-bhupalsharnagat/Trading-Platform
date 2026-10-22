@@ -187,6 +187,11 @@ export const authApi = {
     });
   },
 
+  async getFunds(params?: { type?: string; status?: string; userId?: string }): Promise<{ success: boolean; tenantId?: string; userId?: string; transactions: any[]; wallet?: any }> {
+    const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+    return fetchJson(`/api/trading/funds${query}`, { method: 'GET' });
+  },
+
   async withdrawFunds(amount: number, bankName?: string, accountNumber?: string): Promise<{ success: boolean; message: string; wallet: any }> {
     return fetchJson('/api/trading/funds/withdraw', {
       method: 'POST',
@@ -271,10 +276,5 @@ export const authApi = {
   async getLedger(userId?: string): Promise<{ success: boolean; tenantId: string; userId: string; ledger: any[] }> {
     const query = userId ? `?userId=${encodeURIComponent(userId)}` : '';
     return fetchJson(`/api/trading/ledger${query}`, { method: 'GET' });
-  },
-
-  async getFunds(params?: { type?: string; status?: string; userId?: string }): Promise<{ success: boolean; tenantId: string; userId: string; transactions: any[] }> {
-    const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
-    return fetchJson(`/api/trading/funds${query}`, { method: 'GET' });
   },
 };

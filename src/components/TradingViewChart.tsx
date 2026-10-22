@@ -141,6 +141,30 @@ interface LocalCandle {
   volume: number;
 }
 
+const generateLocalCandles = (basePrice: number): LocalCandle[] => {
+  const safeBase = Math.max(1, basePrice || 1000);
+  const volatility = safeBase * 0.003;
+  const now = Math.floor(Date.now() / 1000);
+  const generated: LocalCandle[] = [];
+
+  let currentClose = safeBase * 0.98;
+  const count = 60;
+
+  for (let i = count; i >= 0; i--) {
+    const time = now - i * 60 * 15;
+    const change = (Math.random() - 0.49) * volatility * 2;
+    const open = currentClose;
+    const close = Math.max(1, open + change);
+    const high = Math.max(open, close) + Math.random() * volatility;
+    const low = Math.min(open, close) - Math.random() * volatility;
+    const volume = Math.floor(Math.random() * 50000 + 10000);
+
+    generated.push({ time, open, high, low, close, volume });
+    currentClose = close;
+  }
+  return generated;
+};
+
 export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   instrument,
   timeframe = '15m',
@@ -215,33 +239,13 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
 
   // Local interactive Canvas Chart state
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [candles, setCandles] = useState<LocalCandle[]>([]);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [candles, setCandles] = useState<LocalCandle[]>(() => generateLocalCandles(instrument.lastPrice || 1000));
   const [hoveredCandle, setHoveredCandle] = useState<LocalCandle | null>(null);
 
   // Generate synthetic yet mathematically consistent candles around instrument price
   useEffect(() => {
-    const basePrice = instrument.lastPrice || 1000;
-    const volatility = basePrice * 0.003;
-    const now = Math.floor(Date.now() / 1000);
-    const generated: LocalCandle[] = [];
-
-    let currentClose = basePrice * 0.98;
-    const count = 60;
-
-    for (let i = count; i >= 0; i--) {
-      const time = now - i * 60 * 15;
-      const change = (Math.random() - 0.49) * volatility * 2;
-      const open = currentClose;
-      const close = Math.max(1, open + change);
-      const high = Math.max(open, close) + Math.random() * volatility;
-      const low = Math.min(open, close) - Math.random() * volatility;
-      const volume = Math.floor(Math.random() * 50000 + 10000);
-
-      generated.push({ time, open, high, low, close, volume });
-      currentClose = close;
-    }
-
-    setCandles(generated);
+    setCandles(generateLocalCandles(instrument.lastPrice || 1000));
   }, [instrument.symbol, instrument.lastPrice]);
 
   // Live tick animation on the most recent candle
@@ -280,14 +284,30 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const width = canvas.width;
-    const height = canvas.height;
+    const dpr = window.devicePixelRatio || 1;
+    const container = containerRef.current;
+    const displayWidth = Math.max(200, Math.floor(container?.clientWidth || canvas.clientWidth || 800));
+    const displayHeight = Math.max(150, Math.floor(container?.clientHeight || canvas.clientHeight || 450));
+
+    if (canvas.width !== displayWidth * dpr || canvas.height !== displayHeight * dpr) {
+      canvas.width = displayWidth * dpr;
+      canvas.height = displayHeight * dpr;
+    }
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+
+    const width = displayWidth;
+    const height = displayHeight;
 
     // Background
     ctx.fillStyle = isDark ? '#060B13' : '#FFFFFF';
     ctx.fillRect(0, 0, width, height);
 
-    if (candles.length === 0) return;
+    if (candles.length === 0) {
+      ctx.restore();
+      return;
+    }
 
     const paddingRight = 70;
     const paddingBottom = 30;
@@ -397,27 +417,32 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
       ctx.font = 'bold 10px JetBrains Mono, monospace';
       ctx.fillText(lastCandle.close.toFixed(2), plotWidth + 6, currentY);
     }
+
+    ctx.restore();
   }, [candles, isDark]);
 
   // Resize observer for canvas
   useEffect(() => {
     if (engine !== 'canvas') return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const updateSize = () => {
-      const rect = canvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      const ctx = canvas.getContext('2d');
-      if (ctx) ctx.scale(dpr, dpr);
+    const container = containerRef.current;
+    const handleResize = () => {
       drawCanvas();
     };
 
-    updateSize();
-    window.addEventListener('resize', updateSize);
-    return () => window.removeEventListener('resize', updateSize);
+    handleResize();
+
+    let observer: ResizeObserver | null = null;
+    if (container && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => {
+        handleResize();
+      });
+      observer.observe(container);
+    }
+    window.addEventListener('resize', handleResize);
+    return () => {
+      if (observer) observer.disconnect();
+      window.removeEventListener('resize', handleResize);
+    };
   }, [engine, drawCanvas]);
 
   useEffect(() => {
@@ -563,7 +588,7 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
           </>
         ) : (
           /* Pro Canvas Chart View */
-          <div className="w-full h-full relative">
+          <div ref={containerRef} className="w-full h-full relative">
             <canvas
               ref={canvasRef}
               className="w-full h-full block cursor-crosshair"

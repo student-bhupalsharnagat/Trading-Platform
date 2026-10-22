@@ -53,7 +53,58 @@ export const LiveChart: React.FC<LiveChartProps> = ({
       setEngineMode('CANVAS');
     }
   }, [isRestricted, instrument.symbol]);
-  const [candles, setCandles] = useState<Candle[]>([]);
+  // Generate clean realistic fallback candles around instrument price
+  const generateInitialCandles = (basePrice: number, tf: string = timeframe, count = 70): Candle[] => {
+    const list: Candle[] = [];
+    const safeBase = Number(basePrice) > 0 ? Number(basePrice) : 1000;
+    let currentPrice = safeBase * 0.988;
+    const now = Date.now();
+    const intervalMs =
+      tf === '1m'
+        ? 60000
+        : tf === '5m'
+        ? 300000
+        : tf === '15m'
+        ? 900000
+        : tf === '30m'
+        ? 1800000
+        : tf === '1h'
+        ? 3600000
+        : 86400000;
+
+    for (let i = count; i >= 0; i--) {
+      const time = now - i * intervalMs;
+      const volatility = safeBase * 0.003;
+      const change = (Math.random() - 0.485) * volatility;
+      const open = currentPrice;
+      const close = Math.max(1, open + change);
+      const high = Math.max(open, close) + Math.random() * (volatility * 0.5);
+      const low = Math.min(open, close) - Math.random() * (volatility * 0.5);
+      const volume = Math.floor(20 + Math.random() * 60);
+
+      list.push({
+        time,
+        open: Number(open.toFixed(2)),
+        high: Number(high.toFixed(2)),
+        low: Number(low.toFixed(2)),
+        close: Number(close.toFixed(2)),
+        volume,
+      });
+
+      currentPrice = close;
+    }
+
+    if (list.length > 0) {
+      const last = list[list.length - 1];
+      last.close = safeBase;
+      last.high = Math.max(last.high, safeBase);
+      last.low = Math.min(last.low, safeBase);
+    }
+
+    return list;
+  };
+
+  const [candles, setCandles] = useState<Candle[]>(() => generateInitialCandles(instrument.lastPrice || 1000, '15m'));
 
   // Market Closed modal
   const [showMarketClosedModal, setShowMarketClosedModal] = useState(false);
@@ -73,58 +124,8 @@ export const LiveChart: React.FC<LiveChartProps> = ({
     price: number | null;
   }>({ candle: null, mouseX: -1, mouseY: -1, price: null });
 
-  // Responsive logical canvas dimensions
-  const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
-
-  // Generate clean realistic fallback candles
-  const generateInitialCandles = (basePrice: number, count = 70): Candle[] => {
-    const list: Candle[] = [];
-    let currentPrice = basePrice * 0.988;
-    const now = Date.now();
-    const intervalMs =
-      timeframe === '1m'
-        ? 60000
-        : timeframe === '5m'
-        ? 300000
-        : timeframe === '15m'
-        ? 900000
-        : timeframe === '30m'
-        ? 1800000
-        : timeframe === '1h'
-        ? 3600000
-        : 86400000;
-
-    for (let i = count; i >= 0; i--) {
-      const time = now - i * intervalMs;
-      const volatility = basePrice * 0.003;
-      const change = (Math.random() - 0.485) * volatility;
-      const open = currentPrice;
-      const close = open + change;
-      const high = Math.max(open, close) + Math.random() * (volatility * 0.5);
-      const low = Math.min(open, close) - Math.random() * (volatility * 0.5);
-      const volume = Math.floor(20 + Math.random() * 60);
-
-      list.push({
-        time,
-        open: Number(open.toFixed(2)),
-        high: Number(high.toFixed(2)),
-        low: Number(low.toFixed(2)),
-        close: Number(close.toFixed(2)),
-        volume,
-      });
-
-      currentPrice = close;
-    }
-
-    if (list.length > 0) {
-      const last = list[list.length - 1];
-      last.close = instrument.lastPrice;
-      last.high = Math.max(last.high, instrument.lastPrice);
-      last.low = Math.min(last.low, instrument.lastPrice);
-    }
-
-    return list;
-  };
+  // Responsive logical canvas dimensions with explicit non-zero default
+  const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number }>({ width: 800, height: 480 });
 
   useEffect(() => {
     let isMounted = true;
@@ -135,20 +136,20 @@ export const LiveChart: React.FC<LiveChartProps> = ({
           if (res.candles && res.candles.length > 0) {
             setCandles(res.candles);
           } else {
-            setCandles(generateInitialCandles(instrument.lastPrice));
+            setCandles(generateInitialCandles(instrument.lastPrice, timeframe));
           }
         }
       })
       .catch(() => {
         if (isMounted) {
-          setCandles(generateInitialCandles(instrument.lastPrice));
+          setCandles(generateInitialCandles(instrument.lastPrice, timeframe));
         }
       });
 
     return () => {
       isMounted = false;
     };
-  }, [instrument.symbol, timeframe]);
+  }, [instrument.symbol, instrument.lastPrice, timeframe]);
 
   // Live ticking candle update
   useEffect(() => {
@@ -440,8 +441,8 @@ export const LiveChart: React.FC<LiveChartProps> = ({
 
       const rect = container.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
-      const w = Math.floor(rect.width);
-      const h = Math.floor(rect.height);
+      const w = Math.floor(rect.width) || container.clientWidth || 800;
+      const h = Math.floor(rect.height) || container.clientHeight || 480;
 
       if (w > 0 && h > 0) {
         canvas.width = Math.floor(w * dpr);

@@ -52,7 +52,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
   const [processing, setProcessing] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Local ledger transaction history
+  // Local & authoritative ledger transaction history
   const [history, setHistory] = useState<
     Array<{
       id: string;
@@ -63,7 +63,38 @@ export const WalletModal: React.FC<WalletModalProps> = ({
       time: string;
       refId: string;
     }>
-  >([]);
+  >(() => {
+    try {
+      const saved = localStorage.getItem('vtx_wallet_history');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
+
+  const loadServerHistory = React.useCallback(async () => {
+    try {
+      const res = await authApi.getFunds();
+      if (res && res.transactions && res.transactions.length > 0) {
+        const mapped = res.transactions.map((t: any) => ({
+          id: t.id || `TX-${Date.now()}`,
+          type: (t.transaction_type || t.type || 'DEPOSIT') as any,
+          amount: Number(t.amount || 0),
+          method: t.payment_method || t.method || (t.type === 'WITHDRAWAL' ? 'Bank Payout' : 'Net Banking (HDFC)'),
+          status: (t.status === 'APPROVED' || t.status === 'COMPLETED' || t.status === 'SUCCESS' ? 'SUCCESS' : 'PROCESSING') as any,
+          time: t.created_at ? new Date(t.created_at).toLocaleDateString('en-GB') + ' ' + new Date(t.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : 'Today',
+          refId: t.reference_id || t.reference || t.id || `TX-${Date.now()}`,
+        }));
+        setHistory(mapped);
+        localStorage.setItem('vtx_wallet_history', JSON.stringify(mapped));
+      }
+    } catch {}
+  }, []);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      loadServerHistory();
+    }
+  }, [isOpen, loadServerHistory]);
 
   if (!isOpen) return null;
 
@@ -82,6 +113,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
   const handleRefreshBalance = async () => {
     setIsRefreshing(true);
     if (onRefresh) await onRefresh();
+    await loadServerHistory();
     setTimeout(() => {
       setIsRefreshing(false);
       showToast({
@@ -115,19 +147,22 @@ export const WalletModal: React.FC<WalletModalProps> = ({
 
       await authApi.depositFunds(amount, methodLabel);
 
-      // Add to local history
-      setHistory((prev) => [
-        {
-          id: `TX-${Date.now().toString().slice(-4)}`,
-          type: 'DEPOSIT',
-          amount,
-          method: methodLabel,
-          status: 'SUCCESS',
-          time: 'Just now',
-          refId: `DEP/${new Date().getFullYear()}/${Math.floor(100000 + Math.random() * 900000)}`,
-        },
-        ...prev,
-      ]);
+      const newTxItem = {
+        id: `TX-${Date.now().toString().slice(-4)}`,
+        type: 'DEPOSIT' as const,
+        amount,
+        method: methodLabel,
+        status: 'SUCCESS' as const,
+        time: 'Just now',
+        refId: `DEP/${new Date().getFullYear()}/${Math.floor(100000 + Math.random() * 900000)}`,
+      };
+
+      // Add to local history & persist immediately
+      setHistory((prev) => {
+        const next = [newTxItem, ...prev];
+        localStorage.setItem('vtx_wallet_history', JSON.stringify(next));
+        return next;
+      });
 
       showToast({
         type: 'success',
@@ -137,6 +172,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
       });
 
       if (onRefresh) onRefresh();
+      loadServerHistory();
     } catch (err: any) {
       showToast({
         type: 'error',
@@ -172,19 +208,22 @@ export const WalletModal: React.FC<WalletModalProps> = ({
     try {
       await authApi.withdrawFunds(amount, 'HDFC Bank Ltd', '50100492818912');
 
-      // Add to local history
-      setHistory((prev) => [
-        {
-          id: `TX-${Date.now().toString().slice(-4)}`,
-          type: 'WITHDRAWAL',
-          amount,
-          method: 'IMPS to HDFC Bank (8912)',
-          status: 'SUCCESS',
-          time: 'Just now',
-          refId: `WDR/${new Date().getFullYear()}/${Math.floor(100000 + Math.random() * 900000)}`,
-        },
-        ...prev,
-      ]);
+      // Add to local history & persist immediately
+      const newWdrItem = {
+        id: `TX-${Date.now().toString().slice(-4)}`,
+        type: 'WITHDRAWAL' as const,
+        amount,
+        method: 'IMPS to HDFC Bank (8912)',
+        status: 'SUCCESS' as const,
+        time: 'Just now',
+        refId: `WDR/${new Date().getFullYear()}/${Math.floor(100000 + Math.random() * 900000)}`,
+      };
+
+      setHistory((prev) => {
+        const next = [newWdrItem, ...prev];
+        localStorage.setItem('vtx_wallet_history', JSON.stringify(next));
+        return next;
+      });
 
       showToast({
         type: 'success',
@@ -195,6 +234,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
 
       setWithdrawAmount('');
       if (onRefresh) onRefresh();
+      loadServerHistory();
     } catch (err: any) {
       showToast({
         type: 'error',
