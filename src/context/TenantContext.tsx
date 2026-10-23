@@ -105,13 +105,59 @@ interface TenantContextType {
 
 const TenantContext = createContext<TenantContextType | undefined>(undefined);
 
+const DEFAULT_TENANT_SUMMARIES: TenantSummary[] = [
+  {
+    id: 'vertex-default',
+    name: 'VERTEX Prime Markets',
+    slug: 'vertex',
+    brandName: 'VERTEX',
+    shortName: 'VX',
+    status: 'active',
+    primaryColor: '#F59E0B',
+    tradingEnabled: true,
+    registrationEnabled: true,
+    optionsTradingEnabled: true,
+  },
+  {
+    id: 'apex-capital',
+    name: 'Apex Capital Markets',
+    slug: 'apex',
+    brandName: 'Apex Capital',
+    shortName: 'APEX',
+    status: 'active',
+    primaryColor: '#10B981',
+    tradingEnabled: true,
+    registrationEnabled: true,
+    optionsTradingEnabled: true,
+  },
+];
+
 export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [tenant, setTenant] = useState<Tenant>(DEFAULT_TENANT);
-  const [branding, setBranding] = useState<TenantBranding>(DEFAULT_BRANDING);
+  const [tenant, setTenant] = useState<Tenant>(() => {
+    const saved = localStorage.getItem('vtx_active_tenant_id');
+    const matched = DEFAULT_TENANT_SUMMARIES.find((t) => t.id === saved);
+    if (matched) {
+      return { ...DEFAULT_TENANT, id: matched.id, name: matched.name, slug: matched.slug };
+    }
+    return DEFAULT_TENANT;
+  });
+  const [branding, setBranding] = useState<TenantBranding>(() => {
+    const saved = localStorage.getItem('vtx_active_tenant_id');
+    const matched = DEFAULT_TENANT_SUMMARIES.find((t) => t.id === saved);
+    if (matched) {
+      return {
+        ...DEFAULT_BRANDING,
+        brandName: matched.brandName,
+        shortName: matched.shortName,
+        primaryColor: matched.primaryColor,
+      };
+    }
+    return DEFAULT_BRANDING;
+  });
   const [config, setConfig] = useState<TenantPlatformConfig>(DEFAULT_CONFIG);
   const [status, setStatus] = useState<TenantSecurityStatus>(DEFAULT_STATUS);
   const [matchedBy, setMatchedBy] = useState<string>('default');
-  const [allTenants, setAllTenants] = useState<TenantSummary[]>([]);
+  const [allTenants, setAllTenants] = useState<TenantSummary[]>(DEFAULT_TENANT_SUMMARIES);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -158,7 +204,17 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setLoading(true);
       setError(null);
 
-      const res = await fetch('/api/tenant/current');
+      const savedTenantId = localStorage.getItem('vtx_active_tenant_id');
+      const url = savedTenantId
+        ? `/api/tenant/current?tenant_id=${encodeURIComponent(savedTenantId)}`
+        : '/api/tenant/current';
+      const headers: Record<string, string> = {};
+      if (savedTenantId) {
+        headers['x-dev-tenant-id'] = savedTenantId;
+        headers['x-tenant-id'] = savedTenantId;
+      }
+
+      const res = await fetch(url, { headers });
       if (!res.ok) {
         throw new Error(`Failed to resolve tenant: HTTP ${res.status}`);
       }
@@ -178,7 +234,21 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     } catch (err: any) {
       console.warn('[TenantContext] Tenant resolution warning, using fallback:', err.message);
       setError(err.message);
-      applyBrandingToDocument(DEFAULT_BRANDING);
+      const savedTenantId = localStorage.getItem('vtx_active_tenant_id');
+      const matched = DEFAULT_TENANT_SUMMARIES.find((t) => t.id === savedTenantId);
+      if (matched) {
+        setTenant((prev) => ({ ...prev, id: matched.id, name: matched.name, slug: matched.slug }));
+        const customBranding = {
+          ...DEFAULT_BRANDING,
+          brandName: matched.brandName,
+          shortName: matched.shortName,
+          primaryColor: matched.primaryColor,
+        };
+        setBranding(customBranding);
+        applyBrandingToDocument(customBranding);
+      } else {
+        applyBrandingToDocument(DEFAULT_BRANDING);
+      }
     } finally {
       setLoading(false);
     }
@@ -189,7 +259,7 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const res = await fetch('/api/tenant/all');
       if (res.ok) {
         const json = await res.json();
-        if (json.success && Array.isArray(json.data)) {
+        if (json.success && Array.isArray(json.data) && json.data.length > 0) {
           setAllTenants(json.data);
         }
       }
@@ -206,27 +276,61 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const switchTenant = async (tenantId: string) => {
     try {
       setLoading(true);
-      const res = await fetch('/api/tenant/dev/switch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenantId }),
-      });
+      localStorage.setItem('vtx_active_tenant_id', tenantId);
 
-      if (!res.ok) {
-        throw new Error('Failed to switch tenant.');
+      // Immediately optimistically apply tenant & branding
+      const matched =
+        allTenants.find((t) => t.id === tenantId) ||
+        DEFAULT_TENANT_SUMMARIES.find((t) => t.id === tenantId);
+
+      if (matched) {
+        setTenant((prev) => ({
+          ...prev,
+          id: matched.id,
+          name: matched.name,
+          slug: matched.slug,
+        }));
+        setBranding((prev) => {
+          const next: TenantBranding = {
+            ...prev,
+            brandName: matched.brandName || matched.name,
+            shortName: matched.shortName || matched.slug.toUpperCase(),
+            primaryColor: matched.primaryColor || '#F59E0B',
+            loginBranding: {
+              ...prev.loginBranding,
+              title: `${matched.brandName} Multi-Asset Engine`,
+              subtitle: 'High-frequency Execution. Professional Liquidity.',
+            },
+          };
+          applyBrandingToDocument(next);
+          return next;
+        });
       }
 
-      const json = await res.json();
-      if (json.success && json.data) {
-        const d = json.data;
-        if (d.tenant) setTenant(d.tenant);
-        if (d.branding) {
-          setBranding(d.branding);
-          applyBrandingToDocument(d.branding);
+      // Also sync with backend
+      try {
+        const res = await fetch('/api/tenant/dev/switch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tenantId }),
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && json.data) {
+            const d = json.data;
+            if (d.tenant) setTenant(d.tenant);
+            if (d.branding) {
+              setBranding(d.branding);
+              applyBrandingToDocument(d.branding);
+            }
+            if (d.platformConfig) setConfig(d.platformConfig);
+            if (d.status) setStatus(d.status);
+            if (d.matchedBy) setMatchedBy(d.matchedBy);
+          }
         }
-        if (d.platformConfig) setConfig(d.platformConfig);
-        if (d.status) setStatus(d.status);
-        if (d.matchedBy) setMatchedBy(d.matchedBy);
+      } catch (backendErr) {
+        console.warn('[TenantContext] Backend switch notice:', backendErr);
       }
 
       // Re-fetch all to synchronize

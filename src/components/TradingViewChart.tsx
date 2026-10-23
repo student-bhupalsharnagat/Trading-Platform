@@ -454,7 +454,7 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   return (
     <div
       style={{ height }}
-      className="w-full h-full flex flex-col bg-[#060B13] rounded-xl overflow-hidden border border-[#121B2B] select-none"
+      className="flex-1 w-full h-full min-h-[480px] flex flex-col bg-[#060B13] rounded-xl overflow-hidden border border-[#121B2B] select-none"
     >
       {/* Top Chart Header / Status Bar */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-[#080E18] border-b border-[#121B2B] text-xs">

@@ -5,7 +5,7 @@ import { X, TrendingUp, TrendingDown, Layers, ArrowUpRight, ArrowDownRight } fro
 interface OptionChainProps {
   instrument: Instrument;
   onClose: () => void;
-  onSelectOption: (optionSymbol: string, strikePrice: number, optionType: 'CE' | 'PE', price: number) => void;
+  onSelectOption: (optionSymbol: string, strikePrice: number, optionType: 'CE' | 'PE', price: number, expiry?: string) => void;
 }
 
 export const OptionChain: React.FC<OptionChainProps> = ({
@@ -170,10 +170,11 @@ export const OptionChain: React.FC<OptionChainProps> = ({
                         type="button"
                         onClick={() =>
                           onSelectOption(
-                            `${instrument.symbol} ${row.strike} CE`,
+                            `${instrument.symbol} ${selectedExpiry.toUpperCase()} ${row.strike} CE`,
                             row.strike,
                             'CE',
-                            row.call.price
+                            row.call.price,
+                            selectedExpiry
                           )
                         }
                         className="px-2 py-1 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-[10px] rounded transition-colors cursor-pointer"
@@ -198,10 +199,11 @@ export const OptionChain: React.FC<OptionChainProps> = ({
                         type="button"
                         onClick={() =>
                           onSelectOption(
-                            `${instrument.symbol} ${row.strike} PE`,
+                            `${instrument.symbol} ${selectedExpiry.toUpperCase()} ${row.strike} PE`,
                             row.strike,
                             'PE',
-                            row.put.price
+                            row.put.price,
+                            selectedExpiry
                           )
                         }
                         className="px-2 py-1 bg-rose-500 hover:bg-rose-600 text-white font-black text-[10px] rounded transition-colors cursor-pointer"

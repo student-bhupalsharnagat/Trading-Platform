@@ -308,8 +308,33 @@ export function getTenantTickets(tenantId: string): SupportTicket[] {
 
 export function getTenantNotifications(tenantId: string): AppNotification[] {
   const normTenant = tenantId || 'vertex-default';
-  if (!tenantNotifications[normTenant]) {
-    tenantNotifications[normTenant] = [];
+  if (!tenantNotifications[normTenant] || tenantNotifications[normTenant].length === 0) {
+    tenantNotifications[normTenant] = [
+      {
+        id: 'notif-1',
+        title: 'Welcome to Vertex Trading',
+        message: 'Your trading desk is active and verified. Explore live market feeds across NSE, MCX, and Crypto.',
+        time: '10m ago',
+        type: 'SYSTEM',
+        read: false,
+      },
+      {
+        id: 'notif-2',
+        title: 'Margin Balance Alert',
+        message: 'Your virtual trading margin is ready. Practice orders with 0 risk and instant order execution.',
+        time: '1h ago',
+        type: 'MARGIN',
+        read: false,
+      },
+      {
+        id: 'notif-3',
+        title: 'Market Hours Update',
+        message: 'MCX & International markets are streaming live. Real-time candlestick charts are active.',
+        time: '2h ago',
+        type: 'PRICE_ALERT',
+        read: false,
+      },
+    ];
   }
   return tenantNotifications[normTenant];
 }

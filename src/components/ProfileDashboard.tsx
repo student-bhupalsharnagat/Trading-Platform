@@ -36,12 +36,41 @@ interface ProfileDashboardProps {
   user: User;
   wallet: WalletFunds;
   onRefreshPortfolio?: () => void;
+  initialNotifications?: AppNotification[];
 }
+
+const DEFAULT_PROFILE_NOTIFICATIONS: AppNotification[] = [
+  {
+    id: 'notif-1',
+    title: 'Welcome to Vertex Trading',
+    message: 'Your trading desk is active and verified. Explore live market feeds across NSE, MCX, and Crypto.',
+    time: '10m ago',
+    type: 'SYSTEM',
+    read: false,
+  },
+  {
+    id: 'notif-2',
+    title: 'Margin Balance Alert',
+    message: 'Your virtual trading margin is ready. Practice orders with 0 risk and instant order execution.',
+    time: '1h ago',
+    type: 'MARGIN',
+    read: false,
+  },
+  {
+    id: 'notif-3',
+    title: 'Market Hours Update',
+    message: 'MCX & International markets are streaming live. Real-time candlestick charts are active.',
+    time: '2h ago',
+    type: 'PRICE_ALERT',
+    read: false,
+  },
+];
 
 export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
   user,
   wallet,
   onRefreshPortfolio,
+  initialNotifications,
 }) => {
   const { logout, showToast } = useAuth();
   const { branding } = useTenant();
@@ -52,7 +81,16 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
   >('NONE');
 
   // Tickets state
-  const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [tickets, setTickets] = useState<SupportTicket[]>(() => {
+    const cached = localStorage.getItem('vtx_support_tickets');
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {}
+    }
+    return [];
+  });
   const [loadingTickets, setLoadingTickets] = useState(false);
   const [newTicketSubject, setNewTicketSubject] = useState('');
   const [newTicketCategory, setNewTicketCategory] = useState<'Trading' | 'Billing' | 'KYC' | 'Technical'>('Trading');
@@ -60,8 +98,36 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
   const [showNewTicketForm, setShowNewTicketForm] = useState(false);
 
   // Notifications state
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
+    if (initialNotifications && initialNotifications.length > 0) return initialNotifications;
+    return DEFAULT_PROFILE_NOTIFICATIONS;
+  });
   const [loadingNotifs, setLoadingNotifs] = useState(false);
+
+  React.useEffect(() => {
+    if (initialNotifications && initialNotifications.length > 0) {
+      setNotifications(initialNotifications);
+    }
+  }, [initialNotifications]);
+
+  React.useEffect(() => {
+    authApi.getNotifications().then((res) => {
+      if (res.notifications && res.notifications.length > 0) {
+        setNotifications(res.notifications);
+      }
+    }).catch(() => {});
+
+    authApi.getTickets().then((res) => {
+      if (res.tickets && res.tickets.length > 0) {
+        setTickets(res.tickets);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
+  const openTicketsCount = tickets.filter(
+    (t) => t.status === 'OPEN' || t.status === 'IN_PROGRESS' || !t.status
+  ).length;
 
   // Settings state persisted in localStorage
   const [orderConfirmation, setOrderConfirmation] = useState(() => {
@@ -282,7 +348,9 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
             </div>
             <div>
               <div className="text-sm font-bold text-white">Notifications</div>
-              <div className="text-xs text-slate-400">3 unread alerts</div>
+              <div className="text-xs text-slate-400">
+                {unreadCount} unread {unreadCount === 1 ? 'alert' : 'alerts'}
+              </div>
             </div>
           </div>
           <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-white transition-colors" />
@@ -300,7 +368,9 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
             </div>
             <div>
               <div className="text-sm font-bold text-white">Support Tickets</div>
-              <div className="text-xs text-slate-400">2 open tickets</div>
+              <div className="text-xs text-slate-400">
+                {openTicketsCount} open {openTicketsCount === 1 ? 'ticket' : 'tickets'}
+              </div>
             </div>
           </div>
           <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-white transition-colors" />

@@ -666,7 +666,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   // If Live Chart is active, render full live chart view matching Screenshot 2
   if (selectedChartInstrument) {
     return (
-      <div className="min-h-screen bg-[#060B13]">
+      <div className="h-screen w-screen bg-[#060B13] flex flex-col overflow-hidden">
         <LiveChart
           instrument={selectedChartInstrument}
           marketClosedOverride={marketClosedOverride}
@@ -689,6 +689,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               setSelectedChartInstrument(inst);
             }}
             onOrderPlaced={handleOrderPlaced}
+            onSelectInstrument={(newInst) => setOrderWindowInstrument(newInst)}
             onOpenWallet={() => {
               setOrderWindowInstrument(null);
               setIsWalletModalOpen(true);
@@ -2701,6 +2702,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               deposited: 200000,
               withdrawn: 50000,
             }}
+            initialNotifications={notifications}
             onRefreshPortfolio={fetchData}
           />
         )}
@@ -2826,6 +2828,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             setSelectedChartInstrument(inst);
           }}
           onOrderPlaced={handleOrderPlaced}
+          onSelectInstrument={(newInst) => setOrderWindowInstrument(newInst)}
           onOpenWallet={() => {
             setOrderWindowInstrument(null);
             setIsWalletModalOpen(true);
@@ -2861,6 +2864,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       <QuickTour
         isOpen={isTourOpen}
         onClose={() => setIsTourOpen(false)}
+        onStartTour={() => {
+          setActiveNav('watchlist');
+          setSelectedChartInstrument(null);
+        }}
         onStepChange={(step) => setTourStep(step)}
         onOpenInstrumentForTour={handleOpenInstrumentForTour}
         onCloseInstrumentForTour={handleCloseInstrumentForTour}

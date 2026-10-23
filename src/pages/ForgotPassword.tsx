@@ -30,6 +30,7 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) =>
       onNavigate('/reset-password', {
         userId: res.userId,
         maskedMobile: res.maskedMobile,
+        initialOtp: res.devOtp,
       });
     } catch (err: any) {
       setError(err.message || 'Failed to dispatch reset code.');

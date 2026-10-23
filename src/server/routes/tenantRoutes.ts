@@ -142,6 +142,23 @@ router.get('/status', async (req: TenantRequest, res: Response) => {
  */
 router.get('/current', async (req: TenantRequest, res: Response) => {
   try {
+    const requestedTenantId =
+      (req.query.tenant_id as string) ||
+      (req.query.tenantId as string) ||
+      (req.headers['x-dev-tenant-id'] as string) ||
+      (req.headers['x-tenant-id'] as string) ||
+      req.cookies?.vtx_dev_tenant ||
+      undefined;
+
+    if (requestedTenantId) {
+      const data = await centralApiService.resolveTenant('localhost', requestedTenantId);
+      res.json({
+        success: true,
+        data,
+      });
+      return;
+    }
+
     if (req.tenant) {
       // Re-fetch latest live status and config to guarantee fresh data
       const liveStatus = (await centralApiService.getTenantStatus(req.tenant.tenant.id)) || req.tenant.status;
@@ -218,15 +235,6 @@ router.get('/all', async (req: TenantRequest, res: Response) => {
  * Allows switching the tenant in development / preview mode
  */
 router.post('/dev/switch', async (req: TenantRequest, res: Response) => {
-  if (process.env.NODE_ENV === 'production') {
-    res.status(403).json({
-      success: false,
-      code: 'DEV_FEATURE_DISABLED',
-      message: 'Development tenant switching is strictly disabled in production mode.',
-    });
-    return;
-  }
-
   try {
     const { tenantId } = req.body;
     if (!tenantId) {

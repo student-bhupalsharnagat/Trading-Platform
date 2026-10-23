@@ -250,6 +250,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
   const simulatedNewBalance = wallet.availableBalance + numDepositAmt;
   const numWithdrawAmt = Number(withdrawAmount) || 0;
   const isWithdrawExceeded = numWithdrawAmt > wallet.availableBalance;
+  const isWithdrawBelowMin = numWithdrawAmt > 0 && numWithdrawAmt < 500;
 
   const filteredHistory = history.filter((item) => {
     if (historyFilter === 'ALL') return true;
@@ -826,12 +827,19 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                     value={withdrawAmount}
                     onChange={(e) => setWithdrawAmount(e.target.value)}
                     className={`w-full bg-[#060B13] border rounded-xl pl-9 pr-4 py-3 text-base sm:text-lg font-mono font-black text-white outline-none transition-all ${
-                      isWithdrawExceeded
+                      isWithdrawExceeded || isWithdrawBelowMin
                         ? 'border-rose-500 ring-1 ring-rose-500/40 text-rose-300'
                         : 'border-[#1E2E44] focus:border-amber-500'
                     }`}
                   />
                 </div>
+
+                {isWithdrawBelowMin && (
+                  <p className="text-xs text-rose-400 font-semibold flex items-center gap-1 mt-1">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    Minimum withdrawal amount is ₹500.
+                  </p>
+                )}
 
                 {isWithdrawExceeded && (
                   <p className="text-xs text-rose-400 font-semibold flex items-center gap-1 mt-1">
@@ -876,7 +884,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
               <button
                 type="button"
                 id="wallet-withdraw-submit-btn"
-                disabled={processing || !numWithdrawAmt || isWithdrawExceeded || numWithdrawAmt < 500}
+                disabled={processing}
                 onClick={handleWithdraw}
                 className="w-full py-4 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-black rounded-2xl text-sm sm:text-base transition-all cursor-pointer shadow-xl shadow-amber-950/50 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.99]"
               >

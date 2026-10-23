@@ -205,7 +205,10 @@ class DatabaseService {
     const cleanDigits = trimmed.replace(/\D/g, '');
 
     return this.state.users.find((u) => {
-      if (u.user_id.toLowerCase() === normalized) return true;
+      if (u.user_id && u.user_id.toLowerCase() === normalized) return true;
+      if (u.id && u.id.toLowerCase() === normalized) return true;
+      if ((u as any).client_code && String((u as any).client_code).toLowerCase() === normalized) return true;
+      if (u.email && u.email.toLowerCase() === normalized) return true;
       if (u.phone_e164 && u.phone_e164 === trimmed) return true;
       if (cleanDigits.length >= 7 && u.mobile && u.mobile.replace(/\D/g, '').endsWith(cleanDigits.slice(-10))) {
         return true;

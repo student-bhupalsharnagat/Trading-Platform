@@ -194,8 +194,19 @@ export const LiveChart: React.FC<LiveChartProps> = ({
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const width = canvasDimensions.width || (canvas.width > 0 ? Math.floor(canvas.width / dpr) : 800);
-    const height = canvasDimensions.height || (canvas.height > 0 ? Math.floor(canvas.height / dpr) : 400);
+    const container = containerRef.current;
+    const displayWidth = Math.max(200, Math.floor(container?.clientWidth || canvas.clientWidth || canvasDimensions.width || 800));
+    const displayHeight = Math.max(150, Math.floor(container?.clientHeight || canvas.clientHeight || canvasDimensions.height || 480));
+
+    if (canvas.width !== Math.floor(displayWidth * dpr) || canvas.height !== Math.floor(displayHeight * dpr)) {
+      canvas.width = Math.floor(displayWidth * dpr);
+      canvas.height = Math.floor(displayHeight * dpr);
+      canvas.style.width = `${displayWidth}px`;
+      canvas.style.height = `${displayHeight}px`;
+    }
+
+    const width = displayWidth;
+    const height = displayHeight;
 
     ctx.save();
     ctx.scale(dpr, dpr);
@@ -311,6 +322,15 @@ export const LiveChart: React.FC<LiveChartProps> = ({
         ctx.fillRect(x - bodyWidth / 2, bodyTop, bodyWidth, bodyHeight);
       });
     } else if (chartType === 'Line' || chartType === 'Area') {
+      const lastX = leftMargin + (visibleCandles.length - 1) * candleWidth + candleWidth / 2;
+      const firstX = leftMargin + candleWidth / 2;
+      const baseY = topMargin + chartHeight;
+
+      // Area gradient for both Line and Area styles (so Line draws visible shaded gradient)
+      const gradient = ctx.createLinearGradient(0, topMargin, 0, baseY);
+      gradient.addColorStop(0, chartType === 'Line' ? 'rgba(56, 189, 248, 0.20)' : 'rgba(16, 185, 129, 0.22)');
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0.0)');
+
       ctx.beginPath();
       visibleCandles.forEach((c, idx) => {
         const x = leftMargin + idx * candleWidth + candleWidth / 2;
@@ -318,37 +338,23 @@ export const LiveChart: React.FC<LiveChartProps> = ({
         if (idx === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       });
+      ctx.lineTo(lastX, baseY);
+      ctx.lineTo(firstX, baseY);
+      ctx.closePath();
+      ctx.fillStyle = gradient;
+      ctx.fill();
 
-      if (chartType === 'Area') {
-        const lastX = leftMargin + (visibleCandles.length - 1) * candleWidth + candleWidth / 2;
-        const firstX = leftMargin + candleWidth / 2;
-        const baseY = topMargin + chartHeight;
-
-        const gradient = ctx.createLinearGradient(0, topMargin, 0, baseY);
-        gradient.addColorStop(0, 'rgba(16, 185, 129, 0.22)');
-        gradient.addColorStop(1, 'rgba(16, 185, 129, 0.0)');
-
-        ctx.lineTo(lastX, baseY);
-        ctx.lineTo(firstX, baseY);
-        ctx.closePath();
-        ctx.fillStyle = gradient;
-        ctx.fill();
-
-        ctx.beginPath();
-        visibleCandles.forEach((c, idx) => {
-          const x = leftMargin + idx * candleWidth + candleWidth / 2;
-          const y = priceToY(c.close);
-          if (idx === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        });
-        ctx.strokeStyle = '#10B981';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      } else {
-        ctx.strokeStyle = '#38BDF8';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      }
+      // Price line path
+      ctx.beginPath();
+      visibleCandles.forEach((c, idx) => {
+        const x = leftMargin + idx * candleWidth + candleWidth / 2;
+        const y = priceToY(c.close);
+        if (idx === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.strokeStyle = chartType === 'Line' ? '#38BDF8' : '#10B981';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
     }
 
     // Active Live Price Line & Badge on Y-axis
@@ -624,7 +630,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-[#060B13] text-slate-100 flex flex-col font-sans selection:bg-amber-500/30">
+    <div className="h-screen max-h-screen bg-[#060B13] text-slate-100 flex flex-col font-sans selection:bg-amber-500/30 overflow-hidden">
       {/* 1. Header: Clean Title, LTP, Change & Ask/Bid */}
       <header className="sticky top-0 z-30 bg-[#060B13] border-b border-[#121B2B] px-3 sm:px-4 py-2.5">
         <div className="w-full flex items-center justify-between">
@@ -819,13 +825,13 @@ export const LiveChart: React.FC<LiveChartProps> = ({
       {/* 4. Main Chart Canvas / TradingView Area (Clean & No Clutter) */}
       <main className="flex-1 relative flex flex-col p-1 sm:p-2 pb-16">
         {engineMode === 'TRADINGVIEW' && chartType === 'Candle' ? (
-          <div className="flex-1 w-full h-[72vh] min-h-[440px] relative rounded-lg border border-[#121B2B] overflow-hidden bg-[#060B13]">
+          <div className="flex-1 w-full h-full min-h-[480px] relative rounded-lg border border-[#121B2B] overflow-hidden bg-[#060B13]">
             <TradingViewChart instrument={instrument} timeframe={timeframe} />
           </div>
         ) : (
           <div
             ref={containerRef}
-            className="flex-1 w-full h-[72vh] min-h-[440px] relative rounded-lg border border-[#121B2B] overflow-hidden bg-[#060B13] cursor-crosshair"
+            className="flex-1 w-full h-full min-h-[480px] relative rounded-lg border border-[#121B2B] overflow-hidden bg-[#060B13] cursor-crosshair"
           >
             <canvas
               ref={canvasRef}

@@ -775,7 +775,8 @@ router.post(
         commissionRate,
         demoBalance,
       } = req.body || {};
-      const mobile = req.body?.mobile || '9999999999';
+      const mobile = req.body?.mobile || '9876543210';
+      const clientEmail = email || (userId ? `${userId.trim().toLowerCase()}@client.com` : undefined);
 
       if (!userId || !fullName) {
         res.status(400).json({
@@ -821,7 +822,7 @@ router.post(
         countryCode: countryCode || '+91',
         mobile,
         passwordHash,
-        email,
+        email: clientEmail,
         role,
         parentId: parentId || null,
         hierarchyPath,

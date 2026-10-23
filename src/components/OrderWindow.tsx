@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Instrument } from '../types.ts';
 import { useAuth } from '../hooks/useAuth.ts';
 import { useTenant } from '../context/TenantContext.tsx';
@@ -38,6 +38,7 @@ interface OrderWindowProps {
   onOpenLiveChart?: (instrument: Instrument) => void;
   onOrderPlaced?: (result?: any) => void;
   onOpenWallet?: () => void;
+  onSelectInstrument?: (instrument: Instrument) => void;
 }
 
 export const OrderWindow: React.FC<OrderWindowProps> = ({
@@ -50,6 +51,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
   onOpenLiveChart,
   onOrderPlaced,
   onOpenWallet,
+  onSelectInstrument,
 }) => {
   const { showToast } = useAuth();
   const { isTradingEnabled, isOptionsEnabled, branding } = useTenant();
@@ -67,20 +69,36 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
     }
   }, [tourStep]);
 
+  // Active ticket instrument (allows Option Chain selection to switch instrument)
+  const [activeInstrument, setActiveInstrument] = useState<Instrument>(instrument);
+
+  useEffect(() => {
+    setActiveInstrument(instrument);
+  }, [instrument]);
+
   // Mode: Intraday (MIS) vs Holding (CNC/NRML)
   const [productType, setProductType] = useState<'INTRADAY' | 'HOLDING'>('INTRADAY');
 
   // Execution: Market vs Limit vs SL vs SL-M (Zerodha & Upstox standard)
   const [orderType, setOrderType] = useState<'MARKET' | 'LIMIT' | 'SL' | 'SL-M'>('MARKET');
-  const [limitPrice, setLimitPrice] = useState<number>(instrument.lastPrice);
-  const [triggerPrice, setTriggerPrice] = useState<number>(
-    Number((instrument.lastPrice * (initialType === 'BUY' ? 1.005 : 0.995)).toFixed(2))
+  const [limitPrice, setLimitPrice] = useState<string>(() => instrument.lastPrice.toString());
+  const [triggerPrice, setTriggerPrice] = useState<string>(() =>
+    (instrument.lastPrice * (initialType === 'BUY' ? 1.005 : 0.995)).toFixed(2)
   );
+
+  const prevInstrumentSymbolRef = useRef(instrument.symbol);
+  useEffect(() => {
+    if (prevInstrumentSymbolRef.current !== instrument.symbol) {
+      prevInstrumentSymbolRef.current = instrument.symbol;
+      setLimitPrice(instrument.lastPrice.toString());
+      setTriggerPrice((instrument.lastPrice * (initialType === 'BUY' ? 1.005 : 0.995)).toFixed(2));
+    }
+  }, [instrument.symbol, instrument.lastPrice, initialType]);
 
   // Lot vs Quantity Mode
   const [inputMode, setInputMode] = useState<'LOTS' | 'QTY'>('LOTS');
   const [lots, setLots] = useState<number>(1);
-  const [quantity, setQuantity] = useState<number>(instrument.lotSize || 100);
+  const [quantity, setQuantity] = useState<number>(activeInstrument.lotSize || 100);
 
   // Stop Loss & Target Toggle (GTT / Cover Order style)
   const [enableSLTarget, setEnableSLTarget] = useState(false);
@@ -105,14 +123,34 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
   const [submitting, setSubmitting] = useState(false);
 
   // Dynamic calculations
-  const lotSize = Math.max(1, instrument.lotSize || 1);
+  const lotSize = Math.max(1, activeInstrument.lotSize || 1);
   const effectiveLots = inputMode === 'LOTS' ? lots : Number((quantity / lotSize).toFixed(2));
+
+  const numLimitPrice =
+    limitPrice !== '' && !isNaN(Number(limitPrice)) ? Number(limitPrice) : activeInstrument.lastPrice;
+  const numTriggerPrice =
+    triggerPrice !== '' && !isNaN(Number(triggerPrice)) ? Number(triggerPrice) : activeInstrument.lastPrice;
+
   const currentPrice =
-    orderType === 'MARKET' || orderType === 'SL-M' ? instrument.lastPrice : limitPrice;
+    orderType === 'MARKET' ? activeInstrument.lastPrice : orderType === 'SL-M' ? numTriggerPrice : numLimitPrice;
+
+  const getButtonSubtitle = () => {
+    if (orderType === 'MARKET') return 'Market Order';
+    if (orderType === 'SL-M') {
+      const displayPrice = triggerPrice !== '' && !isNaN(Number(triggerPrice)) ? Number(triggerPrice) : activeInstrument.lastPrice;
+      return `SL-M @ ₹${displayPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    if (orderType === 'SL') {
+      const displayPrice = limitPrice !== '' && !isNaN(Number(limitPrice)) ? Number(limitPrice) : activeInstrument.lastPrice;
+      return `SL @ ₹${displayPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    const displayPrice = limitPrice !== '' && !isNaN(Number(limitPrice)) ? Number(limitPrice) : activeInstrument.lastPrice;
+    return `LIMIT @ ₹${displayPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
 
   // Margin calculation matching Indian discount brokers (Zerodha/Upstox)
-  const intradayMarginPerLot = instrument.intraday || Math.round(instrument.lastPrice * 0.2);
-  const holdingMarginPerLot = instrument.holding || Math.round(instrument.lastPrice * 1.67);
+  const intradayMarginPerLot = activeInstrument.intraday || Math.round(activeInstrument.lastPrice * 0.2);
+  const holdingMarginPerLot = activeInstrument.holding || Math.round(activeInstrument.lastPrice * 1.67);
 
   const totalIntradayMargin = Math.round(intradayMarginPerLot * effectiveLots);
   const totalHoldingMargin = Math.round(holdingMarginPerLot * effectiveLots);
@@ -121,8 +159,8 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
   const isMarginShortfall = availableBalance !== undefined && availableBalance < selectedMargin;
   const marginShortfallAmount = isMarginShortfall ? selectedMargin - availableBalance : 0;
 
-  const askPrice = instrument.ask || Number((instrument.lastPrice + 0.63).toFixed(2));
-  const bidPrice = instrument.bid || Number((instrument.lastPrice - 2.49).toFixed(2));
+  const askPrice = activeInstrument.ask || Number((activeInstrument.lastPrice + 0.63).toFixed(2));
+  const bidPrice = activeInstrument.bid || Number((activeInstrument.lastPrice - 2.49).toFixed(2));
 
   // Synthesize 5-level Market Depth (Bid/Ask ladder) around current market spread
   const marketDepth = React.useMemo(() => {
@@ -175,7 +213,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
   };
 
   const handleExecuteOrder = async (actionType: 'BUY' | 'SELL') => {
-    const hoursInfo = getMarketHoursInfo(instrument.category, marketClosedOverride);
+    const hoursInfo = getMarketHoursInfo(activeInstrument.category, marketClosedOverride);
     if (!hoursInfo.isOpen) {
       setMarketHoursInfo(hoursInfo);
       setShowMarketClosedModal(true);
@@ -186,18 +224,18 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
 
     try {
       const isPending = orderType === 'LIMIT' || orderType === 'SL' || orderType === 'SL-M';
-      const orderPrice = orderType === 'MARKET' || orderType === 'SL-M' ? instrument.lastPrice : limitPrice;
-      const orderTrigger = orderType === 'SL' || orderType === 'SL-M' ? triggerPrice : undefined;
+      const orderPrice = orderType === 'MARKET' ? activeInstrument.lastPrice : numLimitPrice;
+      const orderTrigger = orderType === 'SL' || orderType === 'SL-M' ? numTriggerPrice : undefined;
 
       const payload = {
-        symbol: instrument.symbol,
+        symbol: activeInstrument.symbol,
         type: actionType,
         orderType,
         product: productType,
         lots: effectiveLots,
-        quantity: inputMode === 'QTY' ? quantity : effectiveLots * (instrument.lotSize || 1),
+        quantity: inputMode === 'QTY' ? quantity : effectiveLots * (activeInstrument.lotSize || 1),
         price: orderPrice,
-        limitPrice: orderType === 'LIMIT' || orderType === 'SL' ? limitPrice : undefined,
+        limitPrice: orderType === 'LIMIT' || orderType === 'SL' ? numLimitPrice : undefined,
         triggerPrice: orderTrigger,
         stopLoss: enableSLTarget && stopLossPrice ? Number(stopLossPrice) : undefined,
         target: enableSLTarget && targetPrice ? Number(targetPrice) : undefined,
@@ -210,8 +248,8 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
         type: 'success',
         title: isPending ? `📋 ${orderType} Order Placed` : `✅ ${actionType === 'BUY' ? 'BUY ASK' : 'SELL BID'} Executed!`,
         description: isPending
-          ? `Placed ${orderType} order for ${effectiveLots} lot(s) (${effectiveLots * (instrument.lotSize || 1)} Qty) of ${instrument.symbol}${orderTrigger ? ` with trigger ₹${orderTrigger}` : ''}.`
-          : `Successfully executed ${actionType} for ${effectiveLots} lot(s) (${effectiveLots * (instrument.lotSize || 1)} Qty) of ${instrument.symbol} at ₹${orderPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}.`,
+          ? `Placed ${orderType} order for ${effectiveLots} lot(s) (${effectiveLots * (activeInstrument.lotSize || 1)} Qty) of ${activeInstrument.symbol}${orderTrigger ? ` with trigger ₹${orderTrigger}` : ''}.`
+          : `Successfully executed ${actionType} for ${effectiveLots} lot(s) (${effectiveLots * (activeInstrument.lotSize || 1)} Qty) of ${activeInstrument.symbol} at ₹${orderPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}.`,
         duration: 4500,
       });
 
@@ -243,30 +281,30 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                    {instrument.symbol}
+                    {activeInstrument.symbol}
                   </h2>
                   <span className="px-1.5 py-0.5 rounded-sm border border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-[#EAB308] text-[9px] font-black tracking-wider uppercase font-mono">
-                    {instrument.category || 'EQUITY'}
+                    {activeInstrument.category || 'EQUITY'}
                   </span>
                   <span className="px-1.5 py-0.5 rounded-sm bg-[#F97316] text-[#060B13] text-[9px] font-black tracking-tight font-mono">
-                    {instrument.expiry || 'NSE'}
+                    {activeInstrument.expiry || 'NSE'}
                   </span>
                 </div>
 
                 <div className="flex items-center gap-1.5 mt-1 text-xs text-slate-600 dark:text-slate-300 flex-wrap">
-                  <span className="text-slate-500 dark:text-slate-400">{instrument.name || instrument.symbol}</span>
+                  <span className="text-slate-500 dark:text-slate-400">{activeInstrument.name || activeInstrument.symbol}</span>
                   <span className="text-slate-400 dark:text-slate-500">•</span>
                   <span className="font-semibold text-slate-700 dark:text-slate-300">
-                    LTP <span className="font-mono font-bold text-slate-900 dark:text-white">₹{instrument.lastPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                    LTP <span className="font-mono font-bold text-slate-900 dark:text-white">₹{activeInstrument.lastPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                   </span>
                   <span
                     className={`font-mono font-bold flex items-center gap-0.5 text-xs ${
-                      instrument.change >= 0 ? 'text-[#10B981]' : 'text-[#EF4444]'
+                      activeInstrument.change >= 0 ? 'text-[#10B981]' : 'text-[#EF4444]'
                     }`}
                   >
-                    {instrument.change >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                    <span>{instrument.change >= 0 ? '+' : ''}{instrument.change.toFixed(2)}</span>
-                    <span>({instrument.change >= 0 ? '+' : ''}{instrument.changePercent.toFixed(2)}%)</span>
+                    {activeInstrument.change >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+                    <span>{activeInstrument.change >= 0 ? '+' : ''}{activeInstrument.change.toFixed(2)}</span>
+                    <span>({activeInstrument.change >= 0 ? '+' : ''}{activeInstrument.changePercent.toFixed(2)}%)</span>
                   </span>
                 </div>
               </div>
@@ -560,10 +598,10 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
                     <>
                       <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 tracking-wider">LIMIT PRICE (₹)</div>
                       <input
-                        type="number"
-                        step="0.05"
+                        type="text"
+                        inputMode="decimal"
                         value={limitPrice}
-                        onChange={(e) => setLimitPrice(parseFloat(e.target.value) || instrument.lastPrice)}
+                        onChange={(e) => setLimitPrice(e.target.value)}
                         className="font-mono font-black text-sm text-slate-900 dark:text-white bg-transparent outline-none w-32 border-b border-amber-500/50"
                       />
                     </>
@@ -621,7 +659,12 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setOrderType('LIMIT')}
+                  onClick={() => {
+                    setOrderType('LIMIT');
+                    if (!limitPrice || limitPrice.trim() === '') {
+                      setLimitPrice(activeInstrument.lastPrice.toString());
+                    }
+                  }}
                   className={`py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
                     orderType === 'LIMIT'
                       ? 'bg-amber-500/15 border-b-2 border-amber-500 text-amber-600 dark:text-amber-400 font-black shadow-xs'
@@ -632,7 +675,15 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setOrderType('SL')}
+                  onClick={() => {
+                    setOrderType('SL');
+                    if (!limitPrice || limitPrice.trim() === '') {
+                      setLimitPrice(activeInstrument.lastPrice.toString());
+                    }
+                    if (!triggerPrice || triggerPrice.trim() === '') {
+                      setTriggerPrice((activeInstrument.lastPrice * (initialType === 'BUY' ? 1.005 : 0.995)).toFixed(2));
+                    }
+                  }}
                   className={`py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
                     orderType === 'SL'
                       ? 'bg-amber-500/15 border-b-2 border-amber-500 text-amber-600 dark:text-amber-400 font-black shadow-xs'
@@ -643,7 +694,12 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setOrderType('SL-M')}
+                  onClick={() => {
+                    setOrderType('SL-M');
+                    if (!triggerPrice || triggerPrice.trim() === '') {
+                      setTriggerPrice((activeInstrument.lastPrice * (initialType === 'BUY' ? 1.005 : 0.995)).toFixed(2));
+                    }
+                  }}
                   className={`py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
                     orderType === 'SL-M'
                       ? 'bg-amber-500/15 border-b-2 border-amber-500 text-amber-600 dark:text-amber-400 font-black shadow-xs'
@@ -662,10 +718,10 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
                     <span className="text-[10px] text-slate-400">Order activates once LTP crosses trigger</span>
                   </div>
                   <input
-                    type="number"
-                    step="0.05"
+                    type="text"
+                    inputMode="decimal"
                     value={triggerPrice}
-                    onChange={(e) => setTriggerPrice(parseFloat(e.target.value) || instrument.lastPrice)}
+                    onChange={(e) => setTriggerPrice(e.target.value)}
                     className="w-full bg-white dark:bg-[#080E18] border border-amber-500/50 rounded-lg px-3 py-1.5 font-mono font-bold text-sm text-slate-900 dark:text-white outline-none focus:border-amber-400"
                   />
                 </div>
@@ -833,7 +889,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
                 <span>SELL BID (₹{bidPrice.toFixed(2)})</span>
               </div>
               <span className="text-[11px] font-mono font-medium opacity-90 mt-0.5">
-                {orderType === 'MARKET' ? 'Market Order' : `${orderType} @ ₹${currentPrice.toFixed(2)}`}
+                {getButtonSubtitle()}
               </span>
             </button>
 
@@ -851,7 +907,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
                 <span>BUY ASK (₹{askPrice.toFixed(2)})</span>
               </div>
               <span className="text-[11px] font-mono font-medium opacity-90 mt-0.5">
-                {orderType === 'MARKET' ? 'Market Order' : `${orderType} @ ₹${currentPrice.toFixed(2)}`}
+                {getButtonSubtitle()}
               </span>
             </button>
           </div>
@@ -861,13 +917,32 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
       {/* Option Chain Modal */}
       {showOptionChain && (
         <OptionChain
-          instrument={instrument}
+          instrument={activeInstrument}
           onClose={() => setShowOptionChain(false)}
-          onSelectOption={(optSymbol, strike, type, price) => {
+          onSelectOption={(optSymbol, strike, type, price, expiry) => {
             setShowOptionChain(false);
+            const optExpiry = expiry || '31 Aug';
+            const optContract: Instrument = {
+              ...activeInstrument,
+              id: `opt_${activeInstrument.symbol}_${optExpiry}_${strike}_${type}`.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+              symbol: `${activeInstrument.symbol} ${optExpiry.toUpperCase()} ${strike} ${type}`,
+              name: `${activeInstrument.name || activeInstrument.symbol} ${optExpiry.toUpperCase()} ${strike} ${type}`,
+              lastPrice: price,
+              change: Number((price * 0.02).toFixed(2)),
+              changePercent: 2.0,
+              lotSize: activeInstrument.lotSize || 1,
+              category: 'OPTIONS' as any,
+              sectionName: 'Options',
+              expiry: optExpiry,
+              strike,
+              optionType: type,
+            };
+            setActiveInstrument(optContract);
+            setLimitPrice(price.toString());
+            onSelectInstrument?.(optContract);
             showToast({
               type: 'info',
-              title: `${optSymbol} Selected`,
+              title: `${optContract.symbol} Selected`,
               description: `Loaded strike ₹${strike} ${type} at LTP ₹${price.toFixed(2)}`,
             });
           }}

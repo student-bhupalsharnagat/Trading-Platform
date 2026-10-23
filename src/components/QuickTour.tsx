@@ -5,6 +5,7 @@ import { Clock, Star, Globe, ChevronDown, Check } from 'lucide-react';
 interface QuickTourProps {
   isOpen: boolean;
   onClose: () => void;
+  onStartTour?: () => void;
   onStepChange?: (step: number) => void;
   onOpenInstrumentForTour?: () => void;
   onCloseInstrumentForTour?: () => void;
@@ -99,6 +100,7 @@ const TOUR_STEPS: StepConfig[] = [
 export const QuickTour: React.FC<QuickTourProps> = ({
   isOpen,
   onClose,
+  onStartTour,
   onStepChange,
   onOpenInstrumentForTour,
   onCloseInstrumentForTour,
@@ -198,6 +200,7 @@ export const QuickTour: React.FC<QuickTourProps> = ({
   if (!isOpen) return null;
 
   const handleStartTour = () => {
+    onStartTour?.();
     setTourMode('guided');
     setCurrentStep(1);
     onCloseInstrumentForTour?.();
