@@ -488,7 +488,7 @@ export class JsonTenantRepository implements ITenantRepository {
     tenantId: string,
     updates: Partial<TenantSecurityStatus>
   ): Promise<TenantSecurityStatus | null> {
-    const item = this.store[tenantId];
+    const item = this.getItem(tenantId);
     if (!item) return null;
     item.status = { ...item.status, ...updates };
     return { ...item.status };
@@ -498,7 +498,7 @@ export class JsonTenantRepository implements ITenantRepository {
     tenantId: string,
     updates: Partial<TenantBranding>
   ): Promise<TenantBranding | null> {
-    const item = this.store[tenantId];
+    const item = this.getItem(tenantId);
     if (!item) return null;
     item.branding = { ...item.branding, ...updates };
     return { ...item.branding };

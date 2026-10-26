@@ -191,4 +191,15 @@ export const adminApi = {
       body: JSON.stringify({ userId, action, reason }),
     });
   },
+
+  // White Label Branding
+  getWhiteLabel: async (): Promise<any> => {
+    return request<any>('/white-label');
+  },
+  updateWhiteLabel: async (payload: any): Promise<any> => {
+    return request<any>('/white-label', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
 };

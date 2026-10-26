@@ -32,6 +32,7 @@ import { AdminRiskPage } from './admin/pages/AdminRiskPage.tsx';
 import { AdminKycPage } from './admin/pages/AdminKycPage.tsx';
 import { AdminCommissionPage } from './admin/pages/AdminCommissionPage.tsx';
 import { AdminReportsPage } from './admin/pages/AdminReportsPage.tsx';
+import { AdminWhiteLabelPage } from './admin/pages/AdminWhiteLabelPage.tsx';
 
 function AppContent() {
   const { user, loading, toasts, dismissToast } = useAuth();
@@ -333,6 +334,22 @@ function AppContent() {
               title="System Audit Logs"
             >
               <AuditLogsPage />
+            </AdminLayout>
+          </AdminProtectedRoute>
+        );
+
+      case '/admin/white-label':
+        return (
+          <AdminProtectedRoute
+            allowedRoles={['SUPER_ADMIN']}
+            onBackToTrading={() => navigate('/dashboard')}
+          >
+            <AdminLayout
+              currentPath={currentRoute}
+              onNavigate={navigate}
+              title="Platform White Label & Branding"
+            >
+              <AdminWhiteLabelPage onNavigate={navigate} />
             </AdminLayout>
           </AdminProtectedRoute>
         );

@@ -10,6 +10,7 @@ import riskRoutes from './riskRoutes.ts';
 import fundRoutes from './fundRoutes.ts';
 import ledgerRoutes from './ledgerRoutes.ts';
 import kycRoutes from './kycRoutes.ts';
+import whiteLabelRoutes from './whiteLabelRoutes.ts';
 
 const router = Router();
 
@@ -24,5 +25,6 @@ router.use('/risk', riskRoutes);
 router.use('/funds', fundRoutes);
 router.use('/ledger', ledgerRoutes);
 router.use('/kyc', kycRoutes);
+router.use('/white-label', whiteLabelRoutes);
 
 export default router;
