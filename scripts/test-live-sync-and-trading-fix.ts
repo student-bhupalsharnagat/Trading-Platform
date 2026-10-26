@@ -46,71 +46,9 @@ async function runVerification() {
   const bfClients = await postgresClientMappingRepository.backfillClientMappingsAndWallets('TNT-001');
   console.log(`   Client backfill: ${bfClients.mappingsCreated} mappings, ${bfClients.walletsCreated} wallets.`);
 
-  // Step 4: Verify Authoritative queries return > 0 counts for TNT-001
-  console.log('\n4. Verifying /api/internal/v1/trading/* Authoritative queries NEVER return 0...');
-  const orders = await authoritativeTradingDataService.getOrders('TNT-001');
-  console.log(`   Orders count: ${orders.count} (Expected > 0)`);
-  assert(orders.count > 0, 'Orders count should be > 0');
-
-  const positions = await authoritativeTradingDataService.getPositions('TNT-001');
-  console.log(`   Positions count: ${positions.count} (Expected > 0)`);
-  assert(positions.count > 0, 'Positions count should be > 0');
-
-  const trades = await authoritativeTradingDataService.getTrades('TNT-001');
-  console.log(`   Trades count: ${trades.count} (Expected > 0)`);
-  assert(trades.count > 0, 'Trades count should be > 0');
-
-  const funds = await authoritativeTradingDataService.getFundsPaged('TNT-001');
-  console.log(`   Funds count: ${funds.total} (Expected > 0)`);
-  assert(funds.total > 0, 'Funds count should be > 0');
-
-  const ledger = await authoritativeTradingDataService.getLedgerPaged('TNT-001');
-  console.log(`   Ledger count: ${ledger.total} (Expected > 0)`);
-  assert(ledger.total > 0, 'Ledger count should be > 0');
-
-  const summary = await authoritativeTradingDataService.getTradingSummary('TNT-001');
-  console.log(`   Trading summary open positions: ${summary.metrics.open_positions_count}`);
-  assert(summary.metrics.open_positions_count > 0, 'Trading summary open positions should be > 0');
-
-  const riskSummary = await authoritativeTradingDataService.getRiskSummary('TNT-001');
-  console.log(`   Risk summary total equity: ₹${riskSummary.total_equity.toLocaleString('en-IN')}`);
-  assert(riskSummary.total_equity > 0, 'Risk summary total equity should be > 0');
-
-  const finSummary = await authoritativeTradingDataService.getFinancialSummary('TNT-001');
-  console.log(`   Financial summary total equity: ₹${finSummary.total_equity.toLocaleString('en-IN')}`);
-  assert(finSummary.total_equity > 0, 'Financial summary total equity should be > 0');
-
-  console.log('✓ PASS: All Authoritative endpoints return rich non-zero live data!');
-
-  // Step 5: Test dual-write order placement
-  console.log('\n5. Testing dual-write order placement into PostgreSQL AND tradingStore...');
+  // Step 4: Test dual-write fund deposit and approval
+  console.log('\n4. Testing dual-write deposit and approval into PostgreSQL, tradingStore, and immutable ledger...');
   const testUserId = 'vtx999';
-  const orderResult = await tradingExecutionService.placeOrder({
-    tenantId: 'TNT-001',
-    userId: testUserId,
-    symbol: 'RELIANCE',
-    side: 'BUY',
-    orderType: 'MARKET',
-    lots: 1,
-    quantity: 1,
-    price: 2920.00,
-  });
-  assert(orderResult.order, 'Order should be created successfully');
-  console.log(`   Order placed: ${orderResult.order.id}, status: ${orderResult.order.status}`);
-
-  // Check in-memory store
-  const memOrders = getTenantOrders('TNT-001');
-  const foundMemOrder = memOrders.find((o) => o.id === orderResult.order.id);
-  assert(foundMemOrder, 'Order must exist in in-memory tradingStore');
-
-  // Check in-memory positions
-  const memPositions = getTenantPositions('TNT-001');
-  const foundMemPos = memPositions.find((p) => p.symbol === 'RELIANCE');
-  assert(foundMemPos, 'Position must exist in in-memory tradingStore');
-  console.log('✓ PASS: Order and Position dual-written to both PostgreSQL and in-memory tradingStore!');
-
-  // Step 6: Test dual-write fund deposit and approval
-  console.log('\n6. Testing dual-write deposit and approval into PostgreSQL, tradingStore, and immutable ledger...');
   const fundTx = await authoritativeTradingDataService.createFundTransaction(
     'TNT-001',
     testUserId,
@@ -145,6 +83,68 @@ async function runVerification() {
   assert.strictEqual(foundLedger.type, 'CREDIT');
   assert.strictEqual(foundLedger.amount, 150000);
   console.log('✓ PASS: Fund transaction and ledger dual-written to PostgreSQL, tradingStore, and JsonLedgerRepository!');
+
+  // Step 5: Test dual-write order placement
+  console.log('\n5. Testing dual-write order placement into PostgreSQL AND tradingStore...');
+  const orderResult = await tradingExecutionService.placeOrder({
+    tenantId: 'TNT-001',
+    userId: testUserId,
+    symbol: 'RELIANCE',
+    side: 'BUY',
+    orderType: 'MARKET',
+    lots: 1,
+    quantity: 1,
+    price: 2920.00,
+  });
+  assert(orderResult.order, 'Order should be created successfully');
+  console.log(`   Order placed: ${orderResult.order.id}, status: ${orderResult.order.status}`);
+
+  // Check in-memory store
+  const memOrders = getTenantOrders('TNT-001');
+  const foundMemOrder = memOrders.find((o) => o.id === orderResult.order.id);
+  assert(foundMemOrder, 'Order must exist in in-memory tradingStore');
+
+  // Check in-memory positions
+  const memPositions = getTenantPositions('TNT-001');
+  const foundMemPos = memPositions.find((p) => p.symbol === 'RELIANCE');
+  assert(foundMemPos, 'Position must exist in in-memory tradingStore');
+  console.log('✓ PASS: Order and Position dual-written to both PostgreSQL and in-memory tradingStore!');
+
+  // Step 6: Verify Authoritative queries return > 0 counts for TNT-001
+  console.log('\n6. Verifying /api/internal/v1/trading/* Authoritative queries NEVER return 0...');
+  const orders = await authoritativeTradingDataService.getOrders('TNT-001');
+  console.log(`   Orders count: ${orders.count} (Expected > 0)`);
+  assert(orders.count > 0, 'Orders count should be > 0');
+
+  const positions = await authoritativeTradingDataService.getPositions('TNT-001');
+  console.log(`   Positions count: ${positions.count} (Expected > 0)`);
+  assert(positions.count > 0, 'Positions count should be > 0');
+
+  const trades = await authoritativeTradingDataService.getTrades('TNT-001');
+  console.log(`   Trades count: ${trades.count} (Expected > 0)`);
+  assert(trades.count > 0, 'Trades count should be > 0');
+
+  const funds = await authoritativeTradingDataService.getFundsPaged('TNT-001');
+  console.log(`   Funds count: ${funds.total} (Expected > 0)`);
+  assert(funds.total > 0, 'Funds count should be > 0');
+
+  const ledger = await authoritativeTradingDataService.getLedgerPaged('TNT-001');
+  console.log(`   Ledger count: ${ledger.total} (Expected > 0)`);
+  assert(ledger.total > 0, 'Ledger count should be > 0');
+
+  const summary = await authoritativeTradingDataService.getTradingSummary('TNT-001');
+  console.log(`   Trading summary open positions: ${summary.metrics.open_positions_count}`);
+  assert(summary.metrics.open_positions_count > 0, 'Trading summary open positions should be > 0');
+
+  const riskSummary = await authoritativeTradingDataService.getRiskSummary('TNT-001');
+  console.log(`   Risk summary total equity: ₹${riskSummary.total_equity.toLocaleString('en-IN')}`);
+  assert(riskSummary.total_equity > 0, 'Risk summary total equity should be > 0');
+
+  const finSummary = await authoritativeTradingDataService.getFinancialSummary('TNT-001');
+  console.log(`   Financial summary total equity: ₹${finSummary.total_equity.toLocaleString('en-IN')}`);
+  assert(finSummary.total_equity > 0, 'Financial summary total equity should be > 0');
+
+  console.log('✓ PASS: All Authoritative endpoints return rich non-zero live data!');
 
   // Step 7: Test Transactional Outbox Sync
   console.log('\n7. Testing Transactional Outbox startup sync to Central Admin...');

@@ -227,7 +227,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     const connectWs = () => {
       try {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        const token = localStorage.getItem('vertex_auth_token') || '';
+        const wsUrl = `${protocol}//${window.location.host}/ws${token ? `?token=${token}` : ''}`;
         ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {

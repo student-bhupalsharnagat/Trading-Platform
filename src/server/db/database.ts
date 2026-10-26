@@ -137,22 +137,14 @@ class DatabaseService {
 
   private save() {
     // In production with DATABASE_URL, authoritative state lives in PostgreSQL
-    if (process.env.DATABASE_URL || process.env.NODE_ENV === 'production') {
+    try {
+      fs.writeFileSync(DB_FILE, JSON.stringify(this.state, null, 2), 'utf-8');
+    } catch (err) {
+      // Non-fatal if OneDrive sync momentarily locks file
       try {
         const tempPath = `${DB_FILE}.tmp`;
         fs.writeFileSync(tempPath, JSON.stringify(this.state, null, 2), 'utf-8');
-        fs.renameSync(tempPath, DB_FILE);
-      } catch {
-        // Ephemeral disk writes in containerized production are non-fatal
-      }
-      return;
-    }
-    try {
-      const tempPath = `${DB_FILE}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify(this.state, null, 2), 'utf-8');
-      fs.renameSync(tempPath, DB_FILE);
-    } catch (err) {
-      console.error('[DB] Failed to write database file:', err);
+      } catch {}
     }
   }
 

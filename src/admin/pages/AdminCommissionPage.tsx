@@ -118,8 +118,14 @@ export const AdminCommissionPage: React.FC<AdminCommissionPageProps> = ({ onNavi
     };
   }, [subscribe]);
 
-  const totalTurnover = trades.reduce((sum, t) => sum + Number(t.execution_value || 0), 0);
-  const totalCommission = trades.reduce((sum, t) => sum + Number(t.fees || 20), 0);
+  const totalTurnover = trades.reduce(
+    (sum, t) => sum + Number(t.execution_value || t.total_value || (Number(t.price || t.execution_price || 0) * Number(t.quantity || 0)) || 0),
+    0
+  );
+  const totalCommission = trades.reduce((sum, t) => {
+    const fee = Number(t.fees != null && t.fees !== '' ? t.fees : (t.commission != null && t.commission !== '' ? t.commission : 20));
+    return sum + (fee > 0 ? fee : 20);
+  }, 0);
 
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat('en-IN', {

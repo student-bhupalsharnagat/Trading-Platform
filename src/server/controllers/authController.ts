@@ -48,6 +48,7 @@ export class AuthController {
         userId: result.user.userId,
         user: result.user,
         token: result.token,
+        devOtp: (result as any).devOtp || (process.env.NODE_ENV !== 'production' ? '123456' : undefined),
       });
     } catch (err) {
       next(err);

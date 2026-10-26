@@ -1,12 +1,14 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { BookOpen, RefreshCw, Search, ArrowDownLeft, ArrowUpRight, Filter } from 'lucide-react';
 import { adminApi } from '../services/adminApi';
+import { useAdminRealtime } from '../context/AdminRealtimeContext';
 
 interface AdminLedgerPageProps {
   onNavigate: (path: string) => void;
 }
 
 export const AdminLedgerPage: React.FC<AdminLedgerPageProps> = ({ onNavigate }) => {
+  const { isConnected, subscribe } = useAdminRealtime();
   const [entries, setEntries] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -29,6 +31,25 @@ export const AdminLedgerPage: React.FC<AdminLedgerPageProps> = ({ onNavigate }) 
   useEffect(() => {
     fetchLedger();
   }, []);
+
+  // Real-time synchronization on financial ledger events
+  useEffect(() => {
+    const unsubTrade = subscribe('trade.executed', () => fetchLedger());
+    const unsubFund = subscribe('fund.requested', () => fetchLedger());
+    const unsubFundCreated = subscribe('fund.created', () => fetchLedger());
+    const unsubFundProc = subscribe('fund.processed', () => fetchLedger());
+    const unsubFundUpd = subscribe('fund.updated', () => fetchLedger());
+    const unsubWallet = subscribe('wallet.updated', () => fetchLedger());
+
+    return () => {
+      unsubTrade();
+      unsubFund();
+      unsubFundCreated();
+      unsubFundProc();
+      unsubFundUpd();
+      unsubWallet();
+    };
+  }, [subscribe]);
 
   const filteredEntries = useMemo(() => {
     return entries.filter((e) => {
@@ -65,6 +86,12 @@ export const AdminLedgerPage: React.FC<AdminLedgerPageProps> = ({ onNavigate }) 
           <div className="flex items-center gap-2 mb-1">
             <BookOpen className="w-5 h-5 text-blue-400" />
             <h2 className="text-xl font-bold text-slate-100">Financial Ledger (Audit Trail)</h2>
+            {isConnected && (
+              <span className="text-[10px] flex items-center gap-1 text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-800/40">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Live Sync
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-400">
             Immutable double-entry transaction journal across all client deposits, withdrawals, trade settlements, and brokerage charges.

@@ -56,20 +56,27 @@ export const AdminFundsPage: React.FC<AdminFundsPageProps> = ({ onNavigate }) =>
 
   // Real-time subscriptions for funds
   useEffect(() => {
-    const unsubFund = subscribe('fund.requested', (tx: any) => {
+    const handleNewFund = (tx: any) => {
       setTransactions((prev) => [tx, ...prev.filter((t) => t.id !== tx.id)]);
-      setSuccessMsg(`New ${tx.type || tx.transaction_type} request received for ${tx.userId}!`);
-    });
+      setSuccessMsg(`New ${tx.type || tx.transaction_type} request received for ${tx.userId || tx.user_id}!`);
+    };
 
-    const unsubProcessed = subscribe('fund.processed', (tx: any) => {
+    const handleProcessedFund = (tx: any) => {
       setTransactions((prev) =>
         prev.map((t) => (t.id === tx.id ? { ...t, ...tx, status: tx.status } : t))
       );
-    });
+    };
+
+    const unsubReq = subscribe('fund.requested', handleNewFund);
+    const unsubCreated = subscribe('fund.created', handleNewFund);
+    const unsubProc = subscribe('fund.processed', handleProcessedFund);
+    const unsubUpd = subscribe('fund.updated', handleProcessedFund);
 
     return () => {
-      unsubFund();
-      unsubProcessed();
+      unsubReq();
+      unsubCreated();
+      unsubProc();
+      unsubUpd();
     };
   }, [subscribe]);
 

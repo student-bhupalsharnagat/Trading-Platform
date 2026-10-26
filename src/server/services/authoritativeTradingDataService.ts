@@ -286,8 +286,8 @@ export class AuthoritativeTradingDataService {
         });
       }
 
-      // Fallback: If 0 orders found and no userId filter, check across all tenants in PostgreSQL
-      if (orders.length === 0 && !resolvedUserId) {
+      // Fallback: If 0 orders found and no userId filter, check across all tenants in PostgreSQL (only for default tenant)
+      if (orders.length === 0 && !resolvedUserId && isDefault) {
         let fallbackSql = `
           SELECT 
             o.*,
@@ -369,6 +369,9 @@ export class AuthoritativeTradingDataService {
     const seenOrderIds = new Set(orders.map((o) => o.id));
     const allMemOrders = getAllTenantOrders();
     for (const item of allMemOrders) {
+      if (!isDefault && item.tenantId.toLowerCase() !== cleanTenant.toLowerCase()) {
+        continue;
+      }
       const o = item.order;
       if (!seenOrderIds.has(o.id)) {
         if (resolvedUserId && o.userId && o.userId.toLowerCase() !== resolvedUserId.toLowerCase()) {
@@ -523,8 +526,8 @@ export class AuthoritativeTradingDataService {
         });
       }
 
-      // Fallback: If 0 trades and no userId filter, check across all tenants in PostgreSQL
-      if (trades.length === 0 && !resolvedUserId) {
+      // Fallback: If 0 trades and no userId filter, check across all tenants in PostgreSQL (only for default tenant)
+      if (trades.length === 0 && !resolvedUserId && isDefault) {
         let fallbackSql = `
           SELECT 
             t.*,
@@ -598,6 +601,9 @@ export class AuthoritativeTradingDataService {
     const seenTradeIds = new Set(trades.map((t) => t.id));
     const allMemTrades = getAllTenantTrades();
     for (const item of allMemTrades) {
+      if (!isDefault && item.tenantId.toLowerCase() !== cleanTenant.toLowerCase()) {
+        continue;
+      }
       const tr = item.trade;
       if (!seenTradeIds.has(tr.id)) {
         if (resolvedUserId && tr.user_id && tr.user_id.toLowerCase() !== resolvedUserId.toLowerCase()) {
@@ -731,8 +737,9 @@ export class AuthoritativeTradingDataService {
           id: p.id,
           position_id: p.id,
           tenant_id: p.tenant_id || cleanTenant,
-          user_id: uId,
-          userId: uId,
+          user_id: p.user_id,
+          userId: p.user_id,
+          user_pk_id: uId,
           clientId: cId,
           client_id: cId,
           clientName: cName,
@@ -759,8 +766,8 @@ export class AuthoritativeTradingDataService {
         });
       }
 
-      // Fallback: If 0 positions and no userId filter, check across all tenants in PostgreSQL
-      if (positions.length === 0 && !resolvedUserId) {
+      // Fallback: If 0 positions and no userId filter, check across all tenants in PostgreSQL (only for default tenant)
+      if (positions.length === 0 && !resolvedUserId && isDefault) {
         let fallbackSql = `
           SELECT 
             p.*,
@@ -813,8 +820,9 @@ export class AuthoritativeTradingDataService {
             id: p.id,
             position_id: p.id,
             tenant_id: p.tenant_id || cleanTenant,
-            user_id: uId,
-            userId: uId,
+            user_id: p.user_id,
+            userId: p.user_id,
+            user_pk_id: uId,
             clientId: cId,
             client_id: cId,
             clientName: cName,
@@ -850,6 +858,9 @@ export class AuthoritativeTradingDataService {
     const seenPosIds = new Set(positions.map((p) => p.id));
     const allMemPositions = getAllTenantPositions();
     for (const item of allMemPositions) {
+      if (!isDefault && item.tenantId.toLowerCase() !== cleanTenant.toLowerCase()) {
+        continue;
+      }
       const p = item.position;
       const key = `${p.userId || 'demo-trader'}_${p.symbol}`;
       if (!seenPosKeys.has(key) && !seenPosIds.has(p.id)) {
@@ -1020,8 +1031,7 @@ export class AuthoritativeTradingDataService {
     const userTenant = user.tenant_id || 'vertex-default';
     if (
       userTenant.toLowerCase() !== tenantId.toLowerCase() &&
-      !isDefaultTenant(tenantId) &&
-      !isDefaultTenant(userTenant)
+      !(isDefaultTenant(tenantId) && isDefaultTenant(userTenant))
     ) {
       const err = new Error(`Tenant mismatch: Client belongs to '${user.tenant_id}', not '${tenantId}'.`);
       (err as any).statusCode = 403;
@@ -1483,6 +1493,12 @@ export class AuthoritativeTradingDataService {
       fundPayload,
       (ws) => ws.userId === resolvedUserId || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
     );
+    tradingWebSocketServer.broadcastToTenant(
+      tenantId,
+      'fund.requested',
+      fundPayload,
+      (ws) => ws.userId === resolvedUserId || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
+    );
 
     return tx;
   }
@@ -1559,6 +1575,12 @@ export class AuthoritativeTradingDataService {
       tradingWebSocketServer.broadcastToTenant(
         tenantId,
         'fund.updated',
+        rejectPayload,
+        (ws) => ws.userId === tx.user_id || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
+      );
+      tradingWebSocketServer.broadcastToTenant(
+        tenantId,
+        'fund.processed',
         rejectPayload,
         (ws) => ws.userId === tx.user_id || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
       );
@@ -1749,6 +1771,12 @@ export class AuthoritativeTradingDataService {
     tradingWebSocketServer.broadcastToTenant(
       tenantId,
       'fund.updated',
+      approvalResult.approvePayload,
+      (ws) => ws.userId === tx.user_id || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
+    );
+    tradingWebSocketServer.broadcastToTenant(
+      tenantId,
+      'fund.processed',
       approvalResult.approvePayload,
       (ws) => ws.userId === tx.user_id || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
     );

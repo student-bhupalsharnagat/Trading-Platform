@@ -63,8 +63,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     const unsubWallet = subscribe('wallet.updated', () => fetchDashboardData());
     const unsubPos = subscribe('position.updated', () => fetchDashboardData());
     const unsubClient = subscribe('client.created', () => fetchDashboardData());
+    const unsubClientReg = subscribe('client.registered', () => fetchDashboardData());
+    const unsubClientAct = subscribe('client.activated', () => fetchDashboardData());
     const unsubFund = subscribe('fund.requested', () => fetchDashboardData());
+    const unsubFundCreated = subscribe('fund.created', () => fetchDashboardData());
     const unsubFundProc = subscribe('fund.processed', () => fetchDashboardData());
+    const unsubFundUpd = subscribe('fund.updated', () => fetchDashboardData());
 
     return () => {
       unsubOrder();
@@ -72,8 +76,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       unsubWallet();
       unsubPos();
       unsubClient();
+      unsubClientReg();
+      unsubClientAct();
       unsubFund();
+      unsubFundCreated();
       unsubFundProc();
+      unsubFundUpd();
     };
   }, [subscribe]);
 

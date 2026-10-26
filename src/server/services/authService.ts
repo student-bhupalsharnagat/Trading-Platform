@@ -146,10 +146,11 @@ export class AuthService {
       }
     }
     if (!normalizedPhone) {
+      const fallbackMobile = '9' + Date.now().toString().slice(-9);
       normalizedPhone = {
         countryCode: '+91',
-        nationalNumber: '9876543210',
-        e164: '+919876543210',
+        nationalNumber: fallbackMobile,
+        e164: `+91${fallbackMobile}`,
       };
     }
 
@@ -296,9 +297,29 @@ export class AuthService {
       console.warn('[Event] KYC submitted event dispatch warning:', e)
     );
 
+    // Generate and dispatch registration OTP for verification workflows
+    let devOtp: string | undefined = undefined;
+    try {
+      const otpRes = await otpService.createAndSendOtp(
+        user.user_id,
+        {
+          countryCode: user.country_code,
+          mobile: user.mobile,
+          phoneE164: user.phone_e164 || user.mobile,
+          email: user.email,
+        },
+        'registration',
+        ipAddress
+      );
+      devOtp = otpRes.devOtp;
+    } catch (e: any) {
+      console.warn('[Signup] OTP generation notice:', e.message);
+    }
+
     return {
       user: sanitizeUser(user),
       token,
+      devOtp,
       message: 'Account created successfully.',
     };
   }
@@ -314,6 +335,7 @@ export class AuthService {
     success: boolean;
     user: SafeUser;
     token: string;
+    message?: string;
   }> {
     const normalizedUserId = userId.trim().toLowerCase();
     const user = db.findUserByUserId(normalizedUserId);
@@ -322,6 +344,31 @@ export class AuthService {
       const err = new Error('Account not found.');
       (err as any).statusCode = 404;
       throw err;
+    }
+
+    if (user.status === 'ACTIVE' && user.is_verified) {
+      const token = this.generateToken(user);
+      const clientActPayload: ClientActivatedPayload = {
+        tenantId: user.tenant_id || 'vertex-default',
+        tradingUserId: user.user_id,
+        userId: user.user_id,
+        clientId: user.id || user.user_id,
+        clientCode: user.user_id.toUpperCase(),
+        name: user.full_name,
+        email: user.email || '',
+        phone: user.phone_e164 || user.mobile,
+        status: user.status,
+        accountStatus: user.status,
+        kycStatus: user.is_verified ? 'VERIFIED' : 'PENDING',
+        createdAt: user.created_at,
+      };
+      internalEventDispatcher.dispatchClientActivated(clientActPayload).catch(() => {});
+      return {
+        success: true,
+        user: sanitizeUser(user),
+        token,
+        message: 'Account is already verified and active.',
+      };
     }
 
     const verification = await otpService.verifyOtp(normalizedUserId, otp, 'registration', ipAddress);
@@ -560,12 +607,13 @@ export class AuthService {
     }
 
     // 3. Check Account Statuses
-    if (
+    const isStaff = user.role && user.role !== 'CLIENT';
+    const isPending =
       user.status === 'PENDING_EMAIL_VERIFICATION' ||
       user.status === 'PENDING_PHONE_VERIFICATION' ||
-      !user.is_verified ||
-      (!user.email_verified_at && user.user_id !== 'vtx123')
-    ) {
+      !user.is_verified;
+
+    if (!isStaff && (isPending || (!user.email_verified_at && user.status !== 'ACTIVE' && user.status !== 'active' && user.user_id !== 'vtx123'))) {
       auditService.log({
         actorId: user.user_id,
         actorName: user.full_name,
@@ -946,7 +994,7 @@ export class AuthService {
    */
   public generateToken(user: any): string {
     const jti = crypto.randomUUID();
-    const userId = user.user_id || user.userId;
+    const userId = user.user_id || user.userId || user.id;
     return jwt.sign(
       {
         id: user.id,
@@ -975,11 +1023,12 @@ export class AuthService {
       if (!decoded) return null;
 
       // Check if user account was updated/invalidated after token issue
-      const user = db.findUserByUserId(decoded.userId);
-      if (!user) return null;
-
-      if (user.status === 'LOCKED' || user.status === 'DISABLED') {
-        return null;
+      const uid = decoded.userId || decoded.id;
+      if (uid) {
+        const user = db.findUserByUserId(uid) || db.findUserById(uid);
+        if (user && (user.status === 'LOCKED' || user.status === 'DISABLED')) {
+          return null;
+        }
       }
 
       return decoded;

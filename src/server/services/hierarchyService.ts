@@ -31,6 +31,15 @@ export class HierarchyService {
   public async ensureSuperAdmin(): Promise<UserRecord> {
     const admins = await jsonUserRepository.findByRole('SUPER_ADMIN');
     if (admins.length > 0) {
+      const sa = admins[0];
+      if (!sa.email_verified_at || !sa.phone_verified_at) {
+        await jsonUserRepository.update(sa.id, {
+          email_verified_at: sa.email_verified_at || new Date().toISOString(),
+          phone_verified_at: sa.phone_verified_at || new Date().toISOString(),
+          is_verified: true,
+          status: 'active',
+        });
+      }
       return admins[0];
     }
 
@@ -50,6 +59,8 @@ export class HierarchyService {
       address: 'Corporate Headquarters, Financial District',
       commission_rate: 100,
       is_verified: true,
+      email_verified_at: new Date().toISOString(),
+      phone_verified_at: new Date().toISOString(),
       status: 'active',
     });
 

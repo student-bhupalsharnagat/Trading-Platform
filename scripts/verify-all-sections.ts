@@ -127,8 +127,16 @@ async function runVerification() {
   const candleRes = await api('/api/trading/candles/gold_fut?timeframe=15m', { method: 'GET' }, userCookie);
   check('Fetch candlestick chart data succeeds', candleRes.status === 200 && Array.isArray(candleRes.data?.candles) && candleRes.data?.candles.length > 0, { status: candleRes.status, data: candleRes.data });
 
-  // 6. Portfolio, Orders & Trading Execution
-  console.log('\n--- 6. Trading Execution (Order Placement, SL/Target, Limit) ---');
+  // 6. Wallet Funds: Deposit
+  console.log('\n--- 6. Wallet Funds Deposit ---');
+  const depositRes = await api('/api/trading/funds/deposit', {
+    method: 'POST',
+    body: JSON.stringify({ amount: 100000, method: 'UPI Instant' }),
+  }, userCookie);
+  check('Deposit Funds button updates balance', depositRes.status === 200 && depositRes.data?.success, { status: depositRes.status, data: depositRes.data });
+
+  // 7. Portfolio, Orders & Trading Execution
+  console.log('\n--- 7. Trading Execution (Order Placement, SL/Target, Limit) ---');
   const portBefore = await api('/api/trading/portfolio', { method: 'GET' }, userCookie);
   check('Initial portfolio retrieved', portBefore.status === 200 && portBefore.data?.wallet, { status: portBefore.status, data: portBefore.data });
 
@@ -169,8 +177,8 @@ async function runVerification() {
     check('Cancel Order button successfully cancels order', cancelRes.status === 200 && cancelRes.data?.success, { status: cancelRes.status, data: cancelRes.data });
   }
 
-  // 7. Positions & Square-Off / Exit All
-  console.log('\n--- 7. Positions Management & Square Off ---');
+  // 8. Positions & Square-Off / Exit All
+  console.log('\n--- 8. Positions Management & Square Off ---');
   const portAfterBuy = await api('/api/trading/portfolio', { method: 'GET' }, userCookie);
   const positions = portAfterBuy.data?.positions || [];
   check('Position reflected in portfolio positions', positions.length > 0, { positionsCount: positions.length });
@@ -202,22 +210,16 @@ async function runVerification() {
   }, userCookie);
   check('Exit All Positions button successfully squares off all open positions', exitAllRes.status === 200 && exitAllRes.data?.success, { status: exitAllRes.status, data: exitAllRes.data });
 
-  // 8. Wallet Funds: Deposit & Withdraw
-  console.log('\n--- 8. Wallet Funds Operations ---');
-  const depositRes = await api('/api/trading/funds/deposit', {
-    method: 'POST',
-    body: JSON.stringify({ amount: 50000, method: 'UPI Instant' }),
-  }, userCookie);
-  check('Deposit Funds button updates balance', depositRes.status === 200 && depositRes.data?.success, { status: depositRes.status, data: depositRes.data });
-
+  // 9. Wallet Funds: Withdraw
+  console.log('\n--- 9. Wallet Funds Withdrawal ---');
   const withdrawRes = await api('/api/trading/funds/withdraw', {
     method: 'POST',
     body: JSON.stringify({ amount: 10000, bankName: 'HDFC Bank', accountNumber: '123456789012' }),
   }, userCookie);
   check('Withdraw Funds button processes payout', withdrawRes.status === 200 && withdrawRes.data?.success, { status: withdrawRes.status, data: withdrawRes.data });
 
-  // 9. Support Tickets Section
-  console.log('\n--- 9. Support Tickets System ---');
+  // 10. Support Tickets Section
+  console.log('\n--- 10. Support Tickets System ---');
   const createTicketRes = await api('/api/trading/tickets', {
     method: 'POST',
     body: JSON.stringify({

@@ -72,6 +72,7 @@ async function runPhase5ITests() {
     REDIS_URL: 'redis://:SecureRedisPass789!@prod-redis.internal:6379',
     JWT_SECRET: 'a_very_secure_random_jwt_secret_with_more_than_32_characters_12345',
     INTERNAL_COMMUNICATION_SECRET: 'another_ultra_secure_hmac_secret_key_32_characters_minimum_67890',
+    CENTRAL_ADMIN_BASE_URL: 'https://central-admin.internal',
   };
   const validProdResult = ProductionValidator.validateEnv(true, secureEnv);
   assert(validProdResult.valid && validProdResult.errors.length === 0, 'Production validation passes with secure ENV configuration');

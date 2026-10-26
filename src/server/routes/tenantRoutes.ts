@@ -235,6 +235,15 @@ router.get('/all', async (req: TenantRequest, res: Response) => {
  * Allows switching the tenant in development / preview mode
  */
 router.post('/dev/switch', async (req: TenantRequest, res: Response) => {
+  if (process.env.NODE_ENV === 'production') {
+    res.status(403).json({
+      success: false,
+      message: 'Developer tenant override is strictly forbidden in production mode.',
+      code: 'DEV_OVERRIDE_FORBIDDEN',
+    });
+    return;
+  }
+
   try {
     const { tenantId } = req.body;
     if (!tenantId) {

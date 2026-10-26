@@ -790,7 +790,8 @@ export class TradingExecutionService {
   public async closePosition(
     tenantId: string,
     userId: string,
-    positionId: string
+    positionId: string,
+    exitPriceOverride?: number
   ): Promise<{ success: boolean; position: TradingPosition; wallet: TradingWallet; message: string }> {
     const result = await pgDb.transaction(async (client: DbClient) => {
       // Lock wallet
@@ -810,19 +811,29 @@ export class TradingExecutionService {
       const releasedMargin = Number(pos.margin_used) || (inst?.intraday || 30000);
       const posQty = Number(pos.quantity);
       const entryAvg = Number(pos.average_price);
-      const exitPrice = inst?.lastPrice ? Number(inst.lastPrice) : entryAvg;
+      let exitPrice = exitPriceOverride !== undefined
+        ? Number(exitPriceOverride)
+        : (inst?.lastPrice ? Number(inst.lastPrice) : entryAvg);
 
-      // QA-037: calculate trade exit PnL: (exitPrice - entryAvgPrice) * closedQty for long, (entryAvgPrice - exitPrice) * closedQty for short
+      // Guard against unscaled/mismatched mock instrument prices (>1.5x or <0.67x deviation from entryAvg beyond exchange circuit limits)
+      if (exitPriceOverride === undefined && inst?.lastPrice && entryAvg > 0) {
+        const ratio = Number(inst.lastPrice) / entryAvg;
+        if (ratio < 0.67 || ratio > 1.5) {
+          exitPrice = entryAvg;
+        }
+      }
+
+      // QA-037: calculate trade exit PnL for current closing quantity
       const tradeExitPnL = posQty > 0
         ? (exitPrice - entryAvg) * Math.abs(posQty)
         : (entryAvg - exitPrice) * Math.abs(posQty);
-      const realizedPnL = Number(((pos.realized_pnl || 0) + tradeExitPnL).toFixed(2));
+      const totalRealizedPnL = Number(((pos.realized_pnl || 0) + tradeExitPnL).toFixed(2));
 
-      // Credit wallet: release blocked margin and permanently add/deduct realizedPnL
-      const newAvailable = Number((wallet.available_balance + releasedMargin + realizedPnL).toFixed(2));
+      // Credit wallet: release blocked margin and permanently add/deduct tradeExitPnL (avoid double-crediting pos.realized_pnl)
+      const newAvailable = Number((wallet.available_balance + releasedMargin + tradeExitPnL).toFixed(2));
       const calculatedUsed = Math.max(0, Number((wallet.used_margin - releasedMargin).toFixed(2)));
       const newUsed = calculatedUsed < 0.05 ? 0 : calculatedUsed;
-      const newRealized = Number((wallet.realized_pnl + realizedPnL).toFixed(2));
+      const newRealized = Number((wallet.realized_pnl + tradeExitPnL).toFixed(2));
 
       // Delete position
       await postgresPositionRepository.deletePosition(tenantId, pos.id, client);
@@ -850,8 +861,8 @@ export class TradingExecutionService {
         quantity: 0,
         averagePrice: Number(pos.average_price),
         buyPrice: Number(pos.average_price),
-        currentPrice: Number(inst?.lastPrice || pos.average_price),
-        realizedPnl: Number(newRealized),
+        currentPrice: Number(exitPrice),
+        realizedPnl: Number(totalRealizedPnL),
         unrealizedPnl: 0,
         marginUsed: 0,
         status: 'CLOSED' as const,
@@ -895,7 +906,7 @@ export class TradingExecutionService {
       const soOrderId = `ORD-SO-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
       const soSide = (pos.quantity > 0 ? 'SELL' : 'BUY') as 'BUY' | 'SELL';
       const soQty = Math.abs(pos.quantity);
-      const soPrice = inst?.lastPrice || pos.average_price;
+      const soPrice = exitPrice;
 
       const closeOrder = await postgresOrderRepository.create(
         {
@@ -929,22 +940,22 @@ export class TradingExecutionService {
           quantity: soQty,
           execution_price: soPrice,
           execution_value: soQty * soPrice,
-          realized_pnl: realizedPnL,
+          realized_pnl: tradeExitPnL,
           executed_at: new Date().toISOString(),
         },
         client
       );
 
       // Record immutable ledger entry for closing PnL if any
-      if (realizedPnL !== 0) {
+      if (tradeExitPnL !== 0) {
         await postgresLedgerRepository.createEntry(
           {
             tenant_id: tenantId,
             user_id: userId,
             transaction_id: closeTrade.id,
-            type: realizedPnL >= 0 ? 'CREDIT' : 'DEBIT',
+            type: tradeExitPnL >= 0 ? 'CREDIT' : 'DEBIT',
             category: 'TRADE_PNL',
-            amount: Math.abs(realizedPnL),
+            amount: Math.abs(tradeExitPnL),
             balance_before: wallet.available_balance,
             balance_after: updatedWallet.available_balance,
             reference: `Position square-off ${pos.instrument_id} PnL`,

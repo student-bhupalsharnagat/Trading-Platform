@@ -555,9 +555,10 @@ router.post(
         return;
       }
 
+      const exitPrice = req.body?.price ?? req.body?.exitPrice;
       let result: any = null;
       try {
-        result = await tradingExecutionService.closePosition(tenantId, userId, positionId);
+        result = await tradingExecutionService.closePosition(tenantId, userId, positionId, exitPrice);
       } catch (dbErr: any) {
         // Fallback to in-memory position close
         const memClose = closeSinglePosition(tenantId, positionId);
