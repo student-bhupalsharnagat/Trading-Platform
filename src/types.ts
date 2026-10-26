@@ -98,6 +98,11 @@ export interface Instrument {
   sparkline: number[];
   trend: 'up' | 'down';
   candles?: Candle[];
+  strike?: number;
+  optionType?: 'CE' | 'PE';
+  isTradingDisabled?: boolean;
+  status?: string;
+  isSuspended?: boolean;
 }
 
 export interface Position {

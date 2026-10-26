@@ -49,11 +49,11 @@ export function generateHistoricalCandles(
 export let INSTRUMENTS: Instrument[] = JSON.parse(JSON.stringify(DEFAULT_INSTRUMENTS));
 
 export const initialWallet: WalletFunds = {
-  availableBalance: 0.0,
+  availableBalance: 1000000.0,
   usedMargin: 0.0,
   totalPnL: 0.0,
   todayPnL: 0.0,
-  deposited: 0.0,
+  deposited: 1000000.0,
   withdrawn: 0.0,
 };
 
@@ -353,28 +353,79 @@ export function findInstrument(symbol: string): Instrument | undefined {
   const clean = raw.replace(/^(nse|bse|mcx|nfo|binance|tvc|fx|fx_idc|comex|nymex|lme):/i, '').trim();
   const normalized = clean.replace(/[\s\-_]/g, '');
 
-  return (
-    INSTRUMENTS.find((i) => {
-      const iRaw = i.symbol.toLowerCase().trim();
-      const iClean = iRaw.replace(/^(nse|bse|mcx|nfo|binance|tvc|fx|fx_idc|comex|nymex|lme):/i, '').trim();
-      const iNorm = iClean.replace(/[\s\-_]/g, '');
-      const idClean = i.id.toLowerCase().trim().replace(/[\s\-_]/g, '');
+  const exactMatch = INSTRUMENTS.find((i) => {
+    const iRaw = i.symbol.toLowerCase().trim();
+    const iClean = iRaw.replace(/^(nse|bse|mcx|nfo|binance|tvc|fx|fx_idc|comex|nymex|lme):/i, '').trim();
+    const iNorm = iClean.replace(/[\s\-_]/g, '');
+    const idClean = i.id.toLowerCase().trim().replace(/[\s\-_]/g, '');
 
-      return (
-        iClean === clean ||
-        iNorm === normalized ||
-        idClean === normalized ||
-        iRaw === raw ||
-        (i.sectionName && i.sectionName.toLowerCase().trim() === clean) ||
-        (i.name && i.name.toLowerCase().trim() === clean)
-      );
-    }) ||
-    INSTRUMENTS.find((i) => {
-      const iRaw = i.symbol.toLowerCase().trim();
-      const iClean = iRaw.replace(/^(nse|bse|mcx|nfo|binance|tvc|fx|fx_idc|comex|nymex|lme):/i, '').trim();
-      return iClean.startsWith(clean) || clean.startsWith(iClean);
-    })
-  );
+    return (
+      iClean === clean ||
+      iNorm === normalized ||
+      idClean === normalized ||
+      iRaw === raw ||
+      (i.sectionName && i.sectionName.toLowerCase().trim() === clean) ||
+      (i.name && i.name.toLowerCase().trim() === clean)
+    );
+  });
+  if (exactMatch) return exactMatch;
+
+  // Option contract dynamic parsing: e.g. "NIFTY 50 31 AUG 25000 CE" or "BANKNIFTY 52000 PE"
+  const isOptionSymbol = /\b(CE|PE)\b/i.test(clean) || clean.endsWith('ce') || clean.endsWith('pe');
+  if (isOptionSymbol) {
+    const optRegex = /^(.*?)\s*(\d{1,2}\s+[a-z]{3})?\s*(\d+(?:\.\d+)?)\s*(ce|pe)$/i;
+    const match = clean.match(optRegex);
+    if (match) {
+      const baseName = match[1].trim() || 'NIFTY';
+      const expiry = match[2] ? match[2].trim() : 'Current';
+      const strike = parseFloat(match[3]);
+      const optType = match[4].toUpperCase() as 'CE' | 'PE';
+
+      const underlying = INSTRUMENTS.find((i) => {
+        const ic = i.symbol.toLowerCase().replace(/^(nse|bse|mcx|nfo|binance|tvc|fx|fx_idc|comex|nymex|lme):/i, '').trim();
+        return ic === baseName.toLowerCase() || ic.replace(/[\s\-_]/g, '') === baseName.toLowerCase().replace(/[\s\-_]/g, '');
+      });
+
+      const lotSize = underlying?.lotSize || (baseName.toUpperCase().includes('BANK') ? 15 : 25);
+      const estPrice = strike > 1000 ? Math.max(10, Math.round(strike * 0.012 * 100) / 100) : 50.0;
+
+      return {
+        id: `opt-${normalized}`,
+        symbol: symbol.toUpperCase().trim(),
+        name: `${underlying?.name || baseName.toUpperCase()} ${strike} ${optType}`,
+        category: 'OPTIONS' as any,
+        sectionName: 'Options',
+        lotSize,
+        lastPrice: estPrice,
+        openPrice: estPrice * 0.98,
+        highPrice: estPrice * 1.05,
+        lowPrice: estPrice * 0.95,
+        prevClose: estPrice * 0.99,
+        change: 1.5,
+        changePercent: 1.25,
+        intraday: Math.round(estPrice * lotSize),
+        holding: Math.round(estPrice * lotSize),
+        maxLots: underlying?.maxLots || 100,
+        ask: estPrice + 0.5,
+        bid: Math.max(0.05, estPrice - 0.5),
+        sparkline: [estPrice * 0.98, estPrice * 0.99, estPrice, estPrice * 1.01, estPrice],
+        trend: 'up',
+        strike,
+        expiry,
+        optionType: optType,
+      };
+    }
+  }
+
+  // Fallback prefix match (prevent option contracts from returning underlying perpetual ticket)
+  return INSTRUMENTS.find((i) => {
+    const iRaw = i.symbol.toLowerCase().trim();
+    const iClean = iRaw.replace(/^(nse|bse|mcx|nfo|binance|tvc|fx|fx_idc|comex|nymex|lme):/i, '').trim();
+    if (isOptionSymbol && !iClean.includes('ce') && !iClean.includes('pe')) {
+      return false;
+    }
+    return iClean.startsWith(clean) || clean.startsWith(iClean);
+  });
 }
 
 /**
@@ -402,6 +453,9 @@ export function closeSinglePosition(
 
   wallet.availableBalance = Number((wallet.availableBalance + releasedMargin + closedPnL).toFixed(2));
   wallet.usedMargin = Math.max(0, Number((wallet.usedMargin - releasedMargin).toFixed(2)));
+  if (wallet.usedMargin < 0.05) {
+    wallet.usedMargin = 0;
+  }
   const existingRealized = (wallet as any).realizedPnL ?? wallet.todayPnL ?? 0;
   const newRealized = Number((existingRealized + closedPnL).toFixed(2));
   wallet.todayPnL = newRealized;
@@ -409,6 +463,9 @@ export function closeSinglePosition(
   (wallet as any).realizedPnL = newRealized;
 
   positions.splice(posIndex, 1);
+  if (positions.length === 0) {
+    wallet.usedMargin = 0;
+  }
 
   return {
     success: true,

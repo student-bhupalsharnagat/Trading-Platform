@@ -108,13 +108,20 @@ export const QuickTour: React.FC<QuickTourProps> = ({
 }) => {
   const { language, setLanguage, currentLanguage, t } = useLanguage();
 
-  // Mode: 'welcome' (Screenshot 1) or 'guided' (Screenshots 2-9)
   const [tourMode, setTourMode] = useState<'welcome' | 'guided'>('welcome');
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [isLangDropdownOpen, setIsLangDropdownOpen] = useState(false);
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
 
   const langMenuRef = useRef<HTMLDivElement>(null);
+
+  // Reset to initial clean state when reopened
+  useEffect(() => {
+    if (isOpen) {
+      setTourMode('welcome');
+      setCurrentStep(1);
+    }
+  }, [isOpen]);
 
   // Close language dropdown on outside click
   useEffect(() => {

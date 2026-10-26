@@ -99,6 +99,7 @@ export const isTradingViewRestrictedSymbol = (symbol: string, category?: string)
   if (category === 'EQUITY' || category === 'INDEX') return true;
   const upper = symbol.toUpperCase().trim();
   if (upper.startsWith('NSE:') || upper.startsWith('BSE:') || upper.startsWith('MCX:')) return true;
+  if (upper.includes('GOLD') || upper.includes('SILVER') || upper.includes('CRUDE') || upper.includes('MCX')) return true;
   const indianKeywords = [
     'RELIANCE', 'HDFC', 'TCS', 'INFY', 'INFOSYS', 'ICICI', 'SBIN', 'SBI',
     'BHARTI', 'AIRTEL', 'ITC', 'TATAMOTORS', 'TATASTEEL', 'AXIS', 'KOTAK',
@@ -162,6 +163,14 @@ const generateLocalCandles = (basePrice: number): LocalCandle[] => {
     generated.push({ time, open, high, low, close, volume });
     currentClose = close;
   }
+
+  // Ensure latest candle aligns with current live base price
+  if (generated.length > 0) {
+    generated[generated.length - 1].close = safeBase;
+    generated[generated.length - 1].high = Math.max(generated[generated.length - 1].high, safeBase);
+    generated[generated.length - 1].low = Math.min(generated[generated.length - 1].low, safeBase);
+  }
+
   return generated;
 };
 
@@ -454,7 +463,7 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   return (
     <div
       style={{ height }}
-      className="flex-1 w-full h-full min-h-[480px] flex flex-col bg-[#060B13] rounded-xl overflow-hidden border border-[#121B2B] select-none"
+      className="flex-1 w-full h-full min-h-[500px] flex flex-col bg-[#060B13] rounded-xl overflow-hidden border border-[#121B2B] select-none"
     >
       {/* Top Chart Header / Status Bar */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-[#080E18] border-b border-[#121B2B] text-xs">
@@ -599,11 +608,12 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
                 <span>LTP:</span>
                 <span className="text-white font-bold">
                   {instrument.lastPrice
-                    ? `₹${instrument.lastPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
-                    : '₹67,220.00'}
+                    ? `${instrument.category === 'CRYPTO' ? '$' : '₹'}${instrument.lastPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                    : `${instrument.category === 'CRYPTO' ? '$' : '₹'}67,220.00`}
                 </span>
                 <span className={instrument.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                  {instrument.change >= 0 ? '+' : ''}{instrument.change?.toFixed(2) || '+1.20'}%
+                  {instrument.change >= 0 ? '+' : ''}{instrument.change?.toFixed(2) || '0.00'}
+                  {instrument.changePercent !== undefined ? ` (${instrument.changePercent >= 0 ? '+' : ''}${instrument.changePercent.toFixed(2)}%)` : ''}
                 </span>
               </div>
             </div>

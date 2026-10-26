@@ -1,8 +1,10 @@
 import { AuthResponse, Instrument, PortfolioData, Candle, SupportTicket, AppNotification, Order, Position } from '../types.ts';
 
 async function fetchJson<T = any>(url: string, options: RequestInit = {}): Promise<T> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('vertex_auth_token') : null;
   const defaultHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 
   const response = await fetch(url, {
@@ -11,7 +13,7 @@ async function fetchJson<T = any>(url: string, options: RequestInit = {}): Promi
       ...defaultHeaders,
       ...options.headers,
     },
-    credentials: 'same-origin',
+    credentials: 'include',
   });
 
   const data = await response.json();

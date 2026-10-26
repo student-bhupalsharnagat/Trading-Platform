@@ -96,6 +96,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   });
   const [isWalletDrawerOpen, setIsWalletDrawerOpen] = useState(false);
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
+  const [walletModalInitialTab, setWalletModalInitialTab] = useState<'DEPOSIT' | 'WITHDRAW' | 'HISTORY'>('DEPOSIT');
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
 
   // Orders Sub-Tab and Filter State (Zerodha Kite & Upstox Level)
@@ -700,13 +701,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         {/* Global Wallet Modal accessible from Live Chart */}
         <WalletModal
           isOpen={isWalletModalOpen}
+          initialTab={walletModalInitialTab}
           wallet={
             portfolio?.wallet || {
-              availableBalance: 0,
+              availableBalance: 1000000,
               usedMargin: 0,
               totalPnL: 0,
               todayPnL: 0,
-              deposited: 0,
+              deposited: 1000000,
               withdrawn: 0,
             }
           }
@@ -890,7 +892,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             <button
               type="button"
               id="header-quick-tour-btn"
-              onClick={() => setIsTourOpen(true)}
+              onClick={() => {
+                setActiveNav('watchlist');
+                setIsWalletModalOpen(false);
+                setShowMarketClosedModal(false);
+                setIsTourOpen(true);
+                setTourStep(0);
+              }}
               className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-[#0E1626] dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700/60 flex items-center justify-center text-slate-700 hover:text-slate-950 dark:text-slate-300 dark:hover:text-white transition-colors cursor-pointer active:scale-95"
               aria-label="Platform Tour"
               title="How to trade / Quick Tour"
@@ -2583,7 +2591,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               </div>
               <button
                 type="button"
-                onClick={() => setIsWalletModalOpen(true)}
+                onClick={() => {
+                  setWalletModalInitialTab('HISTORY');
+                  setIsWalletModalOpen(true);
+                }}
                 className="px-3 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
               >
                 <Wallet className="w-3.5 h-3.5" />
@@ -2846,14 +2857,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       {/* Global Wallet Modal */}
       <WalletModal
         isOpen={isWalletModalOpen}
+        initialTab={walletModalInitialTab}
         wallet={
           portfolio?.wallet || {
-            availableBalance: 142840,
-            usedMargin: 38210,
-            totalPnL: 34386.86,
-            todayPnL: 504.52,
-            deposited: 200000,
-            withdrawn: 50000,
+            availableBalance: 1000000,
+            usedMargin: 0,
+            totalPnL: 0,
+            todayPnL: 0,
+            deposited: 1000000,
+            withdrawn: 0,
           }
         }
         onClose={() => setIsWalletModalOpen(false)}
@@ -2879,6 +2891,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           type="button"
           id="quick-tour-floating-help-btn"
           onClick={() => {
+            setActiveNav('watchlist');
+            setIsWalletModalOpen(false);
+            setShowMarketClosedModal(false);
             setIsTourOpen(true);
             setTourStep(0);
           }}

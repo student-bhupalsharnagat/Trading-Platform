@@ -820,22 +820,25 @@ export class TradingExecutionService {
 
       // Credit wallet: release blocked margin and permanently add/deduct realizedPnL
       const newAvailable = Number((wallet.available_balance + releasedMargin + realizedPnL).toFixed(2));
-      const newUsed = Math.max(0, Number((wallet.used_margin - releasedMargin).toFixed(2)));
+      const calculatedUsed = Math.max(0, Number((wallet.used_margin - releasedMargin).toFixed(2)));
+      const newUsed = calculatedUsed < 0.05 ? 0 : calculatedUsed;
       const newRealized = Number((wallet.realized_pnl + realizedPnL).toFixed(2));
+
+      // Delete position
+      await postgresPositionRepository.deletePosition(tenantId, pos.id, client);
+      const remainingPositions = await postgresPositionRepository.getPositions(tenantId, userId, client);
+      const finalUsed = (!remainingPositions || remainingPositions.length === 0) ? 0 : newUsed;
 
       const updatedWallet = await postgresWalletRepository.updateWallet(
         tenantId,
         userId,
         {
           available_balance: newAvailable,
-          used_margin: newUsed,
+          used_margin: finalUsed,
           realized_pnl: newRealized,
         },
         client
       );
-
-      // Delete position
-      await postgresPositionRepository.deletePosition(tenantId, pos.id, client);
 
       const closedPositionPayload = {
         tenantId,

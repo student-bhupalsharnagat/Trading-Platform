@@ -99,20 +99,19 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
 
   // Notifications state
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
-    if (initialNotifications && initialNotifications.length > 0) return initialNotifications;
-    return DEFAULT_PROFILE_NOTIFICATIONS;
+    return initialNotifications || [];
   });
   const [loadingNotifs, setLoadingNotifs] = useState(false);
 
   React.useEffect(() => {
-    if (initialNotifications && initialNotifications.length > 0) {
+    if (initialNotifications !== undefined) {
       setNotifications(initialNotifications);
     }
   }, [initialNotifications]);
 
   React.useEffect(() => {
     authApi.getNotifications().then((res) => {
-      if (res.notifications && res.notifications.length > 0) {
+      if (res && Array.isArray(res.notifications)) {
         setNotifications(res.notifications);
       }
     }).catch(() => {});
@@ -221,7 +220,8 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
   const handleMarkAllNotifsRead = async () => {
     try {
       await authApi.markNotificationsRead();
-      setNotifications(notifications.map((n) => ({ ...n, read: true })));
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      onRefreshPortfolio?.();
       showToast({ type: 'info', title: 'Notifications', description: 'All alerts marked as read.' });
     } catch {
       // ignore

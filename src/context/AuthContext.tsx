@@ -51,13 +51,30 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const refreshUser = async () => {
     try {
-      const res = await authApi.getMe();
-      if (res.success && res.user) {
-        setUser(res.user);
-      } else {
-        setUser(null);
+      try {
+        const res = await authApi.getMe();
+        if (res.success && res.user) {
+          setUser(res.user);
+          try {
+            localStorage.setItem('vertex_user', JSON.stringify(res.user));
+          } catch {}
+          return;
+        }
+      } catch {
+        // Fallback to persisted session on reload
       }
-    } catch {
+
+      try {
+        const saved = localStorage.getItem('vertex_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && (parsed.userId || parsed.id)) {
+            setUser(parsed);
+            return;
+          }
+        }
+      } catch {}
+
       setUser(null);
     } finally {
       setLoading(false);
@@ -72,6 +89,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const res = await authApi.register(data);
     if (res.user) {
       setUser(res.user);
+      try {
+        localStorage.setItem('vertex_user', JSON.stringify(res.user));
+        if (res.token) localStorage.setItem('vertex_auth_token', res.token);
+      } catch {}
     }
     showToast({
       type: 'success',
@@ -86,6 +107,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const res = await authApi.verifyOtp({ userId, otp, purpose });
     if (res.success && res.user) {
       setUser(res.user);
+      try {
+        localStorage.setItem('vertex_user', JSON.stringify(res.user));
+        if (res.token) localStorage.setItem('vertex_auth_token', res.token);
+      } catch {}
       setPendingVerificationUserId(null);
       setLatestDevOtp(null);
       showToast({
@@ -122,6 +147,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const res = await authApi.login({ userId, password: pass });
     if (res.success && res.user) {
       setUser(res.user);
+      try {
+        localStorage.setItem('vertex_user', JSON.stringify(res.user));
+        if (res.token) localStorage.setItem('vertex_auth_token', res.token);
+      } catch {}
       showToast({
         type: 'success',
         title: 'Welcome Back',
@@ -135,6 +164,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const res = await authApi.demoLogin();
     if (res.success && res.user) {
       setUser(res.user);
+      try {
+        localStorage.setItem('vertex_user', JSON.stringify(res.user));
+        if (res.token) localStorage.setItem('vertex_auth_token', res.token);
+      } catch {}
       showToast({
         type: 'success',
         title: 'Demo Mode Activated',
@@ -149,6 +182,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       await authApi.logout();
     } finally {
       setUser(null);
+      try {
+        localStorage.removeItem('vertex_user');
+        localStorage.removeItem('vertex_auth_token');
+      } catch {}
       showToast({
         type: 'info',
         title: 'Logged Out',

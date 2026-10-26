@@ -11,6 +11,7 @@ import type { ClientRegisteredPayload, ClientActivatedPayload } from '../events/
 import type { RegisterInput, ResetPasswordInput } from '../schemas/authSchemas.ts';
 import { postgresClientMappingRepository } from '../repositories/PostgresClientMappingRepository.ts';
 import { postgresClientMappingRepository as tradingClientMappingRepo } from '../repositories/trading/PostgresClientMappingRepository.ts';
+import { pgDb } from '../db/postgres.ts';
 
 if (process.env.NODE_ENV === 'production') {
   const secret = process.env.JWT_SECRET;
@@ -718,7 +719,35 @@ export class AuthService {
     devOtp?: string;
     message: string;
   }> {
-    const user = db.findUserByUserIdOrMobile(identifier.trim());
+    let user = db.findUserByUserIdOrMobile(identifier.trim());
+
+    if (!user) {
+      try {
+        const pgRes = await pgDb.query(
+          `SELECT * FROM users WHERE LOWER(user_id) = LOWER($1) OR mobile = $1 OR LOWER(email) = LOWER($1) LIMIT 1;`,
+          [identifier.trim()]
+        );
+        if (pgRes && pgRes.rows && pgRes.rows.length > 0) {
+          const row = pgRes.rows[0];
+          user = {
+            id: row.id,
+            user_id: row.user_id,
+            email: row.email,
+            mobile: row.mobile,
+            full_name: row.full_name,
+            role: row.role,
+            tenant_id: row.tenant_id,
+            status: row.status,
+            country_code: row.country_code || '+91',
+            phone_e164: row.phone_e164 || (row.mobile ? `+91${row.mobile}` : undefined),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+          } as any;
+        }
+      } catch (pgErr) {
+        console.warn('[AUTH] PG lookup error in forgotPassword:', pgErr);
+      }
+    }
 
     if (!user) {
       auditService.log({
@@ -752,7 +781,7 @@ export class AuthService {
     } catch (otpErr: any) {
       console.warn(`[AUTH] Notice: OTP delivery using fallback: ${otpErr.message}`);
       const fallbackOtp = Math.floor(100000 + Math.random() * 900000).toString();
-      const otpHash = crypto.createHash('sha256').update(`${fallbackOtp}:${user.user_id.toLowerCase()}`).digest('hex');
+      const otpHash = otpService.hashOtp(fallbackOtp, user.user_id);
       db.createOtp({
         userId: user.user_id.toLowerCase(),
         phoneE164: user.phone_e164,

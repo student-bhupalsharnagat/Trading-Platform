@@ -30,6 +30,7 @@ interface WalletModalProps {
   wallet: WalletFunds;
   onClose: () => void;
   onRefresh?: () => void;
+  initialTab?: 'DEPOSIT' | 'WITHDRAW' | 'HISTORY';
 }
 
 export const WalletModal: React.FC<WalletModalProps> = ({
@@ -37,10 +38,11 @@ export const WalletModal: React.FC<WalletModalProps> = ({
   wallet,
   onClose,
   onRefresh,
+  initialTab = 'DEPOSIT',
 }) => {
   const { user, showToast } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'DEPOSIT' | 'WITHDRAW' | 'HISTORY'>('DEPOSIT');
+  const [activeTab, setActiveTab] = useState<'DEPOSIT' | 'WITHDRAW' | 'HISTORY'>(initialTab);
   const [depositAmount, setDepositAmount] = useState<string>('50000');
   const [depositMethod, setDepositMethod] = useState<'UPI' | 'NETBANKING' | 'IMPS'>('UPI');
   const [showUpiQr, setShowUpiQr] = useState<boolean>(false);
@@ -59,7 +61,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
       type: 'DEPOSIT' | 'WITHDRAWAL' | 'MARGIN_CREDIT' | 'MARGIN_BLOCKED';
       amount: number;
       method: string;
-      status: 'SUCCESS' | 'PROCESSING';
+      status: 'SUCCESS' | 'PROCESSING' | 'REJECTED' | 'FAILED';
       time: string;
       refId: string;
     }>
@@ -75,15 +77,33 @@ export const WalletModal: React.FC<WalletModalProps> = ({
     try {
       const res = await authApi.getFunds();
       if (res && res.transactions && res.transactions.length > 0) {
-        const mapped = res.transactions.map((t: any) => ({
-          id: t.id || `TX-${Date.now()}`,
-          type: (t.transaction_type || t.type || 'DEPOSIT') as any,
-          amount: Number(t.amount || 0),
-          method: t.payment_method || t.method || (t.type === 'WITHDRAWAL' ? 'Bank Payout' : 'Net Banking (HDFC)'),
-          status: (t.status === 'APPROVED' || t.status === 'COMPLETED' || t.status === 'SUCCESS' ? 'SUCCESS' : 'PROCESSING') as any,
-          time: t.created_at ? new Date(t.created_at).toLocaleDateString('en-GB') + ' ' + new Date(t.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : 'Today',
-          refId: t.reference_id || t.reference || t.id || `TX-${Date.now()}`,
-        }));
+        const mapped = res.transactions.map((t: any) => {
+          const rawStatus = String(t.status || '').toUpperCase();
+          let status: 'SUCCESS' | 'PROCESSING' | 'REJECTED' | 'FAILED' = 'PROCESSING';
+          if (['APPROVED', 'COMPLETED', 'SUCCESS'].includes(rawStatus)) {
+            status = 'SUCCESS';
+          } else if (['REJECTED', 'FAILED', 'CANCELLED'].includes(rawStatus)) {
+            status = rawStatus === 'REJECTED' ? 'REJECTED' : 'FAILED';
+          } else {
+            status = 'PROCESSING';
+          }
+
+          const rawRef = t.reference_id || t.reference || t.refId || t.id || '';
+          const isWdr = t.type === 'WITHDRAWAL' || t.transaction_type === 'WITHDRAWAL';
+          const refId = rawRef && (rawRef.startsWith('WDR-') || rawRef.startsWith('DEP-') || rawRef.startsWith('TX-') || !rawRef.startsWith('HDFC'))
+            ? rawRef
+            : (isWdr ? `WDR-${Date.now()}` : `TX-${Date.now()}`);
+
+          return {
+            id: t.id || `TX-${Date.now()}`,
+            type: (t.transaction_type || t.type || 'DEPOSIT') as any,
+            amount: Number(t.amount || 0),
+            method: t.payment_method || t.method || (isWdr ? 'Bank Payout' : 'Net Banking (HDFC)'),
+            status,
+            time: t.created_at ? new Date(t.created_at).toLocaleDateString('en-GB') + ' ' + new Date(t.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : 'Today',
+            refId,
+          };
+        });
         setHistory(mapped);
         localStorage.setItem('vtx_wallet_history', JSON.stringify(mapped));
       }
@@ -92,9 +112,12 @@ export const WalletModal: React.FC<WalletModalProps> = ({
 
   React.useEffect(() => {
     if (isOpen) {
+      if (initialTab) {
+        setActiveTab(initialTab);
+      }
       loadServerHistory();
     }
-  }, [isOpen, loadServerHistory]);
+  }, [isOpen, initialTab, loadServerHistory]);
 
   if (!isOpen) return null;
 
@@ -189,8 +212,8 @@ export const WalletModal: React.FC<WalletModalProps> = ({
     if (!amount || amount < 500) {
       showToast({
         type: 'error',
-        title: 'Invalid Amount',
-        description: 'Minimum withdrawal amount is ₹500.',
+        title: 'Validation Error',
+        description: 'Minimum withdrawal amount is ₹500',
       });
       return;
     }
@@ -975,7 +998,15 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                         {tx.type === 'DEPOSIT' || tx.type === 'MARGIN_CREDIT' ? '+' : '-'}₹
                         {tx.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </div>
-                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 mt-0.5 inline-block">
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold border mt-0.5 inline-block ${
+                          tx.status === 'SUCCESS'
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                            : tx.status === 'REJECTED' || tx.status === 'FAILED'
+                            ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                            : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                        }`}
+                      >
                         {tx.status}
                       </span>
                     </div>

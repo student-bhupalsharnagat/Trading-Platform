@@ -86,14 +86,21 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
     (instrument.lastPrice * (initialType === 'BUY' ? 1.005 : 0.995)).toFixed(2)
   );
 
+  const [isLimitFocused, setIsLimitFocused] = useState(false);
+  const [isTriggerFocused, setIsTriggerFocused] = useState(false);
+
   const prevInstrumentSymbolRef = useRef(instrument.symbol);
   useEffect(() => {
     if (prevInstrumentSymbolRef.current !== instrument.symbol) {
       prevInstrumentSymbolRef.current = instrument.symbol;
-      setLimitPrice(instrument.lastPrice.toString());
-      setTriggerPrice((instrument.lastPrice * (initialType === 'BUY' ? 1.005 : 0.995)).toFixed(2));
+      if (!isLimitFocused) {
+        setLimitPrice(instrument.lastPrice.toString());
+      }
+      if (!isTriggerFocused) {
+        setTriggerPrice((instrument.lastPrice * (initialType === 'BUY' ? 1.005 : 0.995)).toFixed(2));
+      }
     }
-  }, [instrument.symbol, instrument.lastPrice, initialType]);
+  }, [instrument.symbol, isLimitFocused, isTriggerFocused, instrument.lastPrice, initialType]);
 
   // Lot vs Quantity Mode
   const [inputMode, setInputMode] = useState<'LOTS' | 'QTY'>('LOTS');
@@ -203,12 +210,13 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
   const toggleInputMode = () => {
     if (inputMode === 'LOTS') {
       setInputMode('QTY');
-      setQuantity(lots * lotSize);
+      if (!quantity || quantity <= 0) {
+        setQuantity(lots * lotSize);
+      }
     } else {
       setInputMode('LOTS');
       const calculatedLots = Math.max(1, Math.round(quantity / lotSize));
       setLots(calculatedLots);
-      setQuantity(calculatedLots * lotSize);
     }
   };
 
@@ -217,6 +225,57 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
     if (!hoursInfo.isOpen) {
       setMarketHoursInfo(hoursInfo);
       setShowMarketClosedModal(true);
+      return;
+    }
+
+    // Check if instrument trading is disabled or suspended
+    if (
+      (activeInstrument as any).isTradingDisabled ||
+      (activeInstrument as any).status === 'DISABLED' ||
+      (activeInstrument as any).status === 'SUSPENDED' ||
+      (activeInstrument as any).isSuspended
+    ) {
+      showToast({
+        type: 'error',
+        title: 'Trading Disabled',
+        description: `Trading in ${activeInstrument.symbol} is currently suspended or disabled.`,
+      });
+      return;
+    }
+
+    // Validate Limit Price
+    if (orderType === 'LIMIT' || orderType === 'SL') {
+      const parsedLimit = parseFloat(limitPrice);
+      if (limitPrice.trim() === '' || isNaN(parsedLimit) || parsedLimit <= 0) {
+        showToast({
+          type: 'error',
+          title: 'Invalid Price',
+          description: 'Limit price must be greater than ₹0',
+        });
+        return;
+      }
+    }
+
+    // Validate Trigger Price
+    if (orderType === 'SL' || orderType === 'SL-M') {
+      const parsedTrigger = parseFloat(triggerPrice);
+      if (triggerPrice.trim() === '' || isNaN(parsedTrigger) || parsedTrigger <= 0) {
+        showToast({
+          type: 'error',
+          title: 'Invalid Price',
+          description: 'Trigger price must be greater than ₹0',
+        });
+        return;
+      }
+    }
+
+    const calculatedQty = inputMode === 'QTY' ? quantity : effectiveLots * (activeInstrument.lotSize || 1);
+    if (!calculatedQty || calculatedQty <= 0) {
+      showToast({
+        type: 'error',
+        title: 'Invalid Quantity',
+        description: 'Order quantity must be greater than 0',
+      });
       return;
     }
 
@@ -233,7 +292,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
         orderType,
         product: productType,
         lots: effectiveLots,
-        quantity: inputMode === 'QTY' ? quantity : effectiveLots * (activeInstrument.lotSize || 1),
+        quantity: calculatedQty,
         price: orderPrice,
         limitPrice: orderType === 'LIMIT' || orderType === 'SL' ? numLimitPrice : undefined,
         triggerPrice: orderTrigger,
@@ -601,6 +660,9 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
                         type="text"
                         inputMode="decimal"
                         value={limitPrice}
+                        placeholder="0.00"
+                        onFocus={() => setIsLimitFocused(true)}
+                        onBlur={() => setIsLimitFocused(false)}
                         onChange={(e) => setLimitPrice(e.target.value)}
                         className="font-mono font-black text-sm text-slate-900 dark:text-white bg-transparent outline-none w-32 border-b border-amber-500/50"
                       />
@@ -721,6 +783,9 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
                     type="text"
                     inputMode="decimal"
                     value={triggerPrice}
+                    placeholder="0.00"
+                    onFocus={() => setIsTriggerFocused(true)}
+                    onBlur={() => setIsTriggerFocused(false)}
                     onChange={(e) => setTriggerPrice(e.target.value)}
                     className="w-full bg-white dark:bg-[#080E18] border border-amber-500/50 rounded-lg px-3 py-1.5 font-mono font-bold text-sm text-slate-900 dark:text-white outline-none focus:border-amber-400"
                   />

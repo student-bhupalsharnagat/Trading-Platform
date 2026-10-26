@@ -151,7 +151,8 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
   }
 
   try {
-    const pgWallet = await postgresWalletRepository.getOrCreateWallet(tenantId, userId, 0);
+    const isDemo = userId === 'vtx_demo' || userId === 'demo-trader' || String(userId).toLowerCase().includes('demo');
+    const pgWallet = await postgresWalletRepository.getOrCreateWallet(tenantId, userId, isDemo ? 1000000 : 0);
     const pgPositions = await postgresPositionRepository.getPositions(tenantId, userId);
     const pgOrders = await postgresOrderRepository.getOrders(tenantId, userId);
 
@@ -170,12 +171,16 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
         ? Number(((pnl / (avgPrice * qty)) * 100).toFixed(2))
         : 0;
 
+      const rawProd = String((p as any).product || (p as any).product_type || '').toUpperCase();
+      const isHolding = rawProd === 'HOLDING' || rawProd === 'CNC' || (inst?.category === 'EQUITY' && posType === 'BUY' && rawProd !== 'INTRADAY');
+      const product = isHolding ? ('HOLDING' as const) : ('INTRADAY' as const);
+
       return {
         id: p.id,
         symbol: p.instrument_id,
         category: inst?.category || 'EQUITY',
         type: posType,
-        product: 'INTRADAY' as const,
+        product,
         lots,
         qty,
         lotSize,
@@ -191,12 +196,16 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
     const orders = (pgOrders || []).map((o) => {
       const inst = findInstrument(o.instrument_id);
       const lotSize = inst?.lotSize || 100;
+      const rawOrderProd = String((o as any).product || (o as any).product_type || '').toUpperCase();
+      const isHoldingOrder = rawOrderProd === 'HOLDING' || rawOrderProd === 'CNC';
+      const product = isHoldingOrder ? ('HOLDING' as const) : ('INTRADAY' as const);
+
       return {
         id: o.id,
         symbol: o.instrument_id,
         type: o.side as 'BUY' | 'SELL',
         orderType: o.order_type as any,
-        product: 'INTRADAY',
+        product,
         lots: Math.max(1, Math.round(o.quantity / lotSize)),
         qty: o.quantity,
         lotSize,
@@ -339,6 +348,21 @@ router.post(
 
       if (!inst) {
         res.status(404).json({ success: false, message: 'Instrument not found.' });
+        return;
+      }
+
+      // Block disabled or suspended instruments (e.g. ITC or isTradingDisabled)
+      if (
+        (inst as any).isTradingDisabled ||
+        (inst as any).status === 'DISABLED' ||
+        (inst as any).status === 'SUSPENDED' ||
+        (inst as any).isSuspended
+      ) {
+        res.status(403).json({
+          success: false,
+          code: 'INSTRUMENT_DISABLED',
+          message: `Trading is disabled for instrument ${inst.symbol}.`,
+        });
         return;
       }
 
@@ -613,12 +637,16 @@ router.post(
           const lotSize = pInst?.lotSize || 1;
           const lots = Math.max(1, Math.round(qty / lotSize));
           const pnl = posType === 'BUY' ? (ltp - avgPrice) * qty : (avgPrice - ltp) * qty;
+          const rawProd = String((p as any).product || (p as any).product_type || '').toUpperCase();
+          const isHolding = rawProd === 'HOLDING' || rawProd === 'CNC' || (pInst?.category === 'EQUITY' && posType === 'BUY' && rawProd !== 'INTRADAY');
+          const product = isHolding ? ('HOLDING' as const) : ('INTRADAY' as const);
+
           return {
             id: p.id,
             symbol: p.instrument_id,
             category: pInst?.category || 'EQUITY',
             type: posType,
-            product: 'INTRADAY' as const,
+            product,
             lots,
             qty,
             lotSize,
@@ -854,8 +882,8 @@ router.post('/funds/withdraw', requireAuth, async (req: TenantRequest, res: Resp
 
     const { amount, bankName } = req.body;
     const numAmount = Number(amount);
-    if (!numAmount || numAmount <= 0) {
-      res.status(400).json({ success: false, message: 'Invalid withdrawal amount.' });
+    if (!numAmount || numAmount < 500) {
+      res.status(400).json({ success: false, message: 'Minimum withdrawal amount is ₹500.' });
       return;
     }
 
@@ -956,7 +984,8 @@ router.get('/wallet', optionalAuth, async (req: TenantRequest, res: Response) =>
     const userObj = (req as any).user;
     const userId = userObj?.userId || userObj?.user_id || userObj?.id || 'demo-trader';
 
-    const pgWallet = await postgresWalletRepository.getOrCreateWallet(tenantId, userId, 0);
+    const isDemo = userId === 'vtx_demo' || userId === 'demo-trader' || String(userId).toLowerCase().includes('demo');
+    const pgWallet = await postgresWalletRepository.getOrCreateWallet(tenantId, userId, isDemo ? 1000000 : 0);
     const pgTransactions = await postgresFundTransactionRepository.getByTenant(tenantId, userId);
     const memTransactions = [
       ...getTenantFundTransactions(tenantId),

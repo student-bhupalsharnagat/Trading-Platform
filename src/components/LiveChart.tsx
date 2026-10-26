@@ -186,7 +186,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
 
   // Canvas Rendering logic for simple, clean trading chart
   useEffect(() => {
-    if (engineMode !== 'CANVAS') return;
+    if (engineMode === 'TRADINGVIEW' && chartType === 'Candle') return;
     const canvas = canvasRef.current;
     if (!canvas || candles.length === 0) return;
 
@@ -439,7 +439,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
 
   // Responsive canvas resizing with ResizeObserver
   useEffect(() => {
-    if (engineMode !== 'CANVAS') return;
+    if (engineMode === 'TRADINGVIEW' && chartType === 'Candle') return;
     const updateCanvasSize = () => {
       const canvas = canvasRef.current;
       const container = containerRef.current;
@@ -448,7 +448,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
       const rect = container.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
       const w = Math.floor(rect.width) || container.clientWidth || 800;
-      const h = Math.floor(rect.height) || container.clientHeight || 480;
+      const h = Math.floor(rect.height) || container.clientHeight || 500;
 
       if (w > 0 && h > 0) {
         canvas.width = Math.floor(w * dpr);
@@ -464,7 +464,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
     if (containerRef.current) observer.observe(containerRef.current);
 
     return () => observer.disconnect();
-  }, [engineMode]);
+  }, [engineMode, chartType]);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -684,7 +684,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
                   isPositive ? 'text-[#10B981]' : 'text-[#EF4444]'
                 }`}
               >
-                ₹{activePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                {instrument.category === 'CRYPTO' ? '$' : '₹'}{activePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </div>
               <div
                 className={`font-mono text-[11px] font-bold ${
@@ -825,13 +825,13 @@ export const LiveChart: React.FC<LiveChartProps> = ({
       {/* 4. Main Chart Canvas / TradingView Area (Clean & No Clutter) */}
       <main className="flex-1 relative flex flex-col p-1 sm:p-2 pb-16">
         {engineMode === 'TRADINGVIEW' && chartType === 'Candle' ? (
-          <div className="flex-1 w-full h-full min-h-[480px] relative rounded-lg border border-[#121B2B] overflow-hidden bg-[#060B13]">
+          <div className="flex-1 w-full h-full min-h-[500px] relative rounded-lg border border-[#121B2B] overflow-hidden bg-[#060B13]">
             <TradingViewChart instrument={instrument} timeframe={timeframe} />
           </div>
         ) : (
           <div
             ref={containerRef}
-            className="flex-1 w-full h-full min-h-[480px] relative rounded-lg border border-[#121B2B] overflow-hidden bg-[#060B13] cursor-crosshair"
+            className="flex-1 w-full h-full min-h-[500px] relative rounded-lg border border-[#121B2B] overflow-hidden bg-[#060B13] cursor-crosshair"
           >
             <canvas
               ref={canvasRef}
