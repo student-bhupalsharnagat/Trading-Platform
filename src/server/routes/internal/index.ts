@@ -270,163 +270,125 @@ router.post('/tenant/create', async (req: InternalAuthorizedRequest, res: Respon
 });
 
 /**
- * POST /api/internal/v1/tenant/branding
- * White-label branding update from Central Admin.
- */
-router.post('/tenant/branding', async (req: InternalAuthorizedRequest, res: Response) => {
-  try {
-    const tenantId = getInternalTenantId(req);
-    const brandingUpdates = { ...(req.body?.branding || req.body || {}) };
-
-    delete (brandingUpdates as any).tenantId;
-    delete (brandingUpdates as any).tenant_id;
-    delete (brandingUpdates as any).source;
-
-    const updated = await tenantRepository.updateBranding(tenantId, brandingUpdates);
-    if (!updated) {
-      res.status(404).json({
-        success: false,
-        error: `Tenant '${tenantId}' not found.`,
-      });
-      return;
-    }
-
-    const currentCached = tenantConfigCache.get(tenantId);
-    const nextVersion = (currentCached.brandingVersion || 0) + 1;
-    tenantConfigCache.set(tenantId, {
-      brandingVersion: nextVersion,
-    });
-
-    tradingWebSocketServer.broadcastToTenant(tenantId, 'branding.updated', {
-      branding: updated,
-      brandingVersion: nextVersion,
-    });
-
-    auditService.logEmergencyEvent({
-      action: 'TENANT_BRANDING_UPDATED',
-      source: 'CENTRAL_ADMIN',
-      tenantId,
-      result: {
-        tenantId,
-        brandingVersion: nextVersion,
-      },
-    });
-
-    res.json({
-      success: true,
-      tenantId,
-      brandingVersion: nextVersion,
-      branding: updated,
-    });
-  } catch (err: any) {
-    const status = err.statusCode || 500;
-    res.status(status).json({
-      success: false,
-      error: err.message || 'Failed to update tenant branding.',
-      code: err.code,
-    });
-  }
-});
-
-/**
- * POST /api/internal/v1/platform/config (aliases: /platform-config/sync, /tenant/platform-config)
- * Platform configuration sync from Central Admin.
+ * POST /api/internal/v1/tenant/branding (aliases: /tenant/brand, /tenant/white-label, /branding/sync, /branding/publish, /white-label/publish)
+ * White-label branding update from Central Admin / Admin Dashboard.
  */
 router.post(
-  ['/platform/config', '/platform-config/sync', '/tenant/platform-config'],
+  [
+    '/tenant/branding',
+    '/tenant/brand',
+    '/tenant/white-label',
+    '/branding/sync',
+    '/branding/publish',
+    '/white-label/publish',
+  ],
   async (req: InternalAuthorizedRequest, res: Response) => {
     try {
       const tenantId = getInternalTenantId(req);
-      const configUpdates = { ...(req.body?.config || req.body || {}) };
-      delete (configUpdates as any).tenantId;
-      delete (configUpdates as any).tenant_id;
-      delete (configUpdates as any).source;
+      const rawBranding = req.body?.branding || req.body || {};
+      const brandingUpdates: any = { ...rawBranding };
 
-      const updated = await tenantRepository.updatePlatformConfig(tenantId, configUpdates);
-      if (!updated) {
-        res.status(404).json({
-          success: false,
-          error: `Tenant '${tenantId}' not found.`,
-        });
-        return;
-      }
+      delete brandingUpdates.tenantId;
+      delete brandingUpdates.tenant_id;
+      delete brandingUpdates.source;
+      delete brandingUpdates.idempotencyKey;
+      delete brandingUpdates.idempotency_key;
 
-      // Invalidate cache and broadcast
-      tenantConfigCache.invalidate(tenantId);
-      tradingWebSocketServer.broadcastToTenant(tenantId, 'config.updated', {
-        config: updated,
-      });
+      if (rawBranding.brand_name && !brandingUpdates.brandName) brandingUpdates.brandName = rawBranding.brand_name;
+      if (rawBranding.short_name && !brandingUpdates.shortName) brandingUpdates.shortName = rawBranding.short_name;
+      if (rawBranding.logo_url && !brandingUpdates.logoUrl) brandingUpdates.logoUrl = rawBranding.logo_url;
+      if (rawBranding.favicon_url && !brandingUpdates.faviconUrl) brandingUpdates.faviconUrl = rawBranding.favicon_url;
+      if (rawBranding.primary_color && !brandingUpdates.primaryColor) brandingUpdates.primaryColor = rawBranding.primary_color;
+      if (rawBranding.secondary_color && !brandingUpdates.secondaryColor) brandingUpdates.secondaryColor = rawBranding.secondary_color;
+      if (rawBranding.accent_color && !brandingUpdates.accentColor) brandingUpdates.accentColor = rawBranding.accent_color;
+      if (rawBranding.background_color && !brandingUpdates.backgroundColor) brandingUpdates.backgroundColor = rawBranding.background_color;
+      if (rawBranding.surface_color && !brandingUpdates.surfaceColor) brandingUpdates.surfaceColor = rawBranding.surface_color;
+      if (rawBranding.support_email && !brandingUpdates.supportEmail) brandingUpdates.supportEmail = rawBranding.support_email;
+      if (rawBranding.support_phone && !brandingUpdates.supportPhone) brandingUpdates.supportPhone = rawBranding.support_phone;
+      if (rawBranding.terms_url && !brandingUpdates.termsUrl) brandingUpdates.termsUrl = rawBranding.terms_url;
+      if (rawBranding.privacy_url && !brandingUpdates.privacyUrl) brandingUpdates.privacyUrl = rawBranding.privacy_url;
+      if (rawBranding.risk_disclosure_url && !brandingUpdates.riskDisclosureUrl) brandingUpdates.riskDisclosureUrl = rawBranding.risk_disclosure_url;
 
-      auditService.logEmergencyEvent({
-        action: 'PLATFORM_CONFIG_UPDATED',
-        source: req.body?.source || 'CENTRAL_ADMIN',
-        tenantId,
-        result: { tenantId, config: updated },
-      });
-
-      res.json({
-        success: true,
-        tenantId,
-        config: updated,
-      });
-    } catch (err: any) {
-      const status = err.statusCode || 500;
-      res.status(status).json({
-        success: false,
-        error: err.message || 'Failed to update platform configuration.',
-        code: err.code,
-      });
-    }
-  }
-);
-
-/**
- * POST /api/internal/v1/tenant/branding (alias: /tenant/brand)
- * White Label branding update (brandName, shortName, logoUrl, primaryColor) from Central Admin.
- */
-router.post(
-  ['/tenant/branding', '/tenant/brand'],
-  async (req: InternalAuthorizedRequest, res: Response) => {
-    try {
-      const tenantId = getInternalTenantId(req);
-      const { brandName, shortName, logoUrl, primaryColor, source } = req.body || {};
-
-      if (!brandName || typeof brandName !== 'string') {
-        res.status(400).json({
-          success: false,
-          error: 'Field "brandName" is required and must be a string.',
-        });
-        return;
+      if (!brandingUpdates.footerLinks && (brandingUpdates.termsUrl || brandingUpdates.privacyUrl || brandingUpdates.riskDisclosureUrl)) {
+        brandingUpdates.footerLinks = {
+          termsUrl: brandingUpdates.termsUrl || '#terms',
+          privacyUrl: brandingUpdates.privacyUrl || '#privacy',
+          riskDisclosureUrl: brandingUpdates.riskDisclosureUrl || '#risk',
+          helpCenterUrl: brandingUpdates.supportEmail ? `mailto:${brandingUpdates.supportEmail}` : '#support',
+        };
       }
 
       await handleIdempotentOperation(req, res, async () => {
-        // Use tenantConfigSyncService to sync branding across JSON repo, PostgreSQL, cache, and emit WebSocket event
-        const syncResult = await tenantConfigSyncService.syncTenantConfig(tenantId, {
-          brandName,
-          shortName,
-          logoUrl,
-          primaryColor,
-        }, source || 'CENTRAL_ADMIN');
+        const updated = await tenantRepository.updateBranding(tenantId, brandingUpdates);
+        if (tenantId !== 'vertex-default') {
+          await tenantRepository.updateBranding('vertex-default', brandingUpdates);
+        }
 
-        const updatedBranding = await tenantRepository.getBranding(tenantId);
+        try {
+          const effectiveBrandName = brandingUpdates.brandName || rawBranding.brandName;
+          const effectiveShortName = brandingUpdates.shortName || rawBranding.shortName;
+          const effectiveLogoUrl = brandingUpdates.logoUrl || rawBranding.logoUrl;
+          const effectivePrimaryColor = brandingUpdates.primaryColor || rawBranding.primaryColor;
+
+          await postgresTenantConfigRepository.upsertConfig({
+            tenant_id: tenantId,
+            brand_name: effectiveBrandName,
+            short_name: effectiveShortName,
+            logo_url: effectiveLogoUrl,
+            primary_color: effectivePrimaryColor,
+          });
+          if (tenantId !== 'vertex-default') {
+            await postgresTenantConfigRepository.upsertConfig({
+              tenant_id: 'vertex-default',
+              brand_name: effectiveBrandName,
+              short_name: effectiveShortName,
+              logo_url: effectiveLogoUrl,
+              primary_color: effectivePrimaryColor,
+            });
+          }
+        } catch {}
+
+        tenantConfigCache.invalidate(tenantId);
+        tenantConfigCache.invalidate('vertex-default');
+
+        const currentCached = tenantConfigCache.get(tenantId);
+        const nextVersion = (currentCached?.brandingVersion || 0) + 1;
+        tenantConfigCache.set(tenantId, { brandingVersion: nextVersion });
 
         tradingWebSocketServer.broadcastToTenant(tenantId, 'branding.updated', {
-          branding: updatedBranding,
+          branding: updated,
+          brandingVersion: nextVersion,
+        });
+        tradingWebSocketServer.broadcastToTenant('vertex-default', 'branding.updated', {
+          branding: updated,
+          brandingVersion: nextVersion,
+        });
+        tradingWebSocketServer.broadcastToTenant(tenantId, 'tenant.branding_updated', {
+          branding: updated,
+          brandingVersion: nextVersion,
+        });
+        tradingWebSocketServer.broadcastToTenant('vertex-default', 'tenant.branding_updated', {
+          branding: updated,
+          brandingVersion: nextVersion,
         });
 
         auditService.logEmergencyEvent({
           action: 'TENANT_BRANDING_UPDATED',
-          source: source || 'CENTRAL_ADMIN',
+          source: req.body?.source || 'CENTRAL_ADMIN',
           tenantId,
-          reason: `White Label brandName updated to '${brandName}'`,
-          result: { tenantId, brandName, shortName },
+          result: {
+            tenantId,
+            brandingVersion: nextVersion,
+            brandName: brandingUpdates.brandName,
+          },
         });
 
         return {
           success: true,
           tenantId,
-          branding: updatedBranding,
-          timestamp: syncResult.timestamp,
+          brandingVersion: nextVersion,
+          branding: updated,
+          timestamp: new Date().toISOString(),
         };
       });
     } catch (err: any) {
@@ -434,6 +396,106 @@ router.post(
       res.status(status).json({
         success: false,
         error: err.message || 'Failed to update tenant branding.',
+        code: err.code,
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/internal/v1/platform/config (aliases: /platform-config/sync, /tenant/platform-config, /tenant/controls, /platform/controls, /tenant/feature-controls, /platform/feature-controls)
+ * Platform configuration and feature controls sync from Central Admin.
+ */
+router.post(
+  [
+    '/platform/config',
+    '/platform-config/sync',
+    '/tenant/platform-config',
+    '/tenant/controls',
+    '/platform/controls',
+    '/tenant/feature-controls',
+    '/platform/feature-controls',
+  ],
+  async (req: InternalAuthorizedRequest, res: Response) => {
+    try {
+      const tenantId = getInternalTenantId(req);
+      const rawConfig = req.body?.config || req.body?.controls || req.body || {};
+      const configUpdates: any = { ...rawConfig };
+      delete configUpdates.tenantId;
+      delete configUpdates.tenant_id;
+      delete configUpdates.source;
+      delete configUpdates.idempotencyKey;
+      delete configUpdates.idempotency_key;
+
+      const normalizedUpdates: any = {};
+      if (rawConfig.tradingEnabled !== undefined) normalizedUpdates.trading_enabled = rawConfig.tradingEnabled;
+      if (rawConfig.trading_enabled !== undefined) normalizedUpdates.trading_enabled = rawConfig.trading_enabled;
+      if (rawConfig.registrationEnabled !== undefined) normalizedUpdates.registration_enabled = rawConfig.registrationEnabled;
+      if (rawConfig.registration_enabled !== undefined) normalizedUpdates.registration_enabled = rawConfig.registration_enabled;
+      if (rawConfig.apiEnabled !== undefined) normalizedUpdates.api_enabled = rawConfig.apiEnabled;
+      if (rawConfig.api_enabled !== undefined) normalizedUpdates.api_enabled = rawConfig.api_enabled;
+      if (rawConfig.maintenanceMode !== undefined) normalizedUpdates.maintenance_mode = rawConfig.maintenanceMode;
+      if (rawConfig.maintenance_mode !== undefined) normalizedUpdates.maintenance_mode = rawConfig.maintenance_mode;
+      if (rawConfig.optionsTradingEnabled !== undefined) normalizedUpdates.options_trading_enabled = rawConfig.optionsTradingEnabled;
+      if (rawConfig.options_trading_enabled !== undefined) normalizedUpdates.options_trading_enabled = rawConfig.options_trading_enabled;
+      if (rawConfig.maxLeverage !== undefined) normalizedUpdates.max_leverage = rawConfig.maxLeverage;
+      if (rawConfig.max_leverage !== undefined) normalizedUpdates.max_leverage = rawConfig.max_leverage;
+
+      await handleIdempotentOperation(req, res, async () => {
+        const updated = await tenantRepository.updatePlatformConfig(tenantId, normalizedUpdates);
+        if (tenantId !== 'vertex-default') {
+          await tenantRepository.updatePlatformConfig('vertex-default', normalizedUpdates);
+        }
+
+        if (normalizedUpdates.trading_enabled !== undefined) {
+          const isHalted = !normalizedUpdates.trading_enabled;
+          await tradingHaltService.setTradingHalt(
+            tenantId,
+            isHalted,
+            isHalted ? 'Trading disabled by Central Admin' : 'Trading enabled by Central Admin',
+            req.body?.source || 'CENTRAL_ADMIN'
+          );
+          if (tenantId !== 'vertex-default') {
+            await tradingHaltService.setTradingHalt(
+              'vertex-default',
+              isHalted,
+              isHalted ? 'Trading disabled by Central Admin' : 'Trading enabled by Central Admin',
+              req.body?.source || 'CENTRAL_ADMIN'
+            );
+          }
+        }
+
+        tenantConfigCache.invalidate(tenantId);
+        tenantConfigCache.invalidate('vertex-default');
+
+        tradingWebSocketServer.broadcastToTenant(tenantId, 'config.updated', {
+          config: updated,
+        });
+        if (tenantId !== 'vertex-default') {
+          tradingWebSocketServer.broadcastToTenant('vertex-default', 'config.updated', {
+            config: updated,
+          });
+        }
+
+        auditService.logEmergencyEvent({
+          action: 'PLATFORM_CONFIG_UPDATED',
+          source: req.body?.source || 'CENTRAL_ADMIN',
+          tenantId,
+          result: { tenantId, config: updated },
+        });
+
+        return {
+          success: true,
+          tenantId,
+          config: updated,
+          timestamp: new Date().toISOString(),
+        };
+      });
+    } catch (err: any) {
+      const status = err.statusCode || 500;
+      res.status(status).json({
+        success: false,
+        error: err.message || 'Failed to update platform configuration.',
         code: err.code,
       });
     }

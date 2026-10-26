@@ -2,6 +2,14 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+:root {
+  --tenant-primary: #F59E0B;
+  --tenant-secondary: #3B82F6;
+  --tenant-accent: #10B981;
+  --tenant-bg: #060B13;
+  --tenant-surface: #0B111C;
+}
+
 @layer base {
   body {
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;

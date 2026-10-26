@@ -271,6 +271,45 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     fetchTenant();
     fetchAllTenants();
+
+    const handleBrandingUpdate = (e: any) => {
+      const updated = e?.detail;
+      if (updated && typeof updated === 'object') {
+        setBranding((prev) => {
+          const merged: TenantBranding = {
+            ...prev,
+            ...updated,
+            footerLinks: {
+              ...prev.footerLinks,
+              ...(updated.footerLinks || {}),
+              ...(updated.termsUrl ? { termsUrl: updated.termsUrl } : {}),
+              ...(updated.privacyUrl ? { privacyUrl: updated.privacyUrl } : {}),
+              ...(updated.riskDisclosureUrl ? { riskDisclosureUrl: updated.riskDisclosureUrl } : {}),
+            },
+          };
+          applyBrandingToDocument(merged);
+          return merged;
+        });
+      }
+    };
+
+    const handleConfigUpdate = (e: any) => {
+      const updated = e?.detail;
+      if (updated && typeof updated === 'object') {
+        setConfig((prev) => ({
+          ...prev,
+          ...updated,
+        }));
+      }
+    };
+
+    window.addEventListener('vtx_branding_updated', handleBrandingUpdate);
+    window.addEventListener('vtx_config_updated', handleConfigUpdate);
+
+    return () => {
+      window.removeEventListener('vtx_branding_updated', handleBrandingUpdate);
+      window.removeEventListener('vtx_config_updated', handleConfigUpdate);
+    };
   }, [fetchTenant, fetchAllTenants]);
 
   const switchTenant = async (tenantId: string) => {

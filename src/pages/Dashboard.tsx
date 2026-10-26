@@ -290,6 +290,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               data.event === 'portfolio.mtm'
             ) {
               fetchData();
+            } else if (data.event === 'branding.updated' || data.event === 'tenant.branding_updated') {
+              const incoming = data.payload?.branding || data.payload;
+              if (incoming) {
+                window.dispatchEvent(new CustomEvent('vtx_branding_updated', { detail: incoming }));
+              }
+            } else if (data.event === 'config.updated') {
+              const incoming = data.payload?.config || data.payload;
+              if (incoming) {
+                window.dispatchEvent(new CustomEvent('vtx_config_updated', { detail: incoming }));
+              }
             }
           } catch {}
         };
@@ -2718,6 +2728,89 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             onRefreshPortfolio={fetchData}
           />
         )}
+
+        {/* White Label Branding Footer: Contact Details & Legal Compliance */}
+        <footer className="mt-8 mb-16 lg:mb-4 pt-6 pb-4 border-t border-slate-200 dark:border-[#1E2E44] text-slate-500 dark:text-slate-400 text-xs">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              {branding.logoUrl ? (
+                <img
+                  src={branding.logoUrl}
+                  alt={branding.brandName}
+                  className="h-6 w-auto object-contain rounded-md"
+                />
+              ) : (
+                <div
+                  className="w-6 h-6 rounded-md flex items-center justify-center font-black text-slate-950 text-[10px]"
+                  style={{ backgroundColor: branding.primaryColor || '#F59E0B' }}
+                >
+                  {branding.shortName || 'VX'}
+                </div>
+              )}
+              <span className="font-bold text-slate-800 dark:text-slate-200">
+                {branding.brandName || 'VERTEX'}
+              </span>
+              <span className="text-[11px] text-slate-400">
+                {branding.tagline || 'Institutional Trading Desk'}
+              </span>
+            </div>
+
+            {/* Contact Details */}
+            <div className="flex items-center gap-4 text-[11px]">
+              {branding.supportEmail && (
+                <a
+                  href={`mailto:${branding.supportEmail}`}
+                  className="hover:text-amber-400 transition-colors flex items-center gap-1"
+                >
+                  <span>Support:</span>
+                  <span className="font-medium text-slate-700 dark:text-slate-300">{branding.supportEmail}</span>
+                </a>
+              )}
+              {branding.supportPhone && (
+                <a
+                  href={`tel:${branding.supportPhone}`}
+                  className="hover:text-amber-400 transition-colors flex items-center gap-1"
+                >
+                  <span>Desk:</span>
+                  <span className="font-medium text-slate-700 dark:text-slate-300">{branding.supportPhone}</span>
+                </a>
+              )}
+            </div>
+
+            {/* Legal Compliance */}
+            <div className="flex items-center gap-3 text-[11px]">
+              <a
+                href={branding.termsUrl || branding.footerLinks?.termsUrl || '#terms'}
+                target="_blank"
+                rel="noreferrer"
+                className="hover:text-amber-400 transition-colors underline"
+              >
+                Terms of Service
+              </a>
+              <span>•</span>
+              <a
+                href={branding.privacyUrl || branding.footerLinks?.privacyUrl || '#privacy'}
+                target="_blank"
+                rel="noreferrer"
+                className="hover:text-amber-400 transition-colors underline"
+              >
+                Privacy Policy
+              </a>
+              <span>•</span>
+              <a
+                href={branding.footerLinks?.riskDisclosureUrl || '#risk'}
+                target="_blank"
+                rel="noreferrer"
+                className="hover:text-amber-400 transition-colors underline"
+              >
+                Risk Disclosure
+              </a>
+            </div>
+          </div>
+          <p className="mt-3 text-[10px] text-center text-slate-400 dark:text-slate-500">
+            Mandatory Risk Warning: Trading in high leverage derivatives carries significant risk to your capital. Disclaimers and compliance requirements apply.
+          </p>
+        </footer>
       </main>
 
       {/* Bottom Sticky Navigation Bar matching Screenshot 1 (visible on mobile/tablet, hidden on desktop lg+) */}

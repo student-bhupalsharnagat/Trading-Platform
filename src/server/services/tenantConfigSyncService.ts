@@ -4,6 +4,7 @@ import { auditService } from './auditService.ts';
 import { tenantConfigCache } from '../cache/TenantConfigCache.ts';
 import { emergencyStateCache } from '../cache/EmergencyStateCache.ts';
 import { postgresTenantConfigRepository } from '../repositories/trading/PostgresTenantConfigRepository.ts';
+import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
 
 export interface TenantSyncPayload {
   tenantId?: string;
@@ -188,17 +189,69 @@ export class TenantConfigSyncService {
 
     if (Object.keys(repoUpdates).length > 0) {
       await tenantRepository.updatePlatformConfig(authoritativeTenantId, repoUpdates);
+      if (authoritativeTenantId !== 'vertex-default') {
+        await tenantRepository.updatePlatformConfig('vertex-default', repoUpdates);
+      }
+      tradingWebSocketServer.broadcastToTenant(authoritativeTenantId, 'config.updated', { config: repoUpdates });
+      tradingWebSocketServer.broadcastToTenant('vertex-default', 'config.updated', { config: repoUpdates });
     }
 
+    const rawBranding = (payload as any).branding || payload;
     const brandingUpdates: any = {};
-    if (payload.brandName !== undefined) brandingUpdates.brandName = payload.brandName;
-    if (payload.shortName !== undefined) brandingUpdates.shortName = payload.shortName;
-    if (payload.logoUrl !== undefined) brandingUpdates.logoUrl = payload.logoUrl;
-    if (payload.primaryColor !== undefined) brandingUpdates.primaryColor = payload.primaryColor;
+    if (rawBranding.brandName !== undefined) brandingUpdates.brandName = rawBranding.brandName;
+    if (rawBranding.brand_name !== undefined) brandingUpdates.brandName = rawBranding.brand_name;
+    if (rawBranding.shortName !== undefined) brandingUpdates.shortName = rawBranding.shortName;
+    if (rawBranding.short_name !== undefined) brandingUpdates.shortName = rawBranding.short_name;
+    if (rawBranding.logoUrl !== undefined) brandingUpdates.logoUrl = rawBranding.logoUrl;
+    if (rawBranding.logo_url !== undefined) brandingUpdates.logoUrl = rawBranding.logo_url;
+    if (rawBranding.faviconUrl !== undefined) brandingUpdates.faviconUrl = rawBranding.faviconUrl;
+    if (rawBranding.favicon_url !== undefined) brandingUpdates.faviconUrl = rawBranding.favicon_url;
+    if (rawBranding.tagline !== undefined) brandingUpdates.tagline = rawBranding.tagline;
+    if (rawBranding.primaryColor !== undefined) brandingUpdates.primaryColor = rawBranding.primaryColor;
+    if (rawBranding.primary_color !== undefined) brandingUpdates.primaryColor = rawBranding.primary_color;
+    if (rawBranding.secondaryColor !== undefined) brandingUpdates.secondaryColor = rawBranding.secondaryColor;
+    if (rawBranding.secondary_color !== undefined) brandingUpdates.secondaryColor = rawBranding.secondary_color;
+    if (rawBranding.accentColor !== undefined) brandingUpdates.accentColor = rawBranding.accentColor;
+    if (rawBranding.accent_color !== undefined) brandingUpdates.accentColor = rawBranding.accent_color;
+    if (rawBranding.backgroundColor !== undefined) brandingUpdates.backgroundColor = rawBranding.backgroundColor;
+    if (rawBranding.background_color !== undefined) brandingUpdates.backgroundColor = rawBranding.background_color;
+    if (rawBranding.surfaceColor !== undefined) brandingUpdates.surfaceColor = rawBranding.surfaceColor;
+    if (rawBranding.surface_color !== undefined) brandingUpdates.surfaceColor = rawBranding.surface_color;
+    if (rawBranding.supportEmail !== undefined) brandingUpdates.supportEmail = rawBranding.supportEmail;
+    if (rawBranding.support_email !== undefined) brandingUpdates.supportEmail = rawBranding.support_email;
+    if (rawBranding.supportPhone !== undefined) brandingUpdates.supportPhone = rawBranding.supportPhone;
+    if (rawBranding.support_phone !== undefined) brandingUpdates.supportPhone = rawBranding.support_phone;
+    if (rawBranding.termsUrl !== undefined) brandingUpdates.termsUrl = rawBranding.termsUrl;
+    if (rawBranding.terms_url !== undefined) brandingUpdates.termsUrl = rawBranding.terms_url;
+    if (rawBranding.privacyUrl !== undefined) brandingUpdates.privacyUrl = rawBranding.privacyUrl;
+    if (rawBranding.privacy_url !== undefined) brandingUpdates.privacyUrl = rawBranding.privacy_url;
+    if (rawBranding.riskDisclosureUrl !== undefined) brandingUpdates.riskDisclosureUrl = rawBranding.riskDisclosureUrl;
+    if (rawBranding.risk_disclosure_url !== undefined) brandingUpdates.riskDisclosureUrl = rawBranding.risk_disclosure_url;
+    if (rawBranding.footerLinks !== undefined) brandingUpdates.footerLinks = rawBranding.footerLinks;
+    if (rawBranding.headerBranding !== undefined) brandingUpdates.headerBranding = rawBranding.headerBranding;
+    if (rawBranding.loginBranding !== undefined) brandingUpdates.loginBranding = rawBranding.loginBranding;
+    if (rawBranding.sidebarBranding !== undefined) brandingUpdates.sidebarBranding = rawBranding.sidebarBranding;
+
+    if (!brandingUpdates.footerLinks && (brandingUpdates.termsUrl || brandingUpdates.privacyUrl || brandingUpdates.riskDisclosureUrl)) {
+      brandingUpdates.footerLinks = {
+        termsUrl: brandingUpdates.termsUrl || '#terms',
+        privacyUrl: brandingUpdates.privacyUrl || '#privacy',
+        riskDisclosureUrl: brandingUpdates.riskDisclosureUrl || '#risk',
+        helpCenterUrl: brandingUpdates.supportEmail ? `mailto:${brandingUpdates.supportEmail}` : '#support',
+      };
+    }
 
     if (Object.keys(brandingUpdates).length > 0) {
-      await tenantRepository.updateBranding(authoritativeTenantId, brandingUpdates);
+      const updatedAuthoritative = await tenantRepository.updateBranding(authoritativeTenantId, brandingUpdates);
       tenantConfigCache.invalidate(authoritativeTenantId);
+      if (authoritativeTenantId !== 'vertex-default') {
+        await tenantRepository.updateBranding('vertex-default', brandingUpdates);
+        tenantConfigCache.invalidate('vertex-default');
+      }
+      tradingWebSocketServer.broadcastToTenant(authoritativeTenantId, 'branding.updated', { branding: updatedAuthoritative });
+      tradingWebSocketServer.broadcastToTenant('vertex-default', 'branding.updated', { branding: updatedAuthoritative });
+      tradingWebSocketServer.broadcastToTenant(authoritativeTenantId, 'tenant.branding_updated', { branding: updatedAuthoritative });
+      tradingWebSocketServer.broadcastToTenant('vertex-default', 'tenant.branding_updated', { branding: updatedAuthoritative });
     }
 
     if (payload.maintenanceMode !== undefined || payload.tenantStatus !== undefined || payload.tradingEnabled !== undefined) {
@@ -221,16 +274,24 @@ export class TenantConfigSyncService {
         }
       }
       await tenantRepository.updateStatus(authoritativeTenantId, statusUpdates);
+      if (authoritativeTenantId !== 'vertex-default') {
+        await tenantRepository.updateStatus('vertex-default', statusUpdates);
+      }
     }
 
     // 7. Persist to PostgreSQL database for crash-proof durable storage
     try {
+      const effectiveBrandName = brandingUpdates.brandName || payload.brandName;
+      const effectiveShortName = brandingUpdates.shortName || payload.shortName;
+      const effectiveLogoUrl = brandingUpdates.logoUrl || payload.logoUrl;
+      const effectivePrimaryColor = brandingUpdates.primaryColor || payload.primaryColor;
+
       await postgresTenantConfigRepository.upsertConfig({
         tenant_id: authoritativeTenantId,
-        brand_name: payload.brandName,
-        short_name: payload.shortName,
-        logo_url: payload.logoUrl,
-        primary_color: payload.primaryColor,
+        brand_name: effectiveBrandName,
+        short_name: effectiveShortName,
+        logo_url: effectiveLogoUrl,
+        primary_color: effectivePrimaryColor,
         trading_enabled: cached.tradingEnabled ?? true,
         registration_enabled: cached.registrationEnabled ?? true,
         api_enabled: cached.apiEnabled ?? true,
@@ -238,6 +299,22 @@ export class TenantConfigSyncService {
         config_version: cached.configVersion ?? 1,
         branding_version: cached.brandingVersion ?? 1,
       });
+
+      if (authoritativeTenantId !== 'vertex-default') {
+        await postgresTenantConfigRepository.upsertConfig({
+          tenant_id: 'vertex-default',
+          brand_name: effectiveBrandName,
+          short_name: effectiveShortName,
+          logo_url: effectiveLogoUrl,
+          primary_color: effectivePrimaryColor,
+          trading_enabled: cached.tradingEnabled ?? true,
+          registration_enabled: cached.registrationEnabled ?? true,
+          api_enabled: cached.apiEnabled ?? true,
+          max_leverage: cached.maxLeverage ?? 50,
+          config_version: cached.configVersion ?? 1,
+          branding_version: cached.brandingVersion ?? 1,
+        });
+      }
 
       const currentEmg = emergencyStateCache.get(authoritativeTenantId);
       await postgresTenantConfigRepository.upsertEmergencyStatus({
@@ -248,6 +325,16 @@ export class TenantConfigSyncService {
         api_frozen: currentEmg.apiFrozen ?? false,
         reason: currentEmg.reason,
       });
+      if (authoritativeTenantId !== 'vertex-default') {
+        await postgresTenantConfigRepository.upsertEmergencyStatus({
+          tenant_id: 'vertex-default',
+          tenant_frozen: currentEmg.tenantFrozen ?? false,
+          trading_halted: currentEmg.tradingHalted ?? false,
+          registration_frozen: currentEmg.registrationFrozen ?? false,
+          api_frozen: currentEmg.apiFrozen ?? false,
+          reason: currentEmg.reason,
+        });
+      }
     } catch (pgErr: any) {
       console.warn('[PostgresSync] Non-blocking PostgreSQL persistence warning:', pgErr.message);
     }
