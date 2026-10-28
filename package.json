@@ -23,6 +23,7 @@
     "test:auth": "tsx scripts/test-secure-auth.ts",
     "test:integration": "tsx scripts/test-admin-integration.ts",
     "test:all": "tsx scripts/test-phase-5b.ts && tsx scripts/test-phase-5c.ts && tsx scripts/test-phase-5d.ts && tsx scripts/test-phase-5e.ts && tsx scripts/test-phase-5f.ts && tsx scripts/test-phase-5g.ts && tsx scripts/test-phase-5h.ts && tsx scripts/test-phase-5i.ts && tsx scripts/test-phase-5j.ts && tsx scripts/test-phase-5k.ts && tsx scripts/test-secure-auth.ts && tsx scripts/test-admin-integration.ts",
+    "test:load": "k6 run scripts/load-test.js",
     "test": "npm run test:integration"
   },
   "dependencies": {

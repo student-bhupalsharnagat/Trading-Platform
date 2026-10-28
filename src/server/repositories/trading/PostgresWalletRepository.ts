@@ -52,16 +52,28 @@ export class PostgresWalletRepository implements ITradingWalletRepository {
 
   public async lockWalletForUpdate(tenantId: string, userId: string, client: DbClient): Promise<TradingWallet> {
     const sql = `SELECT * FROM trading_wallets WHERE tenant_id = $1 AND user_id = $2 FOR UPDATE;`;
-    const res = await client.query(sql, [tenantId, userId]);
+    let res = await client.query(sql, [tenantId, userId]);
+
+    const isDemo = userId === 'vtx_demo' || userId === 'demo-trader' || String(userId).toLowerCase().includes('demo');
 
     if (res.rows.length === 0) {
       // Create wallet if it didn't exist yet, then lock it
-      await this.getOrCreateWallet(tenantId, userId, 0, client);
-      const lockedRes = await client.query(sql, [tenantId, userId]);
-      return this.mapRow(lockedRes.rows[0]);
+      await this.getOrCreateWallet(tenantId, userId, isDemo ? 1000000 : 0, client);
+      res = await client.query(sql, [tenantId, userId]);
+      return this.mapRow(res.rows[0]);
     }
 
-    return this.mapRow(res.rows[0]);
+    const row = res.rows[0];
+    if (isDemo && Number(row.available_balance || 0) === 0 && Number(row.used_margin || 0) === 0) {
+      await client.query(
+        `UPDATE trading_wallets SET available_balance = 1000000, updated_at = NOW() WHERE tenant_id = $1 AND user_id = $2;`,
+        [tenantId, userId]
+      );
+      res = await client.query(sql, [tenantId, userId]);
+      return this.mapRow(res.rows[0]);
+    }
+
+    return this.mapRow(row);
   }
 
   public async updateWallet(

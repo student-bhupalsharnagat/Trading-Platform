@@ -581,7 +581,7 @@ class DatabaseService {
     let demoUser = this.findUserByUserId(demoUserId);
     if (!demoUser) {
       demoUser = {
-        id: data?.id || 'demo-user-uuid-0000-000000000001',
+        id: data?.id || (demoUserId === 'vtx_demo' ? 'demo-user-uuid-0000-000000000001' : `demo-${crypto.randomUUID()}`),
         full_name: data?.fullName || 'Demo Trader',
         user_id: demoUserId,
         country_code: '+91',
@@ -604,6 +604,10 @@ class DatabaseService {
       this.save();
     } else {
       let changed = false;
+      if (demoUser.id === 'demo-user-uuid-0000-000000000001' && demoUserId !== 'vtx_demo') {
+        demoUser.id = data?.id || `demo-${crypto.randomUUID()}`;
+        changed = true;
+      }
       if (!demoUser.account_type) {
         demoUser.account_type = 'demo';
         changed = true;
