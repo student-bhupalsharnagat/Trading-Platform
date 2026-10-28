@@ -5,6 +5,7 @@ import { tenantConfigCache } from '../cache/TenantConfigCache.ts';
 import { emergencyStateCache } from '../cache/EmergencyStateCache.ts';
 import { postgresTenantConfigRepository } from '../repositories/trading/PostgresTenantConfigRepository.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
+import { centralApiService } from './centralApiService.ts';
 
 export interface TenantSyncPayload {
   tenantId?: string;
@@ -338,6 +339,13 @@ export class TenantConfigSyncService {
     } catch (pgErr: any) {
       console.warn('[PostgresSync] Non-blocking PostgreSQL persistence warning:', pgErr.message);
     }
+
+    try {
+      await centralApiService.invalidateTenantCache(authoritativeTenantId);
+      if (authoritativeTenantId !== 'vertex-default') {
+        await centralApiService.invalidateTenantCache('vertex-default');
+      }
+    } catch {}
 
     // 8. Audit Logging (Never log secrets or HMAC signatures)
     auditService.logEmergencyEvent({

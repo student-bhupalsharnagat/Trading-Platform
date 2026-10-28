@@ -7,6 +7,7 @@ import {
 import { tenantRepository } from '../repositories/JsonTenantRepository.ts';
 import { postgresTenantConfigRepository } from '../repositories/trading/PostgresTenantConfigRepository.ts';
 import { resolveInternalRenderUrl } from '../config/internalConfig.ts';
+import { redisService } from '../redis/RedisService.ts';
 
 export interface TenantResolutionData {
   tenant: Tenant;
@@ -285,72 +286,134 @@ export class CentralApiService implements ICentralApiService {
     return null;
   }
 
-  public async resolveTenant(domain: string, requestedTenantId?: string): Promise<TenantResolutionData> {
-    const baseUrl = this.baseUrl;
-    if (!baseUrl) {
-      return this.mockProvider.resolveTenant(domain, requestedTenantId);
+  public async invalidateTenantCache(tenantId?: string): Promise<void> {
+    try {
+      if (tenantId) {
+        await Promise.all([
+          redisService.del(`cache:tenant:branding:${tenantId}`),
+          redisService.del(`cache:tenant:platform_config:${tenantId}`),
+          redisService.del(`cache:tenant:status:${tenantId}`),
+          redisService.del(`cache:tenant:resolve:localhost:${tenantId}`),
+          redisService.del(`cache:tenant:resolve:127.0.0.1:${tenantId}`),
+        ]);
+      }
+      await Promise.all([
+        redisService.del('cache:tenant:all_list'),
+        redisService.del('cache:tenant:resolve:localhost:default'),
+        redisService.del('cache:tenant:resolve:127.0.0.1:default'),
+      ]);
+    } catch {
+      // Non-fatal cache invalidation error
     }
+  }
+
+  public async resolveTenant(domain: string, requestedTenantId?: string): Promise<TenantResolutionData> {
+    const cleanDomain = (domain || '').toLowerCase().split(':')[0];
+    const cacheKey = `cache:tenant:resolve:${cleanDomain}:${requestedTenantId || 'default'}`;
 
     try {
-      // 1. Try explicit Central API resolve endpoint if available and returns JSON
-      const query = new URLSearchParams({ domain });
-      if (requestedTenantId) query.set('tenant_id', requestedTenantId);
-
-      const resolveJson = await this.fetchJson(`${baseUrl}/api/tenant/resolve?${query.toString()}`, 1500);
-      if (resolveJson && resolveJson.success && resolveJson.data) {
-        return resolveJson.data;
+      const cached = await redisService.get(cacheKey);
+      if (cached) {
+        return JSON.parse(cached);
       }
+    } catch {
+      // Non-fatal cache read error
+    }
 
-      // 2. Query Central Admin's valid JSON /api/tenants endpoint
-      const remoteTenants = await this.fetchRemoteTenants();
-      if (remoteTenants && remoteTenants.length > 0) {
-        const cleanDomain = (domain || '').toLowerCase().split(':')[0];
-        let matchedRemote: any = null;
+    const baseUrl = this.baseUrl;
+    let result: TenantResolutionData | null = null;
 
-        if (requestedTenantId) {
-          matchedRemote = remoteTenants.find(
-            (t: any) => t.id && t.id.toLowerCase() === requestedTenantId.toLowerCase()
-          );
+    if (baseUrl) {
+      try {
+        // 1. Try explicit Central API resolve endpoint if available and returns JSON
+        const query = new URLSearchParams({ domain });
+        if (requestedTenantId) query.set('tenant_id', requestedTenantId);
+
+        const resolveJson = await this.fetchJson(`${baseUrl}/api/tenant/resolve?${query.toString()}`, 1500);
+        if (resolveJson && resolveJson.success && resolveJson.data) {
+          result = resolveJson.data;
         }
 
-        if (!matchedRemote && cleanDomain) {
-          matchedRemote = remoteTenants.find(
-            (t: any) => t.domain && t.domain.toLowerCase() === cleanDomain
-          );
-        }
+        // 2. Query Central Admin's valid JSON /api/tenants endpoint
+        if (!result) {
+          const remoteTenants = await this.fetchRemoteTenants();
+          if (remoteTenants && remoteTenants.length > 0) {
+            let matchedRemote: any = null;
 
-        if (matchedRemote) {
-          const localContext = await this.mockProvider.resolveTenant(domain, matchedRemote.id);
-          return {
-            ...localContext,
-            tenant: {
-              ...localContext.tenant,
-              id: matchedRemote.id,
-              name: matchedRemote.name || localContext.tenant.name,
-              customDomain: matchedRemote.domain || localContext.tenant.customDomain,
-            },
-            matchedBy: requestedTenantId ? 'override' : 'domain',
-            domain: cleanDomain,
-          };
+            if (requestedTenantId) {
+              matchedRemote = remoteTenants.find(
+                (t: any) => t.id && t.id.toLowerCase() === requestedTenantId.toLowerCase()
+              );
+            }
+
+            if (!matchedRemote && cleanDomain) {
+              matchedRemote = remoteTenants.find(
+                (t: any) => t.domain && t.domain.toLowerCase() === cleanDomain
+              );
+            }
+
+            if (matchedRemote) {
+              const localContext = await this.mockProvider.resolveTenant(domain, matchedRemote.id);
+              result = {
+                ...localContext,
+                tenant: {
+                  ...localContext.tenant,
+                  id: matchedRemote.id,
+                  name: matchedRemote.name || localContext.tenant.name,
+                  customDomain: matchedRemote.domain || localContext.tenant.customDomain,
+                },
+                matchedBy: requestedTenantId ? 'override' : 'domain',
+                domain: cleanDomain,
+              };
+            }
+          }
         }
+      } catch (err: any) {
+        this.logFallbackNotice(err.message || 'connection failed');
       }
-    } catch (err: any) {
-      this.logFallbackNotice(err.message || 'connection failed');
     }
 
     // Clean fallback to local / PostgreSQL provider without log spam
-    return this.mockProvider.resolveTenant(domain, requestedTenantId);
+    if (!result) {
+      result = await this.mockProvider.resolveTenant(domain, requestedTenantId);
+    }
+
+    if (result && result.tenant) {
+      try {
+        await redisService.set(cacheKey, JSON.stringify(result), 120); // 2 minute TTL
+      } catch {
+        // Non-fatal cache write error
+      }
+    }
+
+    return result;
   }
 
   public async getTenantBranding(tenantId: string): Promise<TenantBranding | null> {
+    const cacheKey = `cache:tenant:branding:${tenantId}`;
+    try {
+      const cached = await redisService.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch {}
+
     const baseUrl = this.baseUrl;
+    let branding: TenantBranding | null = null;
     if (baseUrl) {
       const json = await this.fetchJson(`${baseUrl}/api/tenant/branding?tenant_id=${encodeURIComponent(tenantId)}`);
       if (json) {
-        return json.data || json;
+        branding = json.data || json;
       }
     }
-    return this.mockProvider.getTenantBranding(tenantId);
+    if (!branding) {
+      branding = await this.mockProvider.getTenantBranding(tenantId);
+    }
+
+    if (branding) {
+      try {
+        await redisService.set(cacheKey, JSON.stringify(branding), 300); // 5 minute TTL
+      } catch {}
+    }
+    return branding;
   }
 
   public async getTenantConfig(
@@ -367,14 +430,30 @@ export class CentralApiService implements ICentralApiService {
   }
 
   public async getTenantPlatformConfig(tenantId: string): Promise<TenantPlatformConfig | null> {
+    const cacheKey = `cache:tenant:platform_config:${tenantId}`;
+    try {
+      const cached = await redisService.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch {}
+
     const baseUrl = this.baseUrl;
+    let config: TenantPlatformConfig | null = null;
     if (baseUrl) {
       const json = await this.fetchJson(`${baseUrl}/api/tenant/platform-config?tenant_id=${encodeURIComponent(tenantId)}`);
       if (json) {
-        return json.data || json;
+        config = json.data || json;
       }
     }
-    return this.mockProvider.getTenantPlatformConfig(tenantId);
+    if (!config) {
+      config = await this.mockProvider.getTenantPlatformConfig(tenantId);
+    }
+
+    if (config) {
+      try {
+        await redisService.set(cacheKey, JSON.stringify(config), 60); // 1 minute TTL
+      } catch {}
+    }
+    return config;
   }
 
   public async getTenantStatus(tenantId: string): Promise<TenantSecurityStatus | null> {
@@ -389,6 +468,13 @@ export class CentralApiService implements ICentralApiService {
   }
 
   public async getAllTenants(): Promise<Tenant[]> {
+    const cacheKey = 'cache:tenant:all_list';
+    try {
+      const cached = await redisService.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch {}
+
+    let tenants: Tenant[] = [];
     const remoteTenants = await this.fetchRemoteTenants();
     if (remoteTenants && remoteTenants.length > 0) {
       const local = await this.mockProvider.getAllTenants();
@@ -408,23 +494,35 @@ export class CentralApiService implements ICentralApiService {
           });
         }
       }
-      return Array.from(map.values());
+      tenants = Array.from(map.values());
+    } else {
+      tenants = await this.mockProvider.getAllTenants();
     }
-    return this.mockProvider.getAllTenants();
+
+    if (tenants.length > 0) {
+      try {
+        await redisService.set(cacheKey, JSON.stringify(tenants), 300); // 5 minute TTL
+      } catch {}
+    }
+    return tenants;
   }
 
   public async updatePlatformConfig(
     tenantId: string,
     updates: Partial<TenantPlatformConfig>
   ): Promise<TenantPlatformConfig | null> {
-    return this.mockProvider.updatePlatformConfig(tenantId, updates);
+    const res = await this.mockProvider.updatePlatformConfig(tenantId, updates);
+    await this.invalidateTenantCache(tenantId);
+    return res;
   }
 
   public async updateStatus(
     tenantId: string,
     updates: Partial<TenantSecurityStatus>
   ): Promise<TenantSecurityStatus | null> {
-    return this.mockProvider.updateStatus(tenantId, updates);
+    const res = await this.mockProvider.updateStatus(tenantId, updates);
+    await this.invalidateTenantCache(tenantId);
+    return res;
   }
 }
 

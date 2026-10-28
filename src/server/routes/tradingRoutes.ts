@@ -77,8 +77,9 @@ function getReqTenantId(req: any): string {
   return req.user?.tenantId || req.tenant?.tenant?.id || (req.headers && (req.headers['x-tenant-id'] as string)) || 'vertex-default';
 }
 
-// Get live instruments list
+// Get live instruments list (static catalog of symbols, lot sizes, tick sizes)
 router.get('/instruments', optionalAuth, (req: AuthenticatedRequest, res: Response) => {
+  res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
   res.json({
     success: true,
     instruments: INSTRUMENTS,

@@ -39,6 +39,7 @@ router.get('/resolve', async (req: TenantRequest, res: Response) => {
 router.get('/branding', async (req: TenantRequest, res: Response) => {
   try {
     const tenantId = (req.query.tenant_id as string) || req.tenant?.tenant.id || 'vertex-default';
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
     const branding = await centralApiService.getTenantBranding(tenantId);
 
     if (!branding) {
@@ -91,6 +92,7 @@ router.get('/config', async (req: TenantRequest, res: Response) => {
 router.get('/platform-config', async (req: TenantRequest, res: Response) => {
   try {
     const tenantId = (req.query.tenant_id as string) || req.tenant?.tenant.id || 'vertex-default';
+    res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
     const platformConfig = await centralApiService.getTenantPlatformConfig(tenantId);
 
     if (!platformConfig) {
@@ -196,6 +198,7 @@ router.get('/current', async (req: TenantRequest, res: Response) => {
  */
 router.get('/all', async (req: TenantRequest, res: Response) => {
   try {
+    res.setHeader('Cache-Control', 'public, max-age=120, stale-while-revalidate=300');
     const tenants = await centralApiService.getAllTenants();
     const enriched = await Promise.all(
       tenants.map(async (t) => {

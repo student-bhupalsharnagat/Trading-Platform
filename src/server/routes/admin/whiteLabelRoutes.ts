@@ -4,6 +4,7 @@ import { requireAdmin } from '../../middleware/requireRole.ts';
 import { tenantRepository } from '../../repositories/JsonTenantRepository.ts';
 import { tenantConfigCache } from '../../cache/TenantConfigCache.ts';
 import { tradingWebSocketServer } from '../../websocket/WebSocketServer.ts';
+import { centralApiService } from '../../services/centralApiService.ts';
 
 const router = Router();
 
@@ -118,10 +119,14 @@ const handleUpdateBranding = async (req: AuthenticatedRequest, res: Response) =>
       await tenantRepository.updateBranding('vertex-default', updates);
     }
 
-    // Invalidate local cache
+    // Invalidate local and Redis cache
     try {
       tenantConfigCache.invalidate(tenantId);
       tenantConfigCache.invalidate('vertex-default');
+      centralApiService.invalidateTenantCache(tenantId);
+      if (tenantId !== 'vertex-default') {
+        centralApiService.invalidateTenantCache('vertex-default');
+      }
     } catch {
       // Non-fatal
     }
