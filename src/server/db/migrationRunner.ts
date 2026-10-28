@@ -44,7 +44,7 @@ export async function runTradingMigrations(): Promise<void> {
 
   const files = fs
     .readdirSync(migrationsDir)
-    .filter((f) => f.endsWith('.sql'))
+    .filter((f) => f.endsWith('.sql') && !f.endsWith('.down.sql') && !f.endsWith('.rollback.sql'))
     .sort();
 
   console.log(`[Postgres Migrations] Found ${files.length} migration files (${appliedSet.size} previously applied).`);
@@ -71,15 +71,27 @@ export async function runTradingMigrations(): Promise<void> {
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
 
-    await pgDb.transaction(async (client) => {
+    const hasConcurrent = statements.some((s) => s.toUpperCase().includes('CONCURRENTLY'));
+
+    if (hasConcurrent) {
       for (const stmt of statements) {
-        await client.query(stmt);
+        await pgDb.query(stmt);
       }
-      await client.query(
+      await pgDb.query(
         'INSERT INTO trading_schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING',
         [file]
       );
-    });
+    } else {
+      await pgDb.transaction(async (client) => {
+        for (const stmt of statements) {
+          await client.query(stmt);
+        }
+        await client.query(
+          'INSERT INTO trading_schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING',
+          [file]
+        );
+      });
+    }
 
     console.log(`[Postgres Migrations] Successfully applied migration: ${file}`);
   }
