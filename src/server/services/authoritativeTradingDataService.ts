@@ -1528,6 +1528,31 @@ export class AuthoritativeTradingDataService {
 
     if (action === 'REJECT') {
       const updated = await postgresFundTransactionRepository.updateStatus(tenantId, txId, 'REJECTED', adminId, reason);
+
+      // If this was a withdrawal that had margin blocked, refund it back to available_balance
+      if (tx.transaction_type === 'WITHDRAWAL') {
+        try {
+          const currentW = await postgresWalletRepository.getOrCreateWallet(tenantId, tx.user_id);
+          if ((currentW.blocked_balance || 0) >= Number(tx.amount)) {
+            const refundAvail = Number((currentW.available_balance + Number(tx.amount)).toFixed(2));
+            const refundBlock = Math.max(0, Number(((currentW.blocked_balance || 0) - Number(tx.amount)).toFixed(2)));
+            await postgresWalletRepository.updateWallet(tenantId, tx.user_id, {
+              available_balance: refundAvail,
+              blocked_balance: refundBlock,
+            });
+            for (const t of [tenantId, 'TNT-001', 'vertex-default']) {
+              const memW = getTenantWallet(t);
+              memW.availableBalance = Number((memW.availableBalance + Number(tx.amount)).toFixed(2));
+              if (memW.blockedBalance) {
+                memW.blockedBalance = Math.max(0, Number((memW.blockedBalance - Number(tx.amount)).toFixed(2)));
+              }
+            }
+          }
+        } catch (unblockErr) {
+          console.warn('[Funds] Failed to unblock rejected withdrawal margin:', unblockErr);
+        }
+      }
+
       const eventType = tx.transaction_type === 'DEPOSIT' ? 'deposit.rejected' : 'withdrawal.rejected';
       const rejectPayload = {
         id: txId,
@@ -1594,16 +1619,28 @@ export class AuthoritativeTradingDataService {
       const currentBal = Number(lockedWallet.available_balance);
 
       let newBal = currentBal;
+      let newBlocked = Number(lockedWallet.blocked_balance || 0);
       let ledgerType: 'CREDIT' | 'DEBIT' = 'CREDIT';
+      let balanceBefore = currentBal;
 
       if (tx.transaction_type === 'DEPOSIT') {
         newBal = currentBal + Number(tx.amount);
         ledgerType = 'CREDIT';
+        balanceBefore = currentBal;
       } else if (tx.transaction_type === 'WITHDRAWAL') {
-        if (currentBal < Number(tx.amount)) {
-          throw new Error(`Insufficient wallet balance for withdrawal. Current balance: ${currentBal}, requested: ${tx.amount}`);
+        if (newBlocked >= Number(tx.amount)) {
+          // Margin was pre-locked upon request submission
+          newBlocked = Math.max(0, Number((newBlocked - Number(tx.amount)).toFixed(2)));
+          newBal = currentBal; // already deducted from available balance
+          balanceBefore = currentBal + Number(tx.amount);
+        } else {
+          // Direct/legacy approval where margin was not pre-locked
+          if (currentBal < Number(tx.amount)) {
+            throw new Error(`Insufficient wallet balance for withdrawal. Current balance: ${currentBal}, requested: ${tx.amount}`);
+          }
+          newBal = currentBal - Number(tx.amount);
+          balanceBefore = currentBal;
         }
-        newBal = currentBal - Number(tx.amount);
         ledgerType = 'DEBIT';
       }
 
@@ -1611,7 +1648,7 @@ export class AuthoritativeTradingDataService {
       const updatedWallet = await postgresWalletRepository.updateWallet(
         tenantId,
         tx.user_id,
-        { available_balance: newBal },
+        { available_balance: newBal, blocked_balance: newBlocked },
         client
       );
 
@@ -1624,7 +1661,7 @@ export class AuthoritativeTradingDataService {
           type: ledgerType,
           category: tx.transaction_type,
           amount: Number(tx.amount),
-          balance_before: currentBal,
+          balance_before: balanceBefore,
           balance_after: newBal,
           reference: `Admin Approved ${tx.transaction_type} [${tx.reference_id || tx.id}]`,
           created_by: adminId,
@@ -1658,7 +1695,7 @@ export class AuthoritativeTradingDataService {
         paymentMethod: tx.payment_method || 'BANK_TRANSFER',
         reference: tx.reference_id || txId,
         referenceId: tx.reference_id,
-        balanceBefore: currentBal,
+        balanceBefore,
         balanceAfter: newBal,
         approvedBy: adminId,
         createdAt: tx.created_at || new Date().toISOString(),
@@ -1708,9 +1745,15 @@ export class AuthoritativeTradingDataService {
     for (const t of [tenantId, 'TNT-001', 'vertex-default']) {
       const memWallet = getTenantWallet(t);
       if (tx.transaction_type === 'DEPOSIT') {
-        memWallet.availableBalance += Number(tx.amount);
+        memWallet.availableBalance = Number((memWallet.availableBalance + Number(tx.amount)).toFixed(2));
+        memWallet.deposited = Number(((memWallet.deposited || 0) + Number(tx.amount)).toFixed(2));
       } else if (tx.transaction_type === 'WITHDRAWAL') {
-        memWallet.availableBalance = Math.max(0, memWallet.availableBalance - Number(tx.amount));
+        if ((memWallet.blockedBalance || 0) >= Number(tx.amount)) {
+          memWallet.blockedBalance = Math.max(0, Number(((memWallet.blockedBalance || 0) - Number(tx.amount)).toFixed(2)));
+        } else {
+          memWallet.availableBalance = Math.max(0, Number((memWallet.availableBalance - Number(tx.amount)).toFixed(2)));
+        }
+        memWallet.withdrawn = Number(((memWallet.withdrawn || 0) + Number(tx.amount)).toFixed(2));
       }
 
       const memTxs = getTenantFundTransactions(t);

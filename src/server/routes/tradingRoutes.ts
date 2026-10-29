@@ -806,6 +806,10 @@ router.post('/funds/deposit', requireAuth, async (req: TenantRequest, res: Respo
       res.status(400).json({ success: false, message: 'Minimum deposit amount is ₹100.' });
       return;
     }
+    if (numAmount > 10000000) {
+      res.status(400).json({ success: false, message: 'Maximum deposit limit per transaction is ₹1,00,00,000 (1 Crore).' });
+      return;
+    }
 
     // 1. Create authoritative fund transaction in PostgreSQL (PENDING state + outbox deposit.created event)
     const refId = `DEP-${Date.now()}`;
@@ -828,10 +832,23 @@ router.post('/funds/deposit', requireAuth, async (req: TenantRequest, res: Respo
       );
     } catch {
       const pgW = await postgresWalletRepository.getOrCreateWallet(tenantId, userId);
+      const newAvail = Number((pgW.available_balance + numAmount).toFixed(2));
       await postgresWalletRepository.updateWallet(tenantId, userId, {
-        available_balance: Number((pgW.available_balance + numAmount).toFixed(2)),
+        available_balance: newAvail,
       });
       await postgresFundTransactionRepository.updateStatus(tenantId, tx.id, 'APPROVED', 'INSTANT_PAYMENT');
+      await postgresLedgerRepository.createEntry({
+        tenant_id: tenantId,
+        user_id: userId,
+        transaction_id: tx.id,
+        type: 'CREDIT',
+        category: 'DEPOSIT',
+        amount: numAmount,
+        balance_before: pgW.available_balance,
+        balance_after: newAvail,
+        reference: `Instant Deposit [${refId}]`,
+        created_by: 'INSTANT_PAYMENT',
+      }).catch(() => null);
     }
 
     // In-memory dual-write for instant margin reflection
@@ -862,10 +879,12 @@ router.post('/funds/deposit', requireAuth, async (req: TenantRequest, res: Respo
     res.json({
       success: true,
       transactionId: tx.id,
+      refId,
       status: 'SUCCESS',
       message: `₹${numAmount.toLocaleString('en-IN')} has been credited to your trading margin balance.`,
       wallet: {
         availableBalance: pgWallet.available_balance,
+        blockedBalance: pgWallet.blocked_balance,
         usedMargin: pgWallet.used_margin,
         totalPnL: pgWallet.realized_pnl,
         todayPnL: pgWallet.realized_pnl,
@@ -911,7 +930,20 @@ router.post('/funds/withdraw', requireAuth, async (req: TenantRequest, res: Resp
       refId
     );
 
-    const wallet = getTenantWallet(tenantId);
+    // Atomically lock available balance into blocked balance to prevent double-spending
+    const newAvailable = Math.max(0, Number((pgWallet.available_balance - numAmount).toFixed(2)));
+    const newBlocked = Number(((pgWallet.blocked_balance || 0) + numAmount).toFixed(2));
+    await postgresWalletRepository.updateWallet(tenantId, userId, {
+      available_balance: newAvailable,
+      blocked_balance: newBlocked,
+    });
+
+    for (const t of [tenantId, 'TNT-001', 'vertex-default']) {
+      const memW = getTenantWallet(t);
+      memW.availableBalance = Math.max(0, Number((memW.availableBalance - numAmount).toFixed(2)));
+      memW.blockedBalance = Number(((memW.blockedBalance || 0) + numAmount).toFixed(2));
+    }
+
     const notifications = getTenantNotifications(tenantId);
     notifications.unshift({
       id: `NOTIF-${Date.now()}`,
@@ -925,10 +957,12 @@ router.post('/funds/withdraw', requireAuth, async (req: TenantRequest, res: Resp
     res.json({
       success: true,
       transactionId: tx.id,
+      refId,
       status: 'PENDING',
       message: `Withdrawal request of ₹${numAmount.toLocaleString('en-IN')} submitted and pending approval.`,
       wallet: {
-        availableBalance: pgWallet.available_balance,
+        availableBalance: newAvailable,
+        blockedBalance: newBlocked,
         usedMargin: pgWallet.used_margin,
         totalPnL: pgWallet.realized_pnl,
         todayPnL: pgWallet.realized_pnl,
@@ -962,16 +996,23 @@ router.get(['/funds', '/funds/transactions'], requireAuth, async (req: Authentic
     const type = req.query.type as 'DEPOSIT' | 'WITHDRAWAL' | undefined;
     const status = req.query.status as string | undefined;
 
-    const pgTxs = await postgresFundTransactionRepository.getByTenant(tenantId, targetUserId, type, status);
+    const resolvedTargetUserId = await authoritativeTradingDataService.resolveTradingUserId(tenantId, targetUserId).catch(() => targetUserId);
+    const pgTxs = await postgresFundTransactionRepository.getByTenant(tenantId, resolvedTargetUserId, type, status);
+    let allPgTxs = pgTxs;
+    if (resolvedTargetUserId !== targetUserId) {
+      const altTxs = await postgresFundTransactionRepository.getByTenant(tenantId, targetUserId, type, status);
+      allPgTxs = [...pgTxs, ...altTxs];
+    }
+
     const memTxs = [
       ...getTenantFundTransactions(tenantId),
       ...getTenantFundTransactions('TNT-001'),
       ...getTenantFundTransactions('vertex-default'),
-    ].filter((t: any) => !t.userId || t.userId === targetUserId || t.userId === 'vtx_demo' || t.userId === 'demo-trader');
+    ].filter((t: any) => !t.userId || t.userId === targetUserId || t.userId === resolvedTargetUserId || t.userId === 'vtx_demo' || t.userId === 'demo-trader');
 
     const seenIds = new Set<string>();
     const transactions: any[] = [];
-    for (const tx of [...pgTxs, ...memTxs]) {
+    for (const tx of [...allPgTxs, ...memTxs]) {
       const id = tx.id || tx.transactionId;
       if (id && !seenIds.has(id)) {
         seenIds.add(id);

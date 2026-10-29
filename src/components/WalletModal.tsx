@@ -75,15 +75,33 @@ export const WalletModal: React.FC<WalletModalProps> = ({
 
   const loadServerHistory = React.useCallback(async () => {
     try {
-      const res = await authApi.getFunds();
+      const [res, ledgerRes] = await Promise.all([
+        authApi.getFunds().catch(() => ({ transactions: [] })),
+        authApi.getLedger().catch(() => ({ ledger: [] })),
+      ]);
+
+      const seenIds = new Set<string>();
+      const mapped: Array<{
+        id: string;
+        type: 'DEPOSIT' | 'WITHDRAWAL' | 'MARGIN_CREDIT' | 'MARGIN_BLOCKED';
+        amount: number;
+        method: string;
+        status: 'SUCCESS' | 'PROCESSING' | 'REJECTED' | 'FAILED';
+        time: string;
+        refId: string;
+      }> = [];
+
+      // 1. Process fund transactions (deposits & withdrawals)
       if (res && res.transactions && res.transactions.length > 0) {
-        const mapped = res.transactions.map((t: any) => {
+        for (const t of res.transactions) {
           const rawStatus = String(t.status || '').toUpperCase();
           let status: 'SUCCESS' | 'PROCESSING' | 'REJECTED' | 'FAILED' = 'PROCESSING';
           if (['APPROVED', 'COMPLETED', 'SUCCESS'].includes(rawStatus)) {
             status = 'SUCCESS';
-          } else if (['REJECTED', 'FAILED', 'CANCELLED'].includes(rawStatus)) {
-            status = rawStatus === 'REJECTED' ? 'REJECTED' : 'FAILED';
+          } else if (['REJECTED'].includes(rawStatus)) {
+            status = 'REJECTED';
+          } else if (['FAILED', 'CANCELLED'].includes(rawStatus)) {
+            status = 'FAILED';
           } else {
             status = 'PROCESSING';
           }
@@ -92,18 +110,55 @@ export const WalletModal: React.FC<WalletModalProps> = ({
           const isWdr = t.type === 'WITHDRAWAL' || t.transaction_type === 'WITHDRAWAL';
           const refId = rawRef && (rawRef.startsWith('WDR-') || rawRef.startsWith('DEP-') || rawRef.startsWith('TX-') || !rawRef.startsWith('HDFC'))
             ? rawRef
-            : (isWdr ? `WDR-${Date.now()}` : `TX-${Date.now()}`);
+            : (isWdr ? `WDR-${Date.now()}` : `DEP-${Date.now()}`);
 
-          return {
-            id: t.id || `TX-${Date.now()}`,
-            type: (t.transaction_type || t.type || 'DEPOSIT') as any,
+          const id = t.id || refId;
+          seenIds.add(id);
+          if (t.reference_id) seenIds.add(t.reference_id);
+
+          mapped.push({
+            id,
+            type: (t.transaction_type || t.type || (isWdr ? 'WITHDRAWAL' : 'DEPOSIT')) as any,
             amount: Number(t.amount || 0),
-            method: t.payment_method || t.method || (isWdr ? 'Bank Payout' : 'Net Banking (HDFC)'),
+            method: t.payment_method || t.method || (isWdr ? 'Bank Payout' : 'UPI Instant'),
             status,
             time: t.created_at ? new Date(t.created_at).toLocaleDateString('en-GB') + ' ' + new Date(t.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : 'Today',
             refId,
-          };
-        });
+          });
+        }
+      }
+
+      // 2. Process trade debits/credits & ledger records
+      if (ledgerRes && ledgerRes.ledger && ledgerRes.ledger.length > 0) {
+        for (const entry of ledgerRes.ledger) {
+          if (entry.transaction_id && seenIds.has(entry.transaction_id)) continue;
+          if (entry.id && seenIds.has(entry.id)) continue;
+          seenIds.add(entry.id);
+
+          const isCredit = entry.type === 'CREDIT';
+          const category = String(entry.category || '').toUpperCase();
+          const mappedType: 'DEPOSIT' | 'WITHDRAWAL' | 'MARGIN_CREDIT' | 'MARGIN_BLOCKED' =
+            category === 'DEPOSIT'
+              ? 'DEPOSIT'
+              : category === 'WITHDRAWAL'
+              ? 'WITHDRAWAL'
+              : isCredit
+              ? 'MARGIN_CREDIT'
+              : 'MARGIN_BLOCKED';
+
+          mapped.push({
+            id: entry.id,
+            type: mappedType,
+            amount: Number(entry.amount || 0),
+            method: entry.reference || (isCredit ? 'Trade Credit / Realized P&L' : 'Trade Margin Debit'),
+            status: 'SUCCESS',
+            time: entry.created_at ? new Date(entry.created_at).toLocaleDateString('en-GB') + ' ' + new Date(entry.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : 'Today',
+            refId: entry.transaction_id || entry.id,
+          });
+        }
+      }
+
+      if (mapped.length > 0) {
         setHistory(mapped);
         localStorage.setItem('vtx_wallet_history', JSON.stringify(mapped));
       }
@@ -158,6 +213,14 @@ export const WalletModal: React.FC<WalletModalProps> = ({
       });
       return;
     }
+    if (amount > 10000000) {
+      showToast({
+        type: 'error',
+        title: 'Limit Exceeded',
+        description: 'Maximum deposit limit per transaction is ₹1,00,00,000 (1 Crore).',
+      });
+      return;
+    }
 
     setProcessing(true);
     try {
@@ -168,21 +231,22 @@ export const WalletModal: React.FC<WalletModalProps> = ({
           ? `Net Banking (${selectedBank})`
           : 'IMPS Virtual Account';
 
-      await authApi.depositFunds(amount, methodLabel);
+      const res: any = await authApi.depositFunds(amount, methodLabel);
+      const txRef = res?.refId || res?.transactionId || `DEP-${Date.now().toString().slice(-6)}`;
 
       const newTxItem = {
-        id: `TX-${Date.now().toString().slice(-4)}`,
+        id: res?.transactionId || `TX-${Date.now().toString().slice(-4)}`,
         type: 'DEPOSIT' as const,
         amount,
         method: methodLabel,
         status: 'SUCCESS' as const,
         time: 'Just now',
-        refId: `DEP/${new Date().getFullYear()}/${Math.floor(100000 + Math.random() * 900000)}`,
+        refId: txRef,
       };
 
       // Add to local history & persist immediately
       setHistory((prev) => {
-        const next = [newTxItem, ...prev];
+        const next = [newTxItem, ...prev.filter((it) => it.id !== newTxItem.id)];
         localStorage.setItem('vtx_wallet_history', JSON.stringify(next));
         return next;
       });
@@ -213,7 +277,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
       showToast({
         type: 'error',
         title: 'Validation Error',
-        description: 'Minimum withdrawal amount is ₹500',
+        description: 'Minimum withdrawal amount is ₹500.',
       });
       return;
     }
@@ -222,28 +286,29 @@ export const WalletModal: React.FC<WalletModalProps> = ({
       showToast({
         type: 'error',
         title: 'Insufficient Margin',
-        description: `Available to withdraw: ₹${wallet.availableBalance.toLocaleString('en-IN')}`,
+        description: `Available to withdraw: ₹${wallet.availableBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
       });
       return;
     }
 
     setProcessing(true);
     try {
-      await authApi.withdrawFunds(amount, 'HDFC Bank Ltd', '50100492818912');
+      const res: any = await authApi.withdrawFunds(amount, 'HDFC Bank Ltd', '50100492818912');
+      const txRef = res?.refId || res?.transactionId || `WDR-${Date.now().toString().slice(-6)}`;
 
-      // Add to local history & persist immediately
+      // Add pending withdrawal record to local history
       const newWdrItem = {
-        id: `TX-${Date.now().toString().slice(-4)}`,
+        id: res?.transactionId || `TX-${Date.now().toString().slice(-4)}`,
         type: 'WITHDRAWAL' as const,
         amount,
         method: 'IMPS to HDFC Bank (8912)',
-        status: 'SUCCESS' as const,
+        status: 'PROCESSING' as const,
         time: 'Just now',
-        refId: `WDR/${new Date().getFullYear()}/${Math.floor(100000 + Math.random() * 900000)}`,
+        refId: txRef,
       };
 
       setHistory((prev) => {
-        const next = [newWdrItem, ...prev];
+        const next = [newWdrItem, ...prev.filter((it) => it.id !== newWdrItem.id)];
         localStorage.setItem('vtx_wallet_history', JSON.stringify(next));
         return next;
       });
@@ -251,7 +316,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
       showToast({
         type: 'success',
         title: 'Payout Request Submitted',
-        description: `₹${amount.toLocaleString('en-IN')} will be credited to HDFC Bank A/C ending in 8912.`,
+        description: `₹${amount.toLocaleString('en-IN')} payout request submitted (ID: ${txRef}). Margin locked pending approval.`,
         duration: 4000,
       });
 
@@ -275,11 +340,19 @@ export const WalletModal: React.FC<WalletModalProps> = ({
   const isWithdrawExceeded = numWithdrawAmt > wallet.availableBalance;
   const isWithdrawBelowMin = numWithdrawAmt > 0 && numWithdrawAmt < 500;
 
+  const unrealizedPnL = typeof wallet.totalPnL === 'number' ? wallet.totalPnL : 0;
+  const realizedPnL = typeof wallet.todayPnL === 'number' ? wallet.todayPnL : 0;
+  const isUnrealizedPositive = unrealizedPnL >= 0;
+  const isRealizedPositive = realizedPnL >= 0;
+
+  const upiUri = `upi://pay?pa=vertex.trading@icici&pn=VERTEX%20Trading&am=${numDepositAmt}&cu=INR&tr=${user?.userId || 'VTX'}_${Date.now()}`;
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(upiUri)}`;
+
   const filteredHistory = history.filter((item) => {
     if (historyFilter === 'ALL') return true;
     if (historyFilter === 'DEPOSIT') return item.type === 'DEPOSIT';
     if (historyFilter === 'WITHDRAWAL') return item.type === 'WITHDRAWAL';
-    if (historyFilter === 'MARGIN_CREDIT') return item.type === 'MARGIN_CREDIT';
+    if (historyFilter === 'MARGIN_CREDIT') return item.type === 'MARGIN_CREDIT' || item.type === 'MARGIN_BLOCKED';
     return true;
   });
 
@@ -390,41 +463,53 @@ export const WalletModal: React.FC<WalletModalProps> = ({
 
             {/* Card 3: Unrealized MTM P&L */}
             <div
-              className="p-3 sm:p-3.5 rounded-xl sm:rounded-2xl bg-gradient-to-br from-[#061F18]/90 via-[#0A1620]/80 to-[#0B111C] border border-emerald-500/30 shadow-lg relative overflow-hidden min-w-0 flex flex-col justify-between"
-              title={`+₹${(wallet.totalPnL || 34386.86).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+              className={`p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border shadow-lg relative overflow-hidden min-w-0 flex flex-col justify-between ${
+                isUnrealizedPositive
+                  ? 'bg-gradient-to-br from-[#061F18]/90 via-[#0A1620]/80 to-[#0B111C] border-emerald-500/30'
+                  : 'bg-gradient-to-br from-[#240608]/90 via-[#1A0B0E]/80 to-[#0B111C] border-rose-500/30'
+              }`}
+              title={`${isUnrealizedPositive ? '+' : '-'}₹${Math.abs(unrealizedPnL).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             >
               <div className="flex items-center justify-between gap-1">
                 <span className="text-[10px] sm:text-[11px] font-bold text-slate-300 uppercase tracking-wider truncate">
                   Unrealized P&L
                 </span>
-                <TrendingUp className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                <TrendingUp className={`w-3 h-3 flex-shrink-0 ${isUnrealizedPositive ? 'text-emerald-400' : 'text-rose-400'}`} />
               </div>
               <div className="my-1 sm:my-1.5">
-                <p className="text-sm sm:text-base lg:text-lg font-mono font-black text-emerald-400 tracking-tight truncate flex items-center gap-0.5">
-                  <span>+₹</span>
-                  <span>{(wallet.totalPnL || 34386.86).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                <p className={`text-sm sm:text-base lg:text-lg font-mono font-black tracking-tight truncate flex items-center gap-0.5 ${
+                  isUnrealizedPositive ? 'text-emerald-400' : 'text-rose-400'
+                }`}>
+                  <span>{isUnrealizedPositive ? '+₹' : '-₹'}</span>
+                  <span>{Math.abs(unrealizedPnL).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </p>
               </div>
-              <span className="text-[9px] sm:text-[10px] text-emerald-300/80 font-medium truncate block">
+              <span className={`text-[9px] sm:text-[10px] font-medium truncate block ${isUnrealizedPositive ? 'text-emerald-300/80' : 'text-rose-300/80'}`}>
                 Open Positions
               </span>
             </div>
 
             {/* Card 4: Today's Realized P&L */}
             <div
-              className="p-3 sm:p-3.5 rounded-xl sm:rounded-2xl bg-gradient-to-br from-[#0B1A2C]/90 via-[#0A1220]/80 to-[#0B111C] border border-blue-500/30 shadow-lg relative overflow-hidden min-w-0 flex flex-col justify-between"
-              title={`+₹${(wallet.todayPnL || 504.52).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+              className={`p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border shadow-lg relative overflow-hidden min-w-0 flex flex-col justify-between ${
+                isRealizedPositive
+                  ? 'bg-gradient-to-br from-[#0B1A2C]/90 via-[#0A1220]/80 to-[#0B111C] border-blue-500/30'
+                  : 'bg-gradient-to-br from-[#240608]/90 via-[#1A0B0E]/80 to-[#0B111C] border-rose-500/30'
+              }`}
+              title={`${isRealizedPositive ? '+' : '-'}₹${Math.abs(realizedPnL).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             >
               <div className="flex items-center justify-between gap-1">
                 <span className="text-[10px] sm:text-[11px] font-bold text-slate-300 uppercase tracking-wider truncate">
                   Today's P&L
                 </span>
-                <Clock className="w-3 h-3 text-blue-400 flex-shrink-0" />
+                <Clock className={`w-3 h-3 flex-shrink-0 ${isRealizedPositive ? 'text-blue-400' : 'text-rose-400'}`} />
               </div>
               <div className="my-1 sm:my-1.5">
-                <p className="text-sm sm:text-base lg:text-lg font-mono font-black text-emerald-400 tracking-tight truncate flex items-center gap-0.5">
-                  <span>+₹</span>
-                  <span>{(wallet.todayPnL || 504.52).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                <p className={`text-sm sm:text-base lg:text-lg font-mono font-black tracking-tight truncate flex items-center gap-0.5 ${
+                  isRealizedPositive ? 'text-emerald-400' : 'text-rose-400'
+                }`}>
+                  <span>{isRealizedPositive ? '+₹' : '-₹'}</span>
+                  <span>{Math.abs(realizedPnL).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </p>
               </div>
               <span className="text-[9px] sm:text-[10px] text-slate-400 font-medium truncate block">
@@ -674,16 +759,55 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                   </div>
 
                   {showUpiQr && (
-                    <div className="p-4 bg-[#0A121E] border border-amber-500/30 rounded-xl flex flex-col items-center justify-center space-y-2 animate-fadeIn">
-                      <div className="w-36 h-36 bg-white p-2 rounded-xl flex items-center justify-center shadow-lg">
-                        <div className="w-full h-full border-2 border-dashed border-slate-800 flex flex-col items-center justify-center text-slate-900 text-center p-1">
+                    <div className="p-4 bg-[#0A121E] border border-amber-500/30 rounded-xl flex flex-col items-center justify-center space-y-3 animate-fadeIn">
+                      <div className="w-44 h-44 bg-white p-2.5 rounded-2xl flex items-center justify-center shadow-2xl relative">
+                        <img
+                          src={qrCodeUrl}
+                          alt={`Scan to Pay ₹${numDepositAmt.toLocaleString('en-IN')}`}
+                          className="w-full h-full object-contain rounded-lg"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLElement).style.display = 'none';
+                            const fallback = document.getElementById('upi-qr-fallback');
+                            if (fallback) fallback.style.display = 'flex';
+                          }}
+                        />
+                        <div
+                          id="upi-qr-fallback"
+                          style={{ display: 'none' }}
+                          className="w-full h-full flex flex-col items-center justify-center text-slate-900 text-center p-2"
+                        >
                           <QrCode className="w-16 h-16 text-slate-900 mb-1" />
-                          <span className="text-[9px] font-mono font-black">UPI QR ₹{numDepositAmt.toLocaleString('en-IN')}</span>
+                          <span className="text-[10px] font-mono font-black">vertex.trading@icici</span>
                         </div>
                       </div>
-                      <p className="text-[11px] text-slate-300 text-center">
-                        Scan with any UPI app on your phone to approve transfer of <strong>₹{numDepositAmt.toLocaleString('en-IN')}</strong>
-                      </p>
+
+                      <div className="text-center space-y-1">
+                        <p className="text-xs text-slate-200 font-semibold">
+                          Scan with <strong className="text-amber-400">GPay, PhonePe, Paytm, BHIM</strong>
+                        </p>
+                        <p className="text-[11px] text-slate-400 font-mono">
+                          Amount: <strong className="text-emerald-400 font-bold">₹{numDepositAmt.toLocaleString('en-IN')}</strong> • Zero Gateway Fee
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleCopy('vertex.trading@icici', 'upi_vpa')}
+                          className="px-2.5 py-1 rounded-lg bg-[#142032] hover:bg-[#1E2E44] text-slate-300 text-xs font-mono font-bold flex items-center gap-1.5 cursor-pointer border border-[#1E2E44]"
+                        >
+                          {copiedField === 'upi_vpa' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedField === 'upi_vpa' ? 'UPI Copied' : 'Copy VPA'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(upiUri, 'upi_intent')}
+                          className="px-2.5 py-1 rounded-lg bg-[#142032] hover:bg-[#1E2E44] text-slate-300 text-xs font-mono font-bold flex items-center gap-1.5 cursor-pointer border border-[#1E2E44]"
+                        >
+                          {copiedField === 'upi_intent' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedField === 'upi_intent' ? 'URI Copied' : 'Copy Payment URI'}</span>
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -953,7 +1077,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                       ? 'Deposits'
                       : cat === 'WITHDRAWAL'
                       ? 'Payouts'
-                      : 'P&L Credits'}
+                      : 'Trades & Margin'}
                   </button>
                 ))}
               </div>

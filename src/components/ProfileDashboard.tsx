@@ -30,6 +30,7 @@ import {
   Mail,
   Phone,
   ExternalLink,
+  Clock,
 } from 'lucide-react';
 
 interface ProfileDashboardProps {
@@ -79,6 +80,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
   const [activeModal, setActiveModal] = useState<
     'NONE' | 'PROFILE' | 'WALLET' | 'NOTIFICATIONS' | 'TICKETS' | 'SETTINGS' | 'TERMS'
   >('NONE');
+  const [walletInitialTab, setWalletInitialTab] = useState<'DEPOSIT' | 'WITHDRAW' | 'HISTORY'>('DEPOSIT');
 
   // Tickets state
   const [tickets, setTickets] = useState<SupportTicket[]>(() => {
@@ -319,7 +321,10 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
         {/* 2. Wallet & Funds */}
         <button
           type="button"
-          onClick={() => setActiveModal('WALLET')}
+          onClick={() => {
+            setWalletInitialTab('DEPOSIT');
+            setActiveModal('WALLET');
+          }}
           className="w-full p-3.5 sm:p-4 flex items-center justify-between hover:bg-[#101928] transition-colors text-left cursor-pointer group"
         >
           <div className="flex items-center gap-3">
@@ -330,6 +335,29 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
               <div className="text-sm font-bold text-white">Wallet & Funds</div>
               <div className="text-xs text-slate-400 font-mono">
                 ₹{wallet.availableBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })} available margin
+              </div>
+            </div>
+          </div>
+          <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-white transition-colors" />
+        </button>
+
+        {/* 2b. Wallet Ledger & History */}
+        <button
+          type="button"
+          onClick={() => {
+            setWalletInitialTab('HISTORY');
+            setActiveModal('WALLET');
+          }}
+          className="w-full p-3.5 sm:p-4 flex items-center justify-between hover:bg-[#101928] transition-colors text-left cursor-pointer group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-[#142032] border border-[#1E2E44] flex items-center justify-center text-amber-400 group-hover:text-white transition-colors">
+              <Clock className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="text-sm font-bold text-white">Wallet Ledger & History</div>
+              <div className="text-xs text-slate-400">
+                Audit log of all deposits, payouts & trade credits
               </div>
             </div>
           </div>
@@ -546,6 +574,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
       {/* 2. Wallet & Funds Modal */}
       <WalletModal
         isOpen={activeModal === 'WALLET'}
+        initialTab={walletInitialTab}
         wallet={wallet}
         onClose={() => setActiveModal('NONE')}
         onRefresh={onRefreshPortfolio}

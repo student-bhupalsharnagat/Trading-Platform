@@ -860,7 +860,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             <button
               type="button"
               id="header-wallet-btn"
-              onClick={() => setIsWalletModalOpen(true)}
+              onClick={() => {
+                setWalletModalInitialTab('DEPOSIT');
+                setIsWalletModalOpen(true);
+              }}
               className="hidden sm:flex px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 font-semibold text-xs items-center gap-1.5 transition-colors cursor-pointer shadow-xs active:scale-95"
               title="Open Wallet & Funds"
             >
@@ -1134,7 +1137,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                   {/* Available Margin */}
                   <button
                     type="button"
-                    onClick={() => setIsWalletModalOpen(true)}
+                    onClick={() => {
+                      setWalletModalInitialTab('DEPOSIT');
+                      setIsWalletModalOpen(true);
+                    }}
                     className="text-left cursor-pointer hover:opacity-90 transition-opacity"
                     title="Click to view Wallet & Funds"
                   >
@@ -2089,7 +2095,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                         </span>
                         <button
                           type="button"
-                          onClick={() => setIsWalletModalOpen(true)}
+                          onClick={() => {
+                            setWalletModalInitialTab('DEPOSIT');
+                            setIsWalletModalOpen(true);
+                          }}
                           className="text-[10px] text-amber-500 hover:underline font-bold"
                         >
                           + Funds
