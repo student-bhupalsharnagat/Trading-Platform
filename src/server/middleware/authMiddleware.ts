@@ -1,12 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import { authService, SafeUser, sanitizeUser } from '../services/authService.ts';
 import { db } from '../db/database.ts';
+import { pgDb } from '../db/postgres.ts';
 
 export interface AuthenticatedRequest extends Request {
   user?: SafeUser;
 }
 
-export function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+export async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   const token = req.cookies?.vertex_auth_token || req.headers.authorization?.replace('Bearer ', '');
 
   if (!token) {
@@ -26,7 +27,40 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
     return;
   }
 
-  const user = db.findUserById(payload.id);
+  let user = db.findUserById(payload.id);
+  if (!user && payload.userId) {
+    user = db.findUserByUserId(payload.userId);
+  }
+  if (!user) {
+    try {
+      const pgRes = await pgDb.query(
+        `SELECT * FROM users WHERE id = $1 OR LOWER(user_id) = LOWER($2) LIMIT 1;`,
+        [payload.id, payload.userId || payload.id]
+      );
+      if (pgRes.rows.length > 0) {
+        const row = pgRes.rows[0];
+        user = {
+          id: row.id,
+          full_name: row.full_name,
+          user_id: row.user_id,
+          country_code: row.country_code || '+91',
+          mobile: row.mobile || '',
+          email: row.email,
+          role: row.role || 'CLIENT',
+          parent_id: row.parent_id,
+          hierarchy_path: row.hierarchy_path || `root.${row.user_id}`,
+          is_verified: Boolean(row.is_verified),
+          status: row.status || 'active',
+          tenant_id: row.tenant_id || 'vertex-default',
+          created_at: new Date(row.created_at).toISOString(),
+          updated_at: new Date(row.updated_at).toISOString(),
+          password_hash: '',
+        };
+        db.addUser(user);
+      }
+    } catch {}
+  }
+
   if (!user) {
     res.status(401).json({
       success: false,
@@ -103,14 +137,43 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
   next();
 }
 
-export function optionalAuth(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+export async function optionalAuth(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   const authHeader = (req.headers['authorization'] || req.headers.authorization || '') as string;
   const token = req.cookies?.vertex_auth_token || authHeader.replace(/^Bearer\s+/i, '').trim();
 
   if (token) {
     const payload = authService.verifyToken(token);
     if (payload && (payload.id || payload.userId)) {
-      const user = (payload.id ? db.findUserById(payload.id) : undefined) || db.findUserByUserId(payload.userId || payload.id);
+      let user = (payload.id ? db.findUserById(payload.id) : undefined) || db.findUserByUserId(payload.userId || payload.id);
+      if (!user) {
+        try {
+          const pgRes = await pgDb.query(
+            `SELECT * FROM users WHERE id = $1 OR LOWER(user_id) = LOWER($2) LIMIT 1;`,
+            [payload.id, payload.userId || payload.id]
+          );
+          if (pgRes.rows.length > 0) {
+            const row = pgRes.rows[0];
+            user = {
+              id: row.id,
+              full_name: row.full_name,
+              user_id: row.user_id,
+              country_code: row.country_code || '+91',
+              mobile: row.mobile || '',
+              email: row.email,
+              role: row.role || 'CLIENT',
+              parent_id: row.parent_id,
+              hierarchy_path: row.hierarchy_path || `root.${row.user_id}`,
+              is_verified: Boolean(row.is_verified),
+              status: row.status || 'active',
+              tenant_id: row.tenant_id || 'vertex-default',
+              created_at: new Date(row.created_at).toISOString(),
+              updated_at: new Date(row.updated_at).toISOString(),
+              password_hash: '',
+            };
+            db.addUser(user);
+          }
+        } catch {}
+      }
       if (user) {
         req.user = sanitizeUser(user);
       }

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { pgDb } from './postgres.ts';
 
 export type UserRole = 'SUPER_ADMIN' | 'MASTER' | 'BROKER' | 'SUB_BROKER' | 'CLIENT';
 
@@ -160,6 +161,53 @@ class DatabaseService {
       this.save();
     }
     return purged;
+  }
+
+  public addUser(user: UserRecord): void {
+    if (!user || !user.id) return;
+    const existing = this.state.users.find(
+      (u) => u.id === user.id || (u.user_id && user.user_id && u.user_id.toLowerCase() === user.user_id.toLowerCase())
+    );
+    if (!existing) {
+      this.state.users.push(user);
+    }
+  }
+
+  public async syncUsersFromPostgres(): Promise<void> {
+    try {
+      const res = await pgDb.query(`SELECT * FROM users;`);
+      if (res && res.rows && res.rows.length > 0) {
+        for (const row of res.rows) {
+          const existing = this.state.users.find(
+            (u) => u.id === row.id || (u.user_id && row.user_id && u.user_id.toLowerCase() === row.user_id.toLowerCase())
+          );
+          if (!existing) {
+            this.state.users.push({
+              id: row.id,
+              full_name: row.full_name,
+              user_id: row.user_id,
+              country_code: row.country_code || '+91',
+              mobile: row.mobile || '',
+              phone_e164: row.phone_e164,
+              email: row.email,
+              role: row.role || 'CLIENT',
+              parent_id: row.parent_id,
+              hierarchy_path: row.hierarchy_path || `root.${row.user_id}`,
+              is_verified: Boolean(row.is_verified),
+              status: row.status || 'active',
+              tenant_id: row.tenant_id || 'vertex-default',
+              created_at: new Date(row.created_at).toISOString(),
+              updated_at: new Date(row.updated_at).toISOString(),
+              account_type: row.account_type || 'real',
+              demo_balance: Number(row.demo_balance || 0),
+              password_hash: row.password_hash || '',
+            });
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[PostgresSync] Notice: syncUsersFromPostgres non-blocking warning:', err.message);
+    }
   }
 
   public findUserById(id: string): UserRecord | undefined {

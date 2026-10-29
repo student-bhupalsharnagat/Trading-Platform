@@ -2659,6 +2659,50 @@
       "created_at": "2026-10-28T19:27:28.928Z",
       "updated_at": "2026-10-28T19:27:28.928Z",
       "demo_balance": 0
+    },
+    {
+      "id": "8fa62a22-f80c-4849-bd43-5d795fe23a86",
+      "tenant_id": "vertex-default",
+      "full_name": "Integration Trader",
+      "user_id": "admin_sync_1793257026157",
+      "email": "admin_sync_1793257026157@client.com",
+      "country_code": "+1",
+      "mobile": "4155551650",
+      "phone_e164": "+14155551650",
+      "password_hash": "$2b$10$ZN3lOJI/dom/CTqYEKm6/OIABVbZgNMBT4jA484tPUgzmCrjRHpje",
+      "role": "CLIENT",
+      "parent_id": null,
+      "hierarchy_path": "root.admin_sync_1793257026157",
+      "is_verified": true,
+      "email_verified_at": "2026-10-29T06:57:06.254Z",
+      "phone_verified_at": "2026-10-29T06:57:06.254Z",
+      "status": "ACTIVE",
+      "is_frozen": false,
+      "failed_login_attempts": 0,
+      "referral_code": "VTX3356",
+      "created_at": "2026-10-29T06:57:06.254Z",
+      "updated_at": "2026-10-29T06:57:06.254Z",
+      "demo_balance": 0
+    },
+    {
+      "id": "3bb79b24-ba60-4567-bd9b-ab7a5f61036d",
+      "tenant_id": "tenant_auth_a_1793257047797",
+      "full_name": "Alice Trader",
+      "user_id": "user_alpha_1793257054887",
+      "country_code": "+91",
+      "mobile": "3394268122",
+      "phone_e164": "+913394268122",
+      "password_hash": "hash",
+      "role": "CLIENT",
+      "parent_id": null,
+      "hierarchy_path": "root.user_alpha_1793257054887",
+      "is_verified": false,
+      "status": "active",
+      "is_frozen": false,
+      "failed_login_attempts": 0,
+      "created_at": "2026-10-29T06:57:34.887Z",
+      "updated_at": "2026-10-29T06:57:34.887Z",
+      "demo_balance": 0
     }
   ],
   "otp_verifications": [
@@ -2697,6 +2741,18 @@
       "max_attempts": 5,
       "created_at": "2026-10-28T19:27:10.547Z",
       "dev_otp_preview": "858007"
+    },
+    {
+      "id": "3bf4e881-e713-4125-9c97-148e4b289acf",
+      "user_id": "admin_sync_1793257026157",
+      "phone_e164": "+14155551650",
+      "otp_hash": "e5cb342592064a94c9f68c41d596866def1b99b7dd450a884dde41ecf491e74b",
+      "purpose": "registration",
+      "expires_at": "2026-10-29T07:02:06.279Z",
+      "attempts": 0,
+      "max_attempts": 5,
+      "created_at": "2026-10-29T06:57:06.283Z",
+      "dev_otp_preview": "189644"
     }
   ],
   "referral_codes": [

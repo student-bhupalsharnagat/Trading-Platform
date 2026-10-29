@@ -276,6 +276,9 @@ async function startServer() {
   // Purge all test/dummy users & seeded records from PostgreSQL, tradingStore, and .vertex_db_store.json
   await purgeDummyAndTestRecords();
 
+  // Synchronize authoritative users from PostgreSQL into memory for stateless multi-instance operation
+  await db.syncUsersFromPostgres();
+
   // Auto-backfill missing client mappings & wallets for legitimate users
   postgresClientMappingRepository
     .backfillClientMappingsAndWallets('TNT-001')
