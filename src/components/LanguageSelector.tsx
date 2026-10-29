@@ -60,8 +60,9 @@ export const LanguageSelector: React.FC = () => {
         }`}
         title="Select Language"
       >
-        <Globe className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 stroke-[2.2]" />
-        <span className="font-medium tracking-tight">{currentLanguage.englishName}</span>
+        <Globe className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 stroke-[2.2] shrink-0" />
+        <span className="font-medium tracking-tight hidden sm:inline">{currentLanguage.englishName}</span>
+        <span className="font-medium tracking-tight font-mono uppercase sm:hidden text-[10px]">{currentLanguage.code}</span>
       </button>
 
       {/* Language Dropdown Menu matching Screenshot 2 */}

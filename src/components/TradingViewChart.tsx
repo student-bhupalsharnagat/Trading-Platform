@@ -255,7 +255,28 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   // Generate synthetic yet mathematically consistent candles around instrument price
   useEffect(() => {
     setCandles(generateLocalCandles(instrument.lastPrice || 1000));
-  }, [instrument.symbol, instrument.lastPrice]);
+  }, [instrument.symbol]);
+
+  // Synchronize live incoming price ticks with the latest candle
+  useEffect(() => {
+    if (!instrument.lastPrice) return;
+    setCandles((prev) => {
+      if (!prev || prev.length === 0) return prev;
+      const lastIndex = prev.length - 1;
+      const last = prev[lastIndex];
+      const newClose = instrument.lastPrice;
+      const newHigh = Math.max(last.high, newClose);
+      const newLow = Math.min(last.low, newClose);
+      const updated = [...prev];
+      updated[lastIndex] = {
+        ...last,
+        close: newClose,
+        high: newHigh,
+        low: newLow,
+      };
+      return updated;
+    });
+  }, [instrument.lastPrice]);
 
   // Live tick animation on the most recent candle
   useEffect(() => {

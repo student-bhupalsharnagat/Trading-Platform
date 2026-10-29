@@ -149,7 +149,23 @@ export const LiveChart: React.FC<LiveChartProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [instrument.symbol, instrument.lastPrice, timeframe]);
+  }, [instrument.symbol, timeframe]);
+
+  // Synchronize latest candle on incoming live price ticks
+  useEffect(() => {
+    if (!instrument.lastPrice) return;
+    setCandles((prev) => {
+      if (!prev || prev.length === 0) return prev;
+      const lastIdx = prev.length - 1;
+      const last = { ...prev[lastIdx] };
+      last.close = instrument.lastPrice;
+      last.high = Math.max(last.high, instrument.lastPrice);
+      last.low = Math.min(last.low, instrument.lastPrice);
+      const updated = [...prev];
+      updated[lastIdx] = last;
+      return updated;
+    });
+  }, [instrument.lastPrice]);
 
   // Live ticking candle update
   useEffect(() => {
@@ -825,13 +841,13 @@ export const LiveChart: React.FC<LiveChartProps> = ({
       {/* 4. Main Chart Canvas / TradingView Area (Clean & No Clutter) */}
       <main className="flex-1 relative flex flex-col p-1 sm:p-2 pb-16">
         {engineMode === 'TRADINGVIEW' && chartType === 'Candle' ? (
-          <div className="flex-1 w-full h-full min-h-[500px] relative rounded-lg border border-[#121B2B] overflow-hidden bg-[#060B13]">
+          <div className="flex-1 w-full h-full min-h-[280px] sm:min-h-[380px] md:min-h-[460px] relative rounded-lg border border-[#121B2B] overflow-hidden bg-[#060B13]">
             <TradingViewChart instrument={instrument} timeframe={timeframe} />
           </div>
         ) : (
           <div
             ref={containerRef}
-            className="flex-1 w-full h-full min-h-[500px] relative rounded-lg border border-[#121B2B] overflow-hidden bg-[#060B13] cursor-crosshair"
+            className="flex-1 w-full h-full min-h-[280px] sm:min-h-[380px] md:min-h-[460px] relative rounded-lg border border-[#121B2B] overflow-hidden bg-[#060B13] cursor-crosshair"
           >
             <canvas
               ref={canvasRef}
@@ -849,7 +865,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
       </main>
 
       {/* 5. Bottom Action Buttons: SELL BID & BUY ASK */}
-      <footer className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-2">
+      <footer className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-2 pb-[env(safe-area-inset-bottom,0px)]">
         {/* SELL BID (Coral Red) */}
         <button
           type="button"

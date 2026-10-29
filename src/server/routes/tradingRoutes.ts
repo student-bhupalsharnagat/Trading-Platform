@@ -159,7 +159,8 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
 
     const positions = (pgPositions || []).map((p) => {
       const inst = findInstrument(p.instrument_id);
-      const avgPrice = Number(p.average_price);
+      const rawAvg = Number(p.average_price);
+      const avgPrice = rawAvg > 0 ? rawAvg : (inst?.lastPrice || inst?.openPrice || 1);
       const ltp = inst ? inst.lastPrice : avgPrice;
       const posType: 'BUY' | 'SELL' = Number(p.quantity) >= 0 ? 'BUY' : 'SELL';
       const qty = Math.abs(Number(p.quantity));
@@ -175,6 +176,7 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
       const rawProd = String((p as any).product || (p as any).product_type || '').toUpperCase();
       const isHolding = rawProd === 'HOLDING' || rawProd === 'CNC' || (inst?.category === 'EQUITY' && posType === 'BUY' && rawProd !== 'INTRADAY');
       const product = isHolding ? ('HOLDING' as const) : ('INTRADAY' as const);
+      const decimals = (inst?.category === 'FOREX' || avgPrice < 10) ? 4 : 2;
 
       return {
         id: p.id,
@@ -185,8 +187,8 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
         lots,
         qty,
         lotSize,
-        avgPrice: Number(avgPrice.toFixed(2)),
-        ltp: Number(ltp.toFixed(2)),
+        avgPrice: Number(avgPrice.toFixed(decimals)),
+        ltp: Number(ltp.toFixed(decimals)),
         pnl: Number(pnl.toFixed(2)),
         pnlPercent,
         timestamp: p.updated_at,
@@ -425,7 +427,7 @@ router.post(
         orderType: orderType || 'MARKET',
         product: normalizedProduct,
         lots: orderLots,
-        quantity: quantity ? Number(quantity) : undefined,
+        quantity: (lotSize > 1) ? (orderLots * lotSize) : (quantity ? Number(quantity) : orderLots * lotSize),
         price: execPrice,
         triggerPrice: (triggerPrice != null || trigger_price != null) ? Number(triggerPrice ?? trigger_price) : undefined,
         stopLoss: stopLoss ? Number(stopLoss) : undefined,
@@ -925,7 +927,13 @@ router.post('/funds/withdraw', requireAuth, async (req: TenantRequest, res: Resp
       transactionId: tx.id,
       status: 'PENDING',
       message: `Withdrawal request of ₹${numAmount.toLocaleString('en-IN')} submitted and pending approval.`,
-      wallet,
+      wallet: {
+        availableBalance: pgWallet.available_balance,
+        usedMargin: pgWallet.used_margin,
+        totalPnL: pgWallet.realized_pnl,
+        todayPnL: pgWallet.realized_pnl,
+        withdrawn: (pgWallet as any).withdrawn || 0,
+      },
     });
   } catch (err: any) {
     res.status(err.statusCode || 500).json({ success: false, message: err.message });

@@ -111,6 +111,12 @@ export const OptionChain: React.FC<OptionChainProps> = ({
           </div>
         </div>
 
+        {/* Mobile Swipe Notice */}
+        <div className="sm:hidden px-3 py-1 bg-amber-500/10 border-b border-[#1E2E44] text-[10px] text-amber-400 font-mono flex items-center justify-between">
+          <span>⇄ Swipe horizontally for Full Option Chain</span>
+          <span>Strike · Calls · Puts</span>
+        </div>
+
         {/* Table Content */}
         <div className="overflow-x-auto overflow-y-auto flex-1 custom-scrollbar">
           <table className="w-full min-w-[680px] text-xs text-left border-collapse font-mono">

@@ -269,8 +269,42 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
       }
     }
 
-    const calculatedQty = inputMode === 'QTY' ? quantity : effectiveLots * (activeInstrument.lotSize || 1);
-    if (!calculatedQty || calculatedQty <= 0) {
+    // Enforce Indian exchange standard tick-size (multiples of ₹0.05 for non-forex/crypto)
+    const isGlobalAsset = activeInstrument.category === 'FOREX' || activeInstrument.category === 'CRYPTO';
+    if (!isGlobalAsset) {
+      if (orderType === 'LIMIT' || orderType === 'SL') {
+        const parsedLimit = parseFloat(limitPrice);
+        if (Math.abs(Math.round(parsedLimit * 100) % 5) !== 0) {
+          const suggested = (Math.round(parsedLimit * 20) / 20).toFixed(2);
+          showToast({
+            type: 'error',
+            title: 'Invalid Tick Size',
+            description: `Limit price must be a multiple of ₹0.05 (e.g. ₹${suggested})`,
+          });
+          return;
+        }
+      }
+
+      if (orderType === 'SL' || orderType === 'SL-M') {
+        const parsedTrigger = parseFloat(triggerPrice);
+        if (Math.abs(Math.round(parsedTrigger * 100) % 5) !== 0) {
+          const suggested = (Math.round(parsedTrigger * 20) / 20).toFixed(2);
+          showToast({
+            type: 'error',
+            title: 'Invalid Tick Size',
+            description: `Trigger price must be a multiple of ₹0.05 (e.g. ₹${suggested})`,
+          });
+          return;
+        }
+      }
+    }
+
+    const rawQty = inputMode === 'QTY' ? quantity : effectiveLots * (activeInstrument.lotSize || 1);
+    const normalizedQty = (activeInstrument.lotSize && activeInstrument.lotSize > 1)
+      ? Math.max(activeInstrument.lotSize, Math.round(rawQty / activeInstrument.lotSize) * activeInstrument.lotSize)
+      : rawQty;
+
+    if (!normalizedQty || normalizedQty <= 0) {
       showToast({
         type: 'error',
         title: 'Invalid Quantity',
@@ -292,7 +326,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
         orderType,
         product: productType,
         lots: effectiveLots,
-        quantity: calculatedQty,
+        quantity: normalizedQty,
         price: orderPrice,
         limitPrice: orderType === 'LIMIT' || orderType === 'SL' ? numLimitPrice : undefined,
         triggerPrice: orderTrigger,
@@ -327,9 +361,9 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-fadeIn">
+      <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex sm:items-center justify-center p-2 sm:p-4 overflow-y-auto animate-fadeIn min-h-full">
         <div
-          className={`bg-white dark:bg-[#080E18] border border-slate-200 dark:border-[#1A2638] rounded-2xl w-full shadow-2xl overflow-hidden flex flex-col my-auto transition-all ${
+          className={`bg-white dark:bg-[#080E18] border border-slate-200 dark:border-[#1A2638] rounded-2xl w-full shadow-2xl overflow-hidden flex flex-col my-auto sm:my-8 max-h-[96vh] sm:max-h-[90vh] transition-all ${
             activeView === 'CHART' ? 'max-w-4xl' : 'max-w-xl'
           }`}
         >
@@ -513,7 +547,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
               </div>
 
               {/* OHLC & Circuit Statistics */}
-              <div className="grid grid-cols-4 gap-2 mt-2 pt-2 border-t border-slate-200 dark:border-slate-800 text-[10px]">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2 pt-2 border-t border-slate-200 dark:border-slate-800 text-[10px]">
                 <div className="text-slate-400">Open: <span className="font-mono text-slate-200 font-bold">₹{instrument.openPrice || instrument.lastPrice}</span></div>
                 <div className="text-slate-400">High: <span className="font-mono text-slate-200 font-bold">₹{instrument.highPrice || (instrument.lastPrice * 1.01).toFixed(2)}</span></div>
                 <div className="text-slate-400">Low: <span className="font-mono text-slate-200 font-bold">₹{instrument.lowPrice || (instrument.lastPrice * 0.99).toFixed(2)}</span></div>
@@ -816,7 +850,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
                         : 'bg-slate-200 dark:bg-slate-800 text-slate-400 hover:text-white'
                     }`}
                   >
-                    IOC (Immediate/Cancel)
+                    IOC<span className="hidden sm:inline"> (Immediate/Cancel)</span>
                   </button>
                 </div>
               </div>

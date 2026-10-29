@@ -80,7 +80,7 @@ export const AuthCard: React.FC<AuthCardProps> = ({
         </div>
 
         {/* Card Body */}
-        <div className="w-full bg-[#0B111C]/90 border border-[#1A2638] rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur-sm">
+        <div className="w-full bg-[#0B111C]/90 border border-[#1A2638] rounded-2xl p-4 sm:p-8 shadow-2xl backdrop-blur-sm">
           {children}
         </div>
 

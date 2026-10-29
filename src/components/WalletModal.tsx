@@ -639,7 +639,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                 <div className="p-3.5 sm:p-4 bg-[#060B13] border border-[#162234] rounded-2xl space-y-3">
                   <div className="flex items-center justify-between text-xs flex-wrap gap-2">
                     <span className="text-slate-400 font-medium">Supported UPI Apps:</span>
-                    <div className="flex items-center gap-1.5 text-[10px] font-bold">
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold flex-wrap">
                       {['GPay', 'PhonePe', 'Paytm', 'BHIM', 'CRED'].map((app) => (
                         <span key={app} className="px-2 py-0.5 rounded-md bg-[#121D2C] border border-[#1E2E44] text-slate-300">
                           {app}

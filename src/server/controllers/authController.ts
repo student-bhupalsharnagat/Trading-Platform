@@ -128,8 +128,7 @@ export class AuthController {
       const tenantId = (req as any).tenant?.tenant?.id || 'vertex-default';
       const ipAddress = getClientIp(req);
       const result = await authService.getDemoSession({
-        id: req.body?.id,
-        userId: req.body?.userId,
+        userId: req.body?.userId || req.body?.id,
         fullName: req.body?.fullName,
         mobile: req.body?.mobile,
         tenantId,

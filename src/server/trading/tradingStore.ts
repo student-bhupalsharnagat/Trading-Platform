@@ -492,16 +492,17 @@ const tickTimer = setInterval(() => {
   INSTRUMENTS = INSTRUMENTS.map((inst) => {
     const volatilityPct = 0.0006;
     const delta = (Math.random() - 0.495) * (inst.lastPrice * volatilityPct);
-    const updatedPrice = Number(Math.max(1, inst.lastPrice + delta).toFixed(2));
-    const change = Number((updatedPrice - inst.prevClose).toFixed(2));
-    const changePercent = Number(((change / inst.prevClose) * 100).toFixed(2));
+    const decimals = (inst.category === 'FOREX' || inst.lastPrice < 10) ? 4 : 2;
+    const updatedPrice = Number(Math.max(0.0001, inst.lastPrice + delta).toFixed(decimals));
+    const change = Number((updatedPrice - inst.prevClose).toFixed(decimals));
+    const changePercent = Number(((change / (inst.prevClose || 1)) * 100).toFixed(2));
 
-    const highPrice = Number(Math.max(inst.highPrice, updatedPrice).toFixed(2));
-    const lowPrice = Number(Math.min(inst.lowPrice, updatedPrice).toFixed(2));
+    const highPrice = Number(Math.max(inst.highPrice, updatedPrice).toFixed(decimals));
+    const lowPrice = Number(Math.min(inst.lowPrice, updatedPrice).toFixed(decimals));
 
     const spread = updatedPrice * 0.0002;
-    const ask = Number((updatedPrice + spread).toFixed(2));
-    const bid = Number((updatedPrice - spread).toFixed(2));
+    const ask = Number((updatedPrice + (spread || 0.0001)).toFixed(decimals));
+    const bid = Number((updatedPrice - (spread || 0.0001)).toFixed(decimals));
 
     return {
       ...inst,

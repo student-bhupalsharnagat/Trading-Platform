@@ -131,7 +131,7 @@ export class TradingExecutionService {
       ? (inst.holding || (inst.lastPrice * lotSize))
       : (inst.intraday || Math.round(inst.lastPrice * lotSize * 0.2));
     const requiredMargin = marginPerLot * lots;
-    const qty = input.quantity && input.quantity > 0 ? input.quantity : lots * lotSize;
+    const qty = lotSize > 1 ? (lots * lotSize) : (input.quantity && input.quantity > 0 ? input.quantity : lots * lotSize);
     const rawOrderType = (input.orderType || 'MARKET').toUpperCase();
     const isPendingOrder = rawOrderType === 'LIMIT' || rawOrderType === 'SL' || rawOrderType === 'SL-M';
     const effectiveOrderType = rawOrderType === 'SL-M' ? 'SL-M' : rawOrderType === 'SL' ? 'SL' : rawOrderType === 'LIMIT' ? 'LIMIT' : 'MARKET';

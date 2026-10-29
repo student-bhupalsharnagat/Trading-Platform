@@ -118,7 +118,7 @@ function AppContent() {
         return (
           <ResetPassword
             initialUserId={routeState.userId}
-            initialOtp={routeState.otp}
+            initialOtp={routeState.otp || routeState.initialOtp}
             maskedMobile={routeState.maskedMobile}
             onNavigate={navigate}
           />

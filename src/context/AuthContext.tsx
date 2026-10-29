@@ -26,7 +26,18 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const saved = localStorage.getItem('vertex_user');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && (parsed.userId || parsed.id)) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return null;
+  });
   const [loading, setLoading] = useState<boolean>(true);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [pendingVerificationUserId, setPendingVerificationUserId] = useState<string | null>(null);
@@ -60,10 +71,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           } catch {}
           return;
         }
-      } catch {
-        // Fallback to persisted session on reload
+      } catch (err: any) {
+        // If server explicitly confirms session has expired or user removed, revoke
+        if (err?.status === 401 && (err?.message?.includes('expired') || err?.message?.includes('no longer exists'))) {
+          try {
+            localStorage.removeItem('vertex_user');
+            localStorage.removeItem('vertex_auth_token');
+          } catch {}
+          setUser(null);
+          return;
+        }
       }
 
+      // Fallback to persisted session on reload
       try {
         const saved = localStorage.getItem('vertex_user');
         if (saved) {

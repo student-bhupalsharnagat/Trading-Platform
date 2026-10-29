@@ -100,7 +100,7 @@ export const SupportTicketsSection: React.FC<SupportTicketsSectionProps> = ({ on
     setLoading(true);
     try {
       const res = await authApi.getTickets();
-      if (res.tickets && res.tickets.length > 0) {
+      if (res && Array.isArray(res.tickets)) {
         setTickets(res.tickets);
       }
     } catch (err) {
@@ -514,26 +514,26 @@ export const SupportTicketsSection: React.FC<SupportTicketsSectionProps> = ({ on
         {/* Status Metrics Bar (4 Columns) matching Screenshot 1 */}
         <div className="grid grid-cols-4 bg-[#0B111C] border border-[#162234] rounded-2xl p-3 sm:p-4 text-center divide-x divide-[#162234]">
           <div>
-            <div className="text-xl sm:text-2xl font-black text-white">{counts.total}</div>
-            <div className="text-[10px] sm:text-xs font-bold text-slate-400 tracking-wider mt-0.5 uppercase">
+            <div className="text-lg sm:text-2xl font-black text-white">{counts.total}</div>
+            <div className="text-[9px] sm:text-xs font-bold text-slate-400 tracking-tight sm:tracking-wider mt-0.5 uppercase truncate">
               TOTAL
             </div>
           </div>
           <div>
-            <div className="text-xl sm:text-2xl font-black text-[#F97316]">{counts.open}</div>
-            <div className="text-[10px] sm:text-xs font-bold text-slate-400 tracking-wider mt-0.5 uppercase">
+            <div className="text-lg sm:text-2xl font-black text-[#F97316]">{counts.open}</div>
+            <div className="text-[9px] sm:text-xs font-bold text-slate-400 tracking-tight sm:tracking-wider mt-0.5 uppercase truncate">
               OPEN
             </div>
           </div>
           <div>
-            <div className="text-xl sm:text-2xl font-black text-sky-400">{counts.inProgress}</div>
-            <div className="text-[10px] sm:text-xs font-bold text-slate-400 tracking-wider mt-0.5 uppercase">
+            <div className="text-lg sm:text-2xl font-black text-sky-400">{counts.inProgress}</div>
+            <div className="text-[9px] sm:text-xs font-bold text-slate-400 tracking-tight sm:tracking-wider mt-0.5 uppercase truncate">
               IN PROGRESS
             </div>
           </div>
           <div>
-            <div className="text-xl sm:text-2xl font-black text-emerald-400">{counts.resolved}</div>
-            <div className="text-[10px] sm:text-xs font-bold text-slate-400 tracking-wider mt-0.5 uppercase">
+            <div className="text-lg sm:text-2xl font-black text-emerald-400">{counts.resolved}</div>
+            <div className="text-[9px] sm:text-xs font-bold text-slate-400 tracking-tight sm:tracking-wider mt-0.5 uppercase truncate">
               RESOLVED
             </div>
           </div>

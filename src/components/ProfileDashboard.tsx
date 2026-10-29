@@ -117,7 +117,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
     }).catch(() => {});
 
     authApi.getTickets().then((res) => {
-      if (res.tickets && res.tickets.length > 0) {
+      if (res && Array.isArray(res.tickets)) {
         setTickets(res.tickets);
       }
     }).catch(() => {});
@@ -174,7 +174,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
     setLoadingTickets(true);
     try {
       const res = await authApi.getTickets();
-      if (res.tickets) setTickets(res.tickets);
+      if (res && Array.isArray(res.tickets)) setTickets(res.tickets);
     } catch {
       // fallback
     } finally {
@@ -353,7 +353,14 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
               </div>
             </div>
           </div>
-          <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-white transition-colors" />
+          <div className="flex items-center gap-2">
+            {unreadCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black font-mono">
+                {unreadCount}
+              </span>
+            )}
+            <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-white transition-colors" />
+          </div>
         </button>
 
         {/* 4. Support Tickets */}
@@ -373,7 +380,14 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
               </div>
             </div>
           </div>
-          <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-white transition-colors" />
+          <div className="flex items-center gap-2">
+            {openTicketsCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-purple-500/20 border border-purple-500/40 text-purple-300 text-[10px] font-black font-mono">
+                {openTicketsCount}
+              </span>
+            )}
+            <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-white transition-colors" />
+          </div>
         </button>
 
         {/* 5. Settings */}
@@ -461,8 +475,8 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
 
       {/* 1. Profile Modal */}
       {activeModal === 'PROFILE' && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-[#0B111C] border border-[#1E2E44] rounded-2xl max-w-lg w-full p-5 shadow-2xl space-y-4 animate-scaleUp">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex sm:items-center justify-center p-3 sm:p-4 overflow-y-auto min-h-full animate-fadeIn">
+          <div className="bg-[#0B111C] border border-[#1E2E44] rounded-2xl max-w-lg w-full max-h-[92vh] sm:max-h-[90vh] overflow-y-auto my-auto p-4 sm:p-5 shadow-2xl space-y-4 animate-scaleUp">
             <div className="flex items-center justify-between border-b border-[#141E2E] pb-3">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <UserIcon className="w-4 h-4 text-amber-400" /> Account Profile
@@ -539,8 +553,8 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
 
       {/* 3. Notifications Modal */}
       {activeModal === 'NOTIFICATIONS' && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-[#0B111C] border border-[#1E2E44] rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4 animate-scaleUp">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex sm:items-center justify-center p-3 sm:p-4 overflow-y-auto min-h-full animate-fadeIn">
+          <div className="bg-[#0B111C] border border-[#1E2E44] rounded-2xl max-w-md w-full max-h-[92vh] sm:max-h-[90vh] overflow-y-auto my-auto p-4 sm:p-5 shadow-2xl space-y-4 animate-scaleUp">
             <div className="flex items-center justify-between border-b border-[#141E2E] pb-3">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <Bell className="w-4 h-4 text-sky-400" /> Alerts & Notifications
@@ -601,8 +615,8 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
 
       {/* 5. Settings Modal */}
       {activeModal === 'SETTINGS' && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-[#0B111C] border border-[#1E2E44] rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4 animate-scaleUp">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex sm:items-center justify-center p-3 sm:p-4 overflow-y-auto min-h-full animate-fadeIn">
+          <div className="bg-[#0B111C] border border-[#1E2E44] rounded-2xl max-w-md w-full max-h-[92vh] sm:max-h-[90vh] overflow-y-auto my-auto p-4 sm:p-5 shadow-2xl space-y-4 animate-scaleUp">
             <div className="flex items-center justify-between border-b border-[#141E2E] pb-3">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <Settings className="w-4 h-4 text-indigo-400" /> Platform Preferences
@@ -671,8 +685,8 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
 
       {/* 6. Terms & Privacy Modal */}
       {activeModal === 'TERMS' && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-[#0B111C] border border-[#1E2E44] rounded-2xl max-w-lg w-full p-5 shadow-2xl space-y-4 animate-scaleUp">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex sm:items-center justify-center p-3 sm:p-4 overflow-y-auto min-h-full animate-fadeIn">
+          <div className="bg-[#0B111C] border border-[#1E2E44] rounded-2xl max-w-lg w-full max-h-[92vh] sm:max-h-[90vh] overflow-y-auto my-auto p-4 sm:p-5 shadow-2xl space-y-4 animate-scaleUp">
             <div className="flex items-center justify-between border-b border-[#141E2E] pb-3">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <FileText className="w-4 h-4 text-amber-400" /> Terms of Service & Risk Disclosure

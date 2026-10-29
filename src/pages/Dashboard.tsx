@@ -569,8 +569,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
       const rawQty = pos.qty ?? pos.quantity ?? 0;
       const qty = Math.abs(Number(rawQty) || 0);
-      const avgPrice = Number(pos.avgPrice ?? pos.average_price ?? pos.averagePrice ?? 0);
-      const ltp = liveInst?.lastPrice ? Number(liveInst.lastPrice) : Number(pos.ltp ?? pos.lastPrice ?? avgPrice);
+      const rawAvg = Number(pos.avgPrice ?? pos.average_price ?? pos.averagePrice ?? 0);
+      const ltp = liveInst?.lastPrice ? Number(liveInst.lastPrice) : Number(pos.ltp ?? pos.lastPrice ?? rawAvg);
+      const avgPrice = rawAvg > 0 ? rawAvg : (ltp > 0 ? ltp : (liveInst?.openPrice || 1));
+      const decimals = (liveInst?.category === 'FOREX' || avgPrice < 10) ? 4 : 2;
 
       const rawType = (pos.type || (Number(rawQty) >= 0 ? 'BUY' : 'SELL') || 'BUY').toUpperCase();
       const posType: 'BUY' | 'SELL' = rawType === 'SELL' ? 'SELL' : 'BUY';
@@ -599,8 +601,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         qty,
         lots,
         lotSize,
-        avgPrice: Number(avgPrice.toFixed(2)),
-        ltp: Number(ltp.toFixed(2)),
+        avgPrice: Number(avgPrice.toFixed(decimals)),
+        ltp: Number(ltp.toFixed(decimals)),
         pnl: Number(pnl.toFixed(2)),
         pnlPercent,
         timestamp: pos.timestamp || pos.updated_at || new Date().toISOString(),
@@ -766,7 +768,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               >
                 {branding.brandName || 'VERTEX'}
               </span>
-              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate max-w-[140px]">
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate max-w-[85px] sm:max-w-[140px]">
                 {branding.tagline || 'Trading Platform'}
               </span>
             </div>
@@ -910,7 +912,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 setIsTourOpen(true);
                 setTourStep(0);
               }}
-              className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-[#0E1626] dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700/60 flex items-center justify-center text-slate-700 hover:text-slate-950 dark:text-slate-300 dark:hover:text-white transition-colors cursor-pointer active:scale-95"
+              className="hidden sm:flex w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-[#0E1626] dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700/60 items-center justify-center text-slate-700 hover:text-slate-950 dark:text-slate-300 dark:hover:text-white transition-colors cursor-pointer active:scale-95"
               aria-label="Platform Tour"
               title="How to trade / Quick Tour"
             >
@@ -940,7 +942,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
       {/* Live Market Indices Ticker Bar (Zerodha Kite & Upstox standard) */}
       <div className="bg-slate-100 dark:bg-[#070D18] border-b border-slate-200 dark:border-[#141F30] px-3 sm:px-6 py-1.5 overflow-x-auto no-scrollbar flex items-center justify-between text-xs">
-        <div className="flex items-center gap-6 shrink-0 font-mono">
+        <div className="flex items-center gap-4 sm:gap-6 shrink-0 font-mono flex-nowrap whitespace-nowrap">
           {/* NIFTY 50 */}
           <div className="flex items-center gap-2">
             <span className="font-bold text-slate-800 dark:text-slate-200 font-sans text-[11px]">NIFTY 50</span>
@@ -1055,7 +1057,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-4 pb-24">
         {/* Verification & Live NSE/MCX Feed Banner */}
-        <div className="mb-4 p-3 sm:p-4 rounded-xl bg-gradient-to-r from-[#0E1726] to-[#0A1220] border border-[#1E2E44] flex items-center justify-between shadow-lg">
+        <div className="mb-4 p-3 sm:p-4 rounded-xl bg-gradient-to-r from-[#0E1726] to-[#0A1220] border border-[#1E2E44] flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
               <ShieldCheck className="w-5 h-5" />
@@ -1070,7 +1072,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 self-start sm:self-auto">
             {/* Market Hours Status Badge with Quick Simulation Selector */}
             <button
               type="button"
@@ -1339,7 +1341,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                               )}
 
                               {/* Row 2: Intraday and Holding values */}
-                              <div className="flex items-center gap-3 text-xs mt-2 text-slate-500 dark:text-slate-400">
+                              <div className="flex items-center gap-x-3 gap-y-1 flex-wrap text-xs mt-2 text-slate-500 dark:text-slate-400">
                                 <span>
                                   Intraday:{' '}
                                   <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
@@ -1388,7 +1390,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                                   <span>
                                     {isPositive ? '+' : '-'}
                                     {Math.abs(inst.change).toFixed(
-                                      inst.lastPrice < 10 ? 4 : 4
+                                      inst.lastPrice < 10 ? 4 : 2
                                     )}{' '}
                                     ({isPositive ? '+' : ''}
                                     {inst.changePercent.toFixed(2)}%)
@@ -2900,7 +2902,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             {activeNav === 'profile' && (
               <span className="absolute -top-2 w-8 h-1 bg-amber-500 rounded-full" />
             )}
-            <UserIcon className="w-4 h-4" />
+            <div className="relative">
+              <UserIcon className="w-4 h-4" />
+              {unreadNotificationsCount > 0 && (
+                <span className="absolute -top-1 -right-1.5 w-2 h-2 rounded-full bg-amber-500 ring-1 ring-white dark:ring-[#080E18]" />
+              )}
+            </div>
             <span className="text-[9px] sm:text-[10px] font-bold tracking-wider uppercase truncate max-w-[64px]">
               {t('profile')}
             </span>
