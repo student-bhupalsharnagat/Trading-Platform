@@ -28,7 +28,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => {
     try {
-      const saved = localStorage.getItem('vertex_user');
+      const saved =
+        localStorage.getItem('nextrade_auth_user') ||
+        localStorage.getItem('vertex_user') ||
+        localStorage.getItem('auth_user');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && (parsed.userId || parsed.id)) {
@@ -67,6 +70,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (res.success && res.user) {
           setUser(res.user);
           try {
+            localStorage.setItem('nextrade_auth_user', JSON.stringify(res.user));
             localStorage.setItem('vertex_user', JSON.stringify(res.user));
           } catch {}
           return;
@@ -75,8 +79,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // If server explicitly confirms session has expired or user removed, revoke
         if (err?.status === 401 && (err?.message?.includes('expired') || err?.message?.includes('no longer exists'))) {
           try {
+            localStorage.removeItem('nextrade_auth_user');
+            localStorage.removeItem('nextrade_auth_token');
             localStorage.removeItem('vertex_user');
             localStorage.removeItem('vertex_auth_token');
+            localStorage.removeItem('auth_user');
+            localStorage.removeItem('auth_token');
           } catch {}
           setUser(null);
           return;
@@ -85,7 +93,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // Fallback to persisted session on reload
       try {
-        const saved = localStorage.getItem('vertex_user');
+        const saved =
+          localStorage.getItem('nextrade_auth_user') ||
+          localStorage.getItem('vertex_user') ||
+          localStorage.getItem('auth_user');
         if (saved) {
           const parsed = JSON.parse(saved);
           if (parsed && (parsed.userId || parsed.id)) {
@@ -110,8 +121,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (res.user) {
       setUser(res.user);
       try {
+        localStorage.setItem('nextrade_auth_user', JSON.stringify(res.user));
         localStorage.setItem('vertex_user', JSON.stringify(res.user));
-        if (res.token) localStorage.setItem('vertex_auth_token', res.token);
+        if (res.token) {
+          localStorage.setItem('nextrade_auth_token', res.token);
+          localStorage.setItem('vertex_auth_token', res.token);
+          localStorage.setItem('auth_token', res.token);
+        }
       } catch {}
     }
     showToast({
@@ -128,8 +144,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (res.success && res.user) {
       setUser(res.user);
       try {
+        localStorage.setItem('nextrade_auth_user', JSON.stringify(res.user));
         localStorage.setItem('vertex_user', JSON.stringify(res.user));
-        if (res.token) localStorage.setItem('vertex_auth_token', res.token);
+        if (res.token) {
+          localStorage.setItem('nextrade_auth_token', res.token);
+          localStorage.setItem('vertex_auth_token', res.token);
+          localStorage.setItem('auth_token', res.token);
+        }
       } catch {}
       setPendingVerificationUserId(null);
       setLatestDevOtp(null);
@@ -168,8 +189,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (res.success && res.user) {
       setUser(res.user);
       try {
+        localStorage.setItem('nextrade_auth_user', JSON.stringify(res.user));
         localStorage.setItem('vertex_user', JSON.stringify(res.user));
-        if (res.token) localStorage.setItem('vertex_auth_token', res.token);
+        if (res.token) {
+          localStorage.setItem('nextrade_auth_token', res.token);
+          localStorage.setItem('vertex_auth_token', res.token);
+          localStorage.setItem('auth_token', res.token);
+        }
       } catch {}
       showToast({
         type: 'success',
@@ -185,8 +211,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (res.success && res.user) {
       setUser(res.user);
       try {
+        localStorage.setItem('nextrade_auth_user', JSON.stringify(res.user));
         localStorage.setItem('vertex_user', JSON.stringify(res.user));
-        if (res.token) localStorage.setItem('vertex_auth_token', res.token);
+        if (res.token) {
+          localStorage.setItem('nextrade_auth_token', res.token);
+          localStorage.setItem('vertex_auth_token', res.token);
+          localStorage.setItem('auth_token', res.token);
+        }
       } catch {}
       showToast({
         type: 'success',
@@ -203,8 +234,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } finally {
       setUser(null);
       try {
+        localStorage.removeItem('nextrade_auth_user');
+        localStorage.removeItem('nextrade_auth_token');
         localStorage.removeItem('vertex_user');
         localStorage.removeItem('vertex_auth_token');
+        localStorage.removeItem('auth_user');
+        localStorage.removeItem('auth_token');
       } catch {}
       showToast({
         type: 'info',

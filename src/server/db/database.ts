@@ -29,6 +29,8 @@ export interface UserRecord {
   email_verified_at?: string;
   password_hash: string;
   role?: UserRole;
+  client_code?: string;
+  broker_id?: string;
   parent_id?: string | null;
   hierarchy_path?: string;
   company?: string;
@@ -201,9 +203,61 @@ class DatabaseService {
               account_type: row.account_type || 'real',
               demo_balance: Number(row.demo_balance || 0),
               password_hash: row.password_hash || '',
+              client_code: row.client_code || row.user_id,
+              broker_id: row.broker_id || 'BRK-001',
             });
+          } else {
+            if (row.password_hash && (!existing.password_hash || existing.password_hash === '')) {
+              existing.password_hash = row.password_hash;
+            }
+            if (row.client_code && !(existing as any).client_code) {
+              (existing as any).client_code = row.client_code;
+            }
+            if (row.email && !existing.email) {
+              existing.email = row.email;
+            }
           }
         }
+      }
+
+      // Also sync from trading_platform_accounts
+      try {
+        const tpaRes = await pgDb.query(`SELECT * FROM trading_platform_accounts;`);
+        if (tpaRes && tpaRes.rows && tpaRes.rows.length > 0) {
+          for (const row of tpaRes.rows) {
+            const existing = this.state.users.find(
+              (u) => u.user_id && row.user_id && u.user_id.toLowerCase() === row.user_id.toLowerCase()
+            );
+            if (!existing) {
+              this.state.users.push({
+                id: row.id,
+                full_name: row.name || row.user_id,
+                user_id: row.user_id,
+                country_code: '+91',
+                mobile: row.phone || '',
+                phone_e164: row.phone,
+                email: row.email,
+                role: row.role || 'CLIENT',
+                parent_id: 'master-node-0001',
+                hierarchy_path: `root.${row.user_id}`,
+                is_verified: true,
+                status: row.status || 'active',
+                tenant_id: row.tenant_id || 'vertex-default',
+                created_at: new Date(row.created_at).toISOString(),
+                updated_at: new Date(row.updated_at).toISOString(),
+                account_type: 'real',
+                demo_balance: 1000000.0,
+                password_hash: row.password_hash || '',
+                client_code: row.client_code || row.user_id,
+                broker_id: row.broker_id || 'BRK-001',
+              });
+            } else if (row.password_hash && (!existing.password_hash || existing.password_hash === '')) {
+              existing.password_hash = row.password_hash;
+            }
+          }
+        }
+      } catch (tpaErr: any) {
+        // Non-blocking: table might not exist yet before first migration
       }
     } catch (err: any) {
       console.warn('[PostgresSync] Notice: syncUsersFromPostgres non-blocking warning:', err.message);

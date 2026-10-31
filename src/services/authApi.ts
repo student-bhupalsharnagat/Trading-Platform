@@ -1,7 +1,11 @@
 import { AuthResponse, Instrument, PortfolioData, Candle, SupportTicket, AppNotification, Order, Position } from '../types.ts';
 
 async function fetchJson<T = any>(url: string, options: RequestInit = {}): Promise<T> {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('vertex_auth_token') : null;
+  const token = typeof window !== 'undefined'
+    ? localStorage.getItem('nextrade_auth_token') ||
+      localStorage.getItem('vertex_auth_token') ||
+      localStorage.getItem('auth_token')
+    : null;
   const defaultHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),

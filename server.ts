@@ -39,6 +39,106 @@ import { postgresClientMappingRepository } from './src/server/repositories/Postg
  * Purges all test/dummy users, test client mappings, and seeded records
  * from PostgreSQL, in-memory tradingStore, and .vertex_db_store.json on boot.
  */
+
+/**
+ * Seeds default ready-to-use demo accounts (vtx_demo, vtx123, arrav) with Password@123
+ * into PostgreSQL users, trading_platform_accounts, and in-memory trading state.
+ */
+export async function seedDefaultDemoAccounts(): Promise<void> {
+  const defaultAccounts = [
+    {
+      id: 'usr-vtx-demo',
+      userId: 'vtx_demo',
+      clientCode: 'VTX_DEMO',
+      name: 'NexTrade Demo Trader',
+      email: 'vtx_demo@nextrade.com',
+      phone: '+919876543210',
+      role: 'CLIENT',
+      tenantId: 'vertex-default',
+      brokerId: 'BRK-001',
+      accountType: 'demo' as const,
+      demoBalance: 1000000.0,
+    },
+    {
+      id: 'usr-vtx123',
+      userId: 'vtx123',
+      clientCode: 'VTX123',
+      name: 'Vertex Demo User',
+      email: 'vtx123@vertex.trade',
+      phone: '+919876543211',
+      role: 'CLIENT',
+      tenantId: 'vertex-default',
+      brokerId: 'BRK-001',
+      accountType: 'demo' as const,
+      demoBalance: 1000000.0,
+    },
+    {
+      id: 'usr-arrav',
+      userId: 'arrav',
+      clientCode: 'ARRAV',
+      name: 'Aarav Mehta',
+      email: 'arrav@vertex.trade',
+      phone: '+919876543212',
+      role: 'CLIENT',
+      tenantId: 'vertex-default',
+      brokerId: 'BRK-001',
+      accountType: 'demo' as const,
+      demoBalance: 1000000.0,
+    },
+  ];
+
+  try {
+    for (const acc of defaultAccounts) {
+      await postgresClientMappingRepository.createClientMappingAndWallet({
+        id: acc.id,
+        user_id: acc.userId,
+        full_name: acc.name,
+        email: acc.email,
+        mobile: acc.phone,
+        password_hash: '',
+        role: acc.role,
+        tenant_id: acc.tenantId,
+        broker_id: acc.brokerId,
+        client_code: acc.clientCode,
+        account_type: acc.accountType,
+        demo_balance: acc.demoBalance,
+        is_verified: true,
+        status: 'ACTIVE',
+      }, acc.tenantId);
+
+      const existing = db.findUserByUserId(acc.userId);
+      if (!existing) {
+        db.addUser({
+          id: acc.id,
+          full_name: acc.name,
+          user_id: acc.userId,
+          country_code: '+91',
+          mobile: acc.phone,
+          phone_e164: acc.phone,
+          email: acc.email,
+          role: acc.role as any,
+          parent_id: 'master-node-0001',
+          hierarchy_path: `root.master_alpha.${acc.userId}`,
+          is_verified: true,
+          status: 'ACTIVE',
+          tenant_id: acc.tenantId,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          account_type: acc.accountType,
+          demo_balance: acc.demoBalance,
+          password_hash: '',
+          failed_login_attempts: 0,
+          client_code: acc.clientCode,
+          broker_id: acc.brokerId,
+        });
+      }
+    }
+    console.log('[STARTUP] Default ready-to-use demo accounts verified/seeded (vtx_demo, vtx123, arrav).');
+  } catch (err: any) {
+    console.warn('[STARTUP] Notice: Default demo accounts seeding notice:', err.message);
+  }
+}
+
 export async function purgeDummyAndTestRecords(): Promise<{
   usersPurged: number;
   ordersPurged: number;
@@ -62,9 +162,9 @@ export async function purgeDummyAndTestRecords(): Promise<{
     const nameLower = name.toLowerCase();
     const email = (typeof u === 'string' ? '' : u.email || '').toLowerCase().trim();
 
-    // Always preserve core system nodes
-    if (['superadmin', 'master_alpha', 'master_zenith', 'broker_metro', 'subbroker_kalyan'].includes(uid)) return false;
-    if (['admin@goldfut.com', 'alpha.master@goldfut.com', 'zenith.master@goldfut.com', 'metro@securities.com', 'kalyan.branch@goldfut.com'].includes(email)) return false;
+    // Always preserve core system nodes and default demo accounts
+    if (['superadmin', 'master_alpha', 'master_zenith', 'broker_metro', 'subbroker_kalyan', 'vtx_demo', 'vtx123', 'arrav', 'aarav'].includes(uid)) return false;
+    if (['admin@goldfut.com', 'alpha.master@goldfut.com', 'zenith.master@goldfut.com', 'metro@securities.com', 'kalyan.branch@goldfut.com', 'demo@vertex.trade', 'vtx_demo@nextrade.com', 'arrav@vertex.trade'].includes(email)) return false;
 
     // Dummy email patterns
     if (email.includes('@test.') || email.includes('@demo.') || email.includes('@example.') || email.includes('audit.trader') || email.includes('@vertex.trade')) return true;
@@ -75,16 +175,17 @@ export async function purgeDummyAndTestRecords(): Promise<{
     if (nameLower.includes('trader 5j') || nameLower.includes('broker 5j') || nameLower.includes('master trader 5j')) return true;
 
     const dummyNames = [
-      'aarav mehta', 'ananya iyer', 'arjun verma', 'diya kapoor', 'ishita singh',
+      'ananya iyer', 'arjun verma', 'diya kapoor', 'ishita singh',
       'kabir rao', 'meera nair', 'vivaan shah', 'ravi kumar', 'rahul sharma',
-      'priya patel', 'amit verma', 'demo trader', 'test demo trader'
+      'priya patel', 'amit verma'
     ];
     if (dummyNames.includes(nameLower)) return true;
 
     // Dummy user_id patterns
+    if (['vtx_demo', 'vtx123', 'arrav', 'aarav'].includes(uid)) return false;
     if (uid.startsWith('vtx') || uid.startsWith('demo') || uid.startsWith('test') || uid.includes('audit')) return true;
     if (uid.startsWith('trd_17') || uid.startsWith('admin_sync_') || uid.startsWith('client_17') || uid.startsWith('trader_17') || uid.startsWith('ub_trader_') || uid.startsWith('user_fall_') || uid.startsWith('fast_user_') || uid.startsWith('master_5j_') || uid.startsWith('broker_5j_') || uid.startsWith('trader_5j_') || uid.startsWith('trader-')) return true;
-    if (['demo-trader', 'vtx_demo', 'test_demo_trader_01', 'vtx999', 'vtx123', 'vtx456', 'vtx101'].includes(uid)) return true;
+    if (['demo-trader', 'test_demo_trader_01', 'vtx999', 'vtx456', 'vtx101'].includes(uid)) return true;
 
     return false;
   };
@@ -142,14 +243,14 @@ export async function purgeDummyAndTestRecords(): Promise<{
         OR user_id ILIKE 'trader_beta%'
         OR user_id IN ('demo-trader', 'vtx_demo', 'test_demo_trader_01', 'vtx999', 'vtx123', 'vtx456', 'vtx101')
       )
-      AND user_id NOT IN ('superadmin', 'master_alpha', 'master_zenith', 'broker_metro', 'subbroker_kalyan')
+      AND user_id NOT IN ('superadmin', 'master_alpha', 'master_zenith', 'broker_metro', 'subbroker_kalyan', 'vtx_demo', 'vtx123', 'arrav', 'aarav')
       AND id NOT IN ('super-admin-root-0001', 'master-node-0001', 'master-node-0002', 'broker-node-0001', 'subbroker-node-0001')
-      AND (email IS NULL OR email NOT IN ('admin@goldfut.com', 'alpha.master@goldfut.com', 'zenith.master@goldfut.com', 'metro@securities.com', 'kalyan.branch@goldfut.com'));
+      AND (email IS NULL OR email NOT IN ('admin@goldfut.com', 'alpha.master@goldfut.com', 'zenith.master@goldfut.com', 'metro@securities.com', 'kalyan.branch@goldfut.com', 'demo@vertex.trade', 'vtx_demo@nextrade.com', 'arrav@vertex.trade'));
     `).catch(() => ({ rows: [] }));
 
     const matchingUserIds = (dummyUsersRes.rows || []).map((r: any) => r.user_id);
     const matchingIds = (dummyUsersRes.rows || []).map((r: any) => r.id);
-    const allDummyUserIds = Array.from(new Set([...matchingUserIds, 'vtx999', 'vtx123', 'vtx456', 'vtx101', 'demo-trader', 'vtx_demo', 'test_demo_trader_01']));
+    const allDummyUserIds = Array.from(new Set([...matchingUserIds, 'vtx999', 'vtx456', 'vtx101', 'demo-trader', 'test_demo_trader_01'])).filter((u) => !['vtx_demo', 'vtx123', 'arrav', 'aarav'].includes(String(u).toLowerCase()));
     const allDummyIds = Array.from(new Set([...matchingIds]));
 
     if (allDummyUserIds.length > 0 || allDummyIds.length > 0) {
@@ -276,6 +377,9 @@ async function startServer() {
 
   // Purge all test/dummy users & seeded records from PostgreSQL, tradingStore, and .vertex_db_store.json
   await purgeDummyAndTestRecords();
+
+  // Seed default ready-to-use demo accounts (vtx_demo, vtx123, arrav) with Password@123
+  await seedDefaultDemoAccounts();
 
   // Synchronize authoritative users from PostgreSQL into memory for stateless multi-instance operation
   await db.syncUsersFromPostgres();

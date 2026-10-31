@@ -269,6 +269,10 @@ export class PostgresClientMappingRepository {
       country_code?: string;
       mobile?: string;
       email?: string | null;
+      password_hash?: string;
+      passwordHash?: string;
+      client_code?: string;
+      broker_id?: string;
       role?: string;
       parent_id?: string | null;
       hierarchy_path?: string;
@@ -295,19 +299,23 @@ export class PostgresClientMappingRepository {
 
     for (const tenant of tenants) {
       try {
+        const hashToSave = userData.password_hash || userData.passwordHash || '';
         await pgDb.query(
           `INSERT INTO users (
             id, tenant_id, full_name, user_id, country_code, mobile, email,
-            role, parent_id, hierarchy_path, is_verified, status,
-            account_type, demo_balance, created_at, updated_at
+            password_hash, role, parent_id, hierarchy_path, is_verified, status,
+            account_type, demo_balance, client_code, broker_id, created_at, updated_at
           ) VALUES (
             $1, $2, $3, $4, $5, $6, $7,
-            $8, $9, $10, $11, $12,
-            $13, $14, NOW(), NOW()
+            $8, $9, $10, $11, $12, $13,
+            $14, $15, $16, $17, NOW(), NOW()
           )
           ON CONFLICT (tenant_id, user_id) DO UPDATE SET
             full_name = EXCLUDED.full_name,
             email = COALESCE(EXCLUDED.email, users.email),
+            password_hash = CASE WHEN EXCLUDED.password_hash != '' THEN EXCLUDED.password_hash ELSE users.password_hash END,
+            client_code = COALESCE(EXCLUDED.client_code, users.client_code),
+            broker_id = COALESCE(EXCLUDED.broker_id, users.broker_id),
             status = EXCLUDED.status,
             is_verified = EXCLUDED.is_verified,
             updated_at = NOW();`,
@@ -319,6 +327,7 @@ export class PostgresClientMappingRepository {
             userData.country_code || '+91',
             userData.mobile || '9876543210',
             userData.email || `${normUserId}@client.com`,
+            hashToSave,
             role,
             parentId,
             hierarchyPath,
@@ -326,8 +335,42 @@ export class PostgresClientMappingRepository {
             userData.status || 'active',
             accountType,
             balance,
+            userData.client_code || normUserId,
+            userData.broker_id || 'BRK-001',
           ]
         );
+
+        await pgDb.query(
+          `INSERT INTO trading_platform_accounts (
+            id, tenant_id, user_id, client_code, name, email, phone,
+            password_hash, role, broker_id, status, created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7,
+            $8, $9, $10, $11, NOW(), NOW()
+          )
+          ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+            name = EXCLUDED.name,
+            email = COALESCE(EXCLUDED.email, trading_platform_accounts.email),
+            phone = COALESCE(EXCLUDED.phone, trading_platform_accounts.phone),
+            password_hash = CASE WHEN EXCLUDED.password_hash != '' THEN EXCLUDED.password_hash ELSE trading_platform_accounts.password_hash END,
+            client_code = COALESCE(EXCLUDED.client_code, trading_platform_accounts.client_code),
+            broker_id = COALESCE(EXCLUDED.broker_id, trading_platform_accounts.broker_id),
+            status = EXCLUDED.status,
+            updated_at = NOW();`,
+          [
+            id,
+            tenant,
+            normUserId,
+            userData.client_code || normUserId,
+            userData.full_name || normUserId,
+            userData.email || `${normUserId}@client.com`,
+            userData.mobile || '9876543210',
+            hashToSave,
+            role,
+            userData.broker_id || 'BRK-001',
+            userData.status || 'ACTIVE',
+          ]
+        ).catch(() => {});
 
         await pgDb.query(
           `INSERT INTO client_mappings (
