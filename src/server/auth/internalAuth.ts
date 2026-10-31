@@ -344,16 +344,11 @@ export function requireInternalAuth(
     isLocalhost
   );
 
-  const isPermissiveSyncRoute = Boolean(
-    rawPath.includes('/tenant') ||
-    baseUrl.includes('/tenant') ||
-    requestPath.includes('/tenant') ||
-    rawPath.includes('/platform') ||
-    baseUrl.includes('/platform') ||
-    requestPath.includes('/platform') ||
+  const isEmergencyRoute = Boolean(
     rawPath.includes('/emergency') ||
-    requestPath.includes('/branding') ||
-    requestPath.includes('/controls')
+    baseUrl.includes('/emergency') ||
+    requestPath.includes('/emergency') ||
+    fullRoutePath.includes('/emergency')
   );
 
   const isTradingRoute = Boolean(
@@ -365,12 +360,7 @@ export function requireInternalAuth(
     (isFromUserOrAdminPanel && (requestPath.includes('trading') || fullRoutePath.includes('trading') || rawPath.includes('trading')))
   );
 
-  const isPermissiveAllowed = Boolean(
-    isTradingRoute ||
-    isFromUserOrAdminPanel ||
-    isPermissiveSyncRoute ||
-    !config.isProduction
-  );
+  const isPermissiveAllowed = !isEmergencyRoute && isTradingRoute;
 
   const rawTimestamp =
     (req.headers['x-internal-timestamp'] as string) ||

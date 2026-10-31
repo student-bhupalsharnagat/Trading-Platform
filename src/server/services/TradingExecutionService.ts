@@ -85,8 +85,14 @@ export class TradingExecutionService {
       throw err;
     }
 
-    if (!lots || lots <= 0) {
+    if (!lots || lots <= 0 || !Number.isFinite(lots)) {
       const err = new Error('Order quantity (lots) must be greater than zero.');
+      (err as any).statusCode = 400;
+      throw err;
+    }
+
+    if (input.price !== undefined && (!Number.isFinite(input.price) || input.price <= 0)) {
+      const err = new Error('Order price must be a positive number.');
       (err as any).statusCode = 400;
       throw err;
     }
@@ -1201,6 +1207,18 @@ export class TradingExecutionService {
 
       if (order.status !== 'PENDING') {
         const err = new Error(`Cannot modify order with status '${order.status}'. Only PENDING orders may be modified.`);
+        (err as any).statusCode = 400;
+        throw err;
+      }
+
+      if (updates.price !== undefined && (!Number.isFinite(updates.price) || updates.price <= 0)) {
+        const err = new Error('Modified price must be a positive number.');
+        (err as any).statusCode = 400;
+        throw err;
+      }
+
+      if (updates.quantity !== undefined && (!Number.isFinite(updates.quantity) || updates.quantity <= 0)) {
+        const err = new Error('Modified quantity must be a positive number.');
         (err as any).statusCode = 400;
         throw err;
       }

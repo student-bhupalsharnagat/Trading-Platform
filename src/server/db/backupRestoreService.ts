@@ -178,6 +178,13 @@ export class BackupRestoreService {
           const columns = Object.keys(row);
           if (columns.length === 0) continue;
 
+          const validColRegex = /^[a-zA-Z0-9_]+$/;
+          for (const c of columns) {
+            if (!validColRegex.test(c)) {
+              throw new Error(`Invalid column name '${c}' in backup data.`);
+            }
+          }
+
           const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
           const colNames = columns.map((c) => `"${c}"`).join(', ');
           const values = columns.map((c) => {

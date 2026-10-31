@@ -35,7 +35,7 @@ export async function resolveTenantMiddleware(
     const isInternalRoute = req.path ? req.path.startsWith('/api/internal/') : false;
 
     const devTenantOverride =
-      !isInternalRoute
+      !isProduction && !isInternalRoute
         ? req.cookies?.vtx_dev_tenant ||
           (req.headers['x-dev-tenant-id'] as string) ||
           (req.headers['x-tenant-id'] as string) ||

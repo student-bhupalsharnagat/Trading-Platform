@@ -22,9 +22,12 @@ import { operationIdempotencyStore } from '../../events/OperationIdempotencyStor
 import { postgresTenantConfigRepository } from '../../repositories/trading/PostgresTenantConfigRepository.ts';
 import { authoritativeTradingDataService } from '../../services/authoritativeTradingDataService.ts';
 
+import { s2sRateLimiter } from '../../middleware/rateLimitMiddleware.ts';
+
 const router = Router();
 
-// Apply internal authentication (HMAC verification, replay check, tenant ID extraction) to all internal routes
+// Protect internal routes with S2S rate limiting and cryptographic HMAC verification
+router.use(s2sRateLimiter);
 router.use(requireInternalAuth);
 
 /**
@@ -348,11 +351,11 @@ router.post(
           }
         } catch {}
 
+        const currentCached = tenantConfigCache.get(tenantId);
         tenantConfigCache.invalidate(tenantId);
         tenantConfigCache.invalidate('vertex-default');
 
-        const currentCached = tenantConfigCache.get(tenantId);
-        const nextVersion = (currentCached?.brandingVersion || 0) + 1;
+        const nextVersion = Math.max((currentCached?.brandingVersion || 1) + 1, 2);
         tenantConfigCache.set(tenantId, { brandingVersion: nextVersion });
 
         tradingWebSocketServer.broadcastToTenant(tenantId, 'branding.updated', {

@@ -6,6 +6,7 @@ import {
   registerLimiter,
   loginLimiter,
   otpLimiter,
+  demoLimiter,
 } from '../middleware/rateLimitMiddleware.ts';
 
 const router = Router();
@@ -19,7 +20,7 @@ router.post('/resend-otp', otpLimiter, authController.resendOtp);
 
 // Login & Demo
 router.post('/login', loginLimiter, authController.login);
-router.post('/demo', authController.demoLogin);
+router.post('/demo', demoLimiter, authController.demoLogin);
 
 // Forgot & Reset Password
 router.post('/forgot-password', otpLimiter, authController.forgotPassword);

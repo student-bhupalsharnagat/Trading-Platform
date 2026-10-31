@@ -5,6 +5,7 @@ import {
   requireTradingEnabled,
   requireActiveTrader,
 } from '../middleware/tenantMiddleware.ts';
+import { orderRateLimiter, fundsRateLimiter } from '../middleware/rateLimitMiddleware.ts';
 import { Instrument, Candle, Position, Order, WalletFunds, SupportTicket, AppNotification } from '../../types.ts';
 import {
   INSTRUMENTS,
@@ -278,6 +279,7 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
 // Place new Order (BUY / SELL) - Enforces Tenant trading freeze, active trader, and ACID persistence
 router.post(
   ['/order', '/orders'],
+  orderRateLimiter,
   optionalAuth,
   requireTradingEnabled,
   requireActiveTrader,
@@ -404,6 +406,30 @@ router.post(
         : (orderPrice !== undefined && orderPrice !== 'Market'
             ? Number(orderPrice)
             : (orderType === 'LIMIT' && limitPrice ? Number(limitPrice) : inst.lastPrice));
+
+      if (!Number.isFinite(execPrice) || execPrice <= 0) {
+        res.status(400).json({ success: false, message: 'Invalid order price: price must be a positive number.' });
+        return;
+      }
+      if (!Number.isInteger(orderLots) || orderLots <= 0 || orderLots > 10000) {
+        res.status(400).json({ success: false, message: 'Invalid order quantity: lots must be a positive integer up to 10,000.' });
+        return;
+      }
+      const numTrigger = (triggerPrice != null || trigger_price != null) ? Number(triggerPrice ?? trigger_price) : undefined;
+      if (numTrigger !== undefined && (!Number.isFinite(numTrigger) || numTrigger <= 0)) {
+        res.status(400).json({ success: false, message: 'Invalid trigger price. Must be a positive number.' });
+        return;
+      }
+      const numStopLoss = stopLoss ? Number(stopLoss) : undefined;
+      if (numStopLoss !== undefined && (!Number.isFinite(numStopLoss) || numStopLoss <= 0)) {
+        res.status(400).json({ success: false, message: 'Invalid stop loss. Must be a positive number.' });
+        return;
+      }
+      const numTarget = target ? Number(target) : undefined;
+      if (numTarget !== undefined && (!Number.isFinite(numTarget) || numTarget <= 0)) {
+        res.status(400).json({ success: false, message: 'Invalid target price. Must be a positive number.' });
+        return;
+      }
 
       const callerRole = String(userObj?.role || '').toUpperCase();
       const isHierarchyCaller = ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER', 'OPERATIONS'].includes(callerRole);
@@ -543,6 +569,7 @@ router.post(
 // Close / Square-off position - Supports both Postgres and fallback memory store
 router.post(
   ['/position/close', '/positions/close', '/positions/:id/square-off'],
+  orderRateLimiter,
   optionalAuth,
   requireTradingEnabled,
   requireActiveTrader,
@@ -559,6 +586,10 @@ router.post(
       }
 
       const exitPrice = req.body?.price ?? req.body?.exitPrice;
+      if (exitPrice !== undefined && (!Number.isFinite(Number(exitPrice)) || Number(exitPrice) <= 0)) {
+        res.status(400).json({ success: false, message: 'Invalid exit price: price must be a positive number.' });
+        return;
+      }
       let result: any = null;
       try {
         result = await tradingExecutionService.closePosition(tenantId, userId, positionId, exitPrice);
@@ -672,6 +703,7 @@ router.post(
 // Square-off ALL Positions (Exit All) - Zerodha Kite & Upstox benchmark feature
 router.post(
   '/positions/close-all',
+  orderRateLimiter,
   optionalAuth,
   requireTradingEnabled,
   requireActiveTrader,
@@ -681,10 +713,15 @@ router.post(
       const userObj = (req as any).user;
       const userId = userObj?.userId || userObj?.user_id || userObj?.id || 'demo-trader';
 
-      const positions = [...getTenantPositions(tenantId)];
+      const pgPositions = await postgresPositionRepository.getPositions(tenantId, userId).catch(() => []);
+      const memPositions = getTenantPositions(tenantId).filter((p: any) => p.userId === userId || (!p.userId && userId === 'demo-trader'));
+      const positionsToClose = pgPositions.length > 0
+        ? pgPositions.map((p) => ({ id: p.id, symbol: p.instrument_id, lots: 1, qty: Math.abs(Number(p.quantity)), type: Number(p.quantity) >= 0 ? 'BUY' : 'SELL', product: 'INTRADAY', ltp: 0 }))
+        : memPositions;
+
       const closedList: string[] = [];
 
-      for (const pos of positions) {
+      for (const pos of positionsToClose) {
         try {
           await tradingExecutionService.closePosition(tenantId, userId, pos.id);
         } catch {
@@ -695,16 +732,16 @@ router.post(
         // Record square-off order in Order Book
         const memOrders = getTenantOrders(tenantId);
         const inst = findInstrument(pos.symbol);
-        const ltp = inst ? inst.lastPrice : pos.ltp;
+        const ltp = inst ? inst.lastPrice : (pos as any).ltp || 0;
         memOrders.unshift({
           id: `ORD-SO-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
           symbol: pos.symbol,
-          type: pos.type === 'BUY' ? 'SELL' : 'BUY',
+          type: (pos as any).type === 'BUY' ? 'SELL' : 'BUY',
           orderType: 'MARKET',
-          product: pos.product || 'INTRADAY',
-          lots: pos.lots || 1,
-          qty: pos.qty,
-          lotSize: pos.lotSize || 100,
+          product: (pos as any).product || 'INTRADAY',
+          lots: (pos as any).lots || 1,
+          qty: (pos as any).qty || 1,
+          lotSize: (pos as any).lotSize || 100,
           price: ltp,
           status: 'EXECUTED',
           time: new Date().toTimeString().split(' ')[0],
@@ -714,8 +751,11 @@ router.post(
         });
       }
 
-      // Empty in-memory positions
-      setTenantPositions(tenantId, []);
+      // Only remove this user's positions from memory
+      setTenantPositions(
+        tenantId,
+        getTenantPositions(tenantId).filter((p: any) => p.userId !== userId && (p.userId || userId !== 'demo-trader'))
+      );
 
       const memWallet = getTenantWallet(tenantId);
       res.json({
@@ -794,7 +834,7 @@ router.get('/trades', requireAuth, async (req: TenantRequest, res: Response) => 
 });
 
 // Add Funds (Deposit) - Authoritative PostgreSQL Transaction & Immutable Ledger Flow
-router.post('/funds/deposit', requireAuth, async (req: TenantRequest, res: Response) => {
+router.post('/funds/deposit', fundsRateLimiter, requireAuth, async (req: TenantRequest, res: Response) => {
   try {
     const tenantId = getReqTenantId(req);
     const userObj = (req as any).user;
@@ -802,7 +842,7 @@ router.post('/funds/deposit', requireAuth, async (req: TenantRequest, res: Respo
 
     const { amount, method } = req.body;
     const numAmount = Number(amount);
-    if (!numAmount || numAmount < 100) {
+    if (!Number.isFinite(numAmount) || numAmount < 100) {
       res.status(400).json({ success: false, message: 'Minimum deposit amount is ₹100.' });
       return;
     }
@@ -897,7 +937,7 @@ router.post('/funds/deposit', requireAuth, async (req: TenantRequest, res: Respo
 });
 
 // Withdraw Funds - Authoritative PostgreSQL Transaction & Immutable Ledger Flow
-router.post('/funds/withdraw', requireAuth, async (req: TenantRequest, res: Response) => {
+router.post('/funds/withdraw', fundsRateLimiter, requireAuth, async (req: TenantRequest, res: Response) => {
   try {
     const tenantId = getReqTenantId(req);
     const userObj = (req as any).user;
@@ -905,7 +945,7 @@ router.post('/funds/withdraw', requireAuth, async (req: TenantRequest, res: Resp
 
     const { amount, bankName } = req.body;
     const numAmount = Number(amount);
-    if (!numAmount || numAmount < 500) {
+    if (!Number.isFinite(numAmount) || numAmount < 500) {
       res.status(400).json({ success: false, message: 'Minimum withdrawal amount is ₹500.' });
       return;
     }
@@ -1033,7 +1073,22 @@ router.get('/wallet', optionalAuth, async (req: TenantRequest, res: Response) =>
   try {
     const tenantId = getReqTenantId(req);
     const userObj = (req as any).user;
-    const userId = userObj?.userId || userObj?.user_id || userObj?.id || 'demo-trader';
+    if (!userObj) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required to view wallet.',
+        wallet: {
+          availableBalance: 0,
+          usedMargin: 0,
+          totalPnL: 0,
+          todayPnL: 0,
+          deposited: 0,
+          withdrawn: 0,
+        },
+        transactions: [],
+      });
+    }
+    const userId = userObj.userId || userObj.user_id || userObj.id;
 
     const isDemo = userId === 'vtx_demo' || userId === 'demo-trader' || String(userId).toLowerCase().includes('demo');
     const pgWallet = await postgresWalletRepository.getOrCreateWallet(tenantId, userId, isDemo ? 1000000 : 0);
@@ -1166,17 +1221,38 @@ router.get('/account', requireAuth, async (req: AuthenticatedRequest, res: Respo
   }
 });
 
-// Get & Create Support Tickets (scoped to resolved tenant)
+// Get & Create Support Tickets (scoped to resolved tenant with user isolation)
 router.get('/tickets', optionalAuth, (req: TenantRequest, res: Response) => {
   const tenantId = getReqTenantId(req);
-  res.json({ success: true, tickets: getTenantTickets(tenantId) });
+  const caller = req.user;
+  if (!caller) {
+    res.status(401).json({ success: false, message: 'Authentication required to view support tickets.' });
+    return;
+  }
+  const allTickets = getTenantTickets(tenantId);
+  const isPrivileged = ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER', 'OPERATIONS'].includes(caller.role || '');
+  const userTickets = isPrivileged
+    ? allTickets
+    : allTickets.filter((t: any) => !t.userId || t.userId === caller.userId || t.userId === caller.id);
+
+  res.json({ success: true, tickets: userTickets });
 });
 
 router.get('/tickets/:id', optionalAuth, (req: TenantRequest, res: Response) => {
   const tenantId = getReqTenantId(req);
+  const caller = req.user;
+  if (!caller) {
+    res.status(401).json({ success: false, message: 'Authentication required to view ticket details.' });
+    return;
+  }
   const tickets = getTenantTickets(tenantId);
   const ticket = tickets.find((t) => t.id.toLowerCase() === req.params.id.toLowerCase());
   if (!ticket) {
+    res.status(404).json({ success: false, message: 'Ticket not found.' });
+    return;
+  }
+  const isPrivileged = ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER', 'OPERATIONS'].includes(caller.role || '');
+  if (!isPrivileged && (ticket as any).userId && (ticket as any).userId !== caller.userId && (ticket as any).userId !== caller.id) {
     res.status(404).json({ success: false, message: 'Ticket not found.' });
     return;
   }
@@ -1185,6 +1261,11 @@ router.get('/tickets/:id', optionalAuth, (req: TenantRequest, res: Response) => 
 
 router.post('/tickets', optionalAuth, (req: TenantRequest, res: Response) => {
   const tenantId = getReqTenantId(req);
+  const caller = req.user;
+  if (!caller) {
+    res.status(401).json({ success: false, message: 'Authentication required to submit support tickets.' });
+    return;
+  }
   const tickets = getTenantTickets(tenantId);
   const notifications = getTenantNotifications(tenantId);
 
@@ -1223,6 +1304,7 @@ router.post('/tickets', optionalAuth, (req: TenantRequest, res: Response) => {
       },
     ],
   };
+  (newTicket as any).userId = caller.userId || caller.id;
 
   tickets.unshift(newTicket);
 
@@ -1267,10 +1349,20 @@ router.post('/tickets', optionalAuth, (req: TenantRequest, res: Response) => {
 
 router.post('/tickets/:id/reply', optionalAuth, (req: TenantRequest, res: Response) => {
   const tenantId = getReqTenantId(req);
+  const caller = req.user;
+  if (!caller) {
+    res.status(401).json({ success: false, message: 'Authentication required to reply to ticket.' });
+    return;
+  }
   const tickets = getTenantTickets(tenantId);
   const { message, attachmentUrl, attachmentName } = req.body;
   const ticket = tickets.find((t) => t.id.toLowerCase() === req.params.id.toLowerCase());
   if (!ticket) {
+    res.status(404).json({ success: false, message: 'Ticket not found.' });
+    return;
+  }
+  const isPrivileged = ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER', 'OPERATIONS'].includes(caller.role || '');
+  if (!isPrivileged && (ticket as any).userId && (ticket as any).userId !== caller.userId && (ticket as any).userId !== caller.id) {
     res.status(404).json({ success: false, message: 'Ticket not found.' });
     return;
   }
@@ -1424,19 +1516,36 @@ router.post('/notifications/clear', requireAuth, (req: TenantRequest, res: Respo
 // ==========================================================
 
 // Modify order via Execution Gateway
-router.put('/orders/:id', requireAuth, requireActiveTrader, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const tenantId = getReqTenantId(req);
-    const userId = req.user!.userId;
-    const { id } = req.params;
-    const { price, quantity } = req.body || {};
+router.put(
+  '/orders/:id',
+  orderRateLimiter,
+  requireAuth,
+  requireActiveTrader,
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const tenantId = getReqTenantId(req);
+      const userId = req.user!.userId;
+      const { id } = req.params;
+      const { price, quantity } = req.body || {};
 
-    const result = await tradingExecutionService.modifyOrder(tenantId, userId, id, {
-      price: price ? Number(price) : undefined,
-      quantity: quantity ? Number(quantity) : undefined,
-    });
+      const numPrice = price != null ? Number(price) : undefined;
+      if (numPrice !== undefined && (!Number.isFinite(numPrice) || numPrice <= 0)) {
+        res.status(400).json({ success: false, message: 'Invalid price: price must be a positive number.' });
+        return;
+      }
 
-    res.json(result);
+      const numQty = quantity != null ? Number(quantity) : undefined;
+      if (numQty !== undefined && (!Number.isFinite(numQty) || numQty <= 0)) {
+        res.status(400).json({ success: false, message: 'Invalid quantity: quantity must be a positive number.' });
+        return;
+      }
+
+      const result = await tradingExecutionService.modifyOrder(tenantId, userId, id, {
+        price: numPrice,
+        quantity: numQty,
+      });
+
+      res.json(result);
   } catch (err: any) {
     res.status(err.statusCode || 500).json({ success: false, message: err.message, code: err.code });
   }

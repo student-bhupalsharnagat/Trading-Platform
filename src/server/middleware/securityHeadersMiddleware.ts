@@ -7,13 +7,59 @@ import { Request, Response, NextFunction } from 'express';
 
 const isProd = process.env.NODE_ENV === 'production';
 
+function isAllowedCorsOrigin(origin: string, host?: string): boolean {
+  if (!isProd) return true;
+  try {
+    const url = new URL(origin);
+    const originHost = url.hostname.toLowerCase();
+    const reqHost = host ? host.split(':')[0].toLowerCase() : '';
+
+    if (reqHost && (originHost === reqHost || originHost === 'localhost' || originHost === '127.0.0.1')) {
+      return true;
+    }
+
+    if (
+      originHost.endsWith('.onrender.com') ||
+      originHost.includes('admin-dashbord') ||
+      originHost.includes('user-panel') ||
+      originHost.includes('trading-platform') ||
+      originHost.includes('vertex-trading')
+    ) {
+      return true;
+    }
+
+    const envOrigins = (
+      (process.env.CORS_ALLOWED_ORIGINS || '') +
+      ',' +
+      (process.env.WEBSOCKET_ALLOWED_ORIGINS || '') +
+      ',' +
+      (process.env.CLIENT_URL || '') +
+      ',' +
+      (process.env.TRADING_PLATFORM_BASE_URL || '')
+    )
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+
+    return envOrigins.some(
+      (allowed) =>
+        allowed === '*' ||
+        allowed === origin.toLowerCase() ||
+        allowed === originHost ||
+        origin.toLowerCase().startsWith(allowed)
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Cross-Origin Resource Sharing (CORS) Middleware
  * Allows cross-origin requests from User Panel dashboard port/domain with credentials.
  */
 export function corsMiddleware(req: Request, res: Response, next: NextFunction): void {
   const origin = req.headers.origin;
-  if (origin) {
+  if (origin && isAllowedCorsOrigin(origin, req.headers.host)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');

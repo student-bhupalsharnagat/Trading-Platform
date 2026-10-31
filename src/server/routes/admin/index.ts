@@ -12,7 +12,14 @@ import ledgerRoutes from './ledgerRoutes.ts';
 import kycRoutes from './kycRoutes.ts';
 import whiteLabelRoutes from './whiteLabelRoutes.ts';
 
+import { requireAuth } from '../../middleware/authMiddleware.ts';
+import { requireAdmin } from '../../middleware/requireRole.ts';
+
 const router = Router();
+
+// Strict Defense-in-Depth: Enforce backend JWT verification and Admin RBAC on all /api/admin/* endpoints
+router.use(requireAuth);
+router.use(requireAdmin);
 
 router.use('/dashboard', adminDashboardRoutes);
 router.use('/masters', masterRoutes);

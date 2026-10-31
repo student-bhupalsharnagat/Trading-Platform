@@ -24,6 +24,7 @@ import {
   csrfProtectionMiddleware,
   sanitizeQueryParams,
 } from './src/server/middleware/securityHeadersMiddleware.ts';
+import { generalApiLimiter } from './src/server/middleware/rateLimitMiddleware.ts';
 import { initializeCachesFromLocal } from './src/server/cache/initCache.ts';
 import { runMigrations } from './src/server/db/migrationRunner.ts';
 import { tradingWebSocketServer } from './src/server/websocket/WebSocketServer.ts';
@@ -327,7 +328,8 @@ async function startServer() {
   // Protected by HMAC-SHA256, Nonce, Timestamp, and Tenant ID validation
   app.use('/api/internal/v1', internalRoutes);
 
-  // Browser & Client API Routes
+  // Browser & Client API Routes with DDoS & spam rate limiting protection
+  app.use('/api', generalApiLimiter);
   app.use('/api/tenant', tenantRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/trading', tradingRoutes);

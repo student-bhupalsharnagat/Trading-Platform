@@ -144,13 +144,16 @@ router.get('/status', async (req: TenantRequest, res: Response) => {
  */
 router.get('/current', async (req: TenantRequest, res: Response) => {
   try {
+    const isProd = process.env.NODE_ENV === 'production';
     const requestedTenantId =
-      (req.query.tenant_id as string) ||
-      (req.query.tenantId as string) ||
-      (req.headers['x-dev-tenant-id'] as string) ||
-      (req.headers['x-tenant-id'] as string) ||
-      req.cookies?.vtx_dev_tenant ||
-      undefined;
+      !isProd
+        ? (req.query.tenant_id as string) ||
+          (req.query.tenantId as string) ||
+          (req.headers['x-dev-tenant-id'] as string) ||
+          (req.headers['x-tenant-id'] as string) ||
+          req.cookies?.vtx_dev_tenant ||
+          undefined
+        : undefined;
 
     if (requestedTenantId) {
       const data = await centralApiService.resolveTenant('localhost', requestedTenantId);
