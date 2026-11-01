@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { adminApi } from '../services/adminApi';
 import { useAuth } from '../../context/AuthContext';
+import { useAdminRealtime } from '../context/AdminRealtimeContext';
 
 interface ManualDepositItem {
   id: string;
@@ -115,10 +116,29 @@ export const AdminDepositRequestsPage: React.FC<AdminDepositRequestsPageProps> =
     }
   };
 
+  const { isConnected, subscribe } = useAdminRealtime();
+
   useEffect(() => {
     fetchRequests();
     fetchSettings();
   }, [activeTab]);
+
+  useEffect(() => {
+    const unsub1 = subscribe('manual_deposit.created', () => {
+      fetchRequests();
+    });
+    const unsub2 = subscribe('manual_deposit.approved', () => {
+      fetchRequests();
+    });
+    const unsub3 = subscribe('manual_deposit.rejected', () => {
+      fetchRequests();
+    });
+    return () => {
+      unsub1();
+      unsub2();
+      unsub3();
+    };
+  }, [subscribe]);
 
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard?.writeText(text);

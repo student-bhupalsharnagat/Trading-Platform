@@ -287,9 +287,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               data.event === 'trade.executed' ||
               data.event === 'position.updated' ||
               data.event === 'order.cancelled' ||
-              data.event === 'portfolio.mtm'
+              data.event === 'portfolio.mtm' ||
+              data.event === 'manual_deposit.approved' ||
+              data.event === 'manual_deposit.rejected'
             ) {
               fetchData();
+              if (data.event.startsWith('manual_deposit.')) {
+                window.dispatchEvent(new CustomEvent('vtx_manual_deposit_updated', { detail: data.payload }));
+              }
             } else if (data.event === 'branding.updated' || data.event === 'tenant.branding_updated') {
               const incoming = data.payload?.branding || data.payload;
               if (incoming) {

@@ -231,6 +231,15 @@ export const WalletModal: React.FC<WalletModalProps> = ({
     }
   }, [isOpen, initialTab, loadServerHistory, loadPaymentDetails]);
 
+  React.useEffect(() => {
+    const handleDepositUpdate = () => {
+      loadServerHistory();
+      if (onRefresh) onRefresh();
+    };
+    window.addEventListener('vtx_manual_deposit_updated', handleDepositUpdate);
+    return () => window.removeEventListener('vtx_manual_deposit_updated', handleDepositUpdate);
+  }, [loadServerHistory, onRefresh]);
+
   const handleProofFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;

@@ -28,6 +28,7 @@ import { useAuth } from '../../context/AuthContext';
 import { HierarchyBadge } from './HierarchyBadge';
 import { UserRole } from '../types/adminTypes';
 import { adminApi } from '../services/adminApi';
+import { useAdminRealtime } from '../context/AdminRealtimeContext';
 
 interface AdminSidebarProps {
   currentPath: string;
@@ -45,21 +46,33 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
   const { user, logout } = useAuth();
   const userRole = (user?.role || 'CLIENT') as UserRole;
   const [pendingDeposits, setPendingDeposits] = useState<number>(0);
+  const { subscribe } = useAdminRealtime();
 
-  useEffect(() => {
-    let isMounted = true;
+  const fetchBadge = () => {
     adminApi
       .getDepositRequests({ status: 'PENDING', limit: 1 })
       .then((res) => {
-        if (isMounted && res && typeof res.pendingCount === 'number') {
+        if (res && typeof res.pendingCount === 'number') {
           setPendingDeposits(res.pendingCount);
         }
       })
       .catch(() => {});
-    return () => {
-      isMounted = false;
-    };
+  };
+
+  useEffect(() => {
+    fetchBadge();
   }, [currentPath]);
+
+  useEffect(() => {
+    const unsub1 = subscribe('manual_deposit.created', () => fetchBadge());
+    const unsub2 = subscribe('manual_deposit.approved', () => fetchBadge());
+    const unsub3 = subscribe('manual_deposit.rejected', () => fetchBadge());
+    return () => {
+      unsub1();
+      unsub2();
+      unsub3();
+    };
+  }, [subscribe]);
 
   const navSections = [
     {

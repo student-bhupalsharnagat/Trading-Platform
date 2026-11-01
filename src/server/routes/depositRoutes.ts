@@ -80,7 +80,7 @@ router.post('/manual-request', requireAuth, async (req: AuthenticatedRequest, re
 router.get('/my-requests', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = getReqTenantId(req);
-    const userId = req.user?.userId || req.user?.user_id || req.user?.id;
+    const userId = req.user?.userId || req.user?.id;
 
     if (!userId) {
       res.status(401).json({ success: false, message: 'User identification missing' });
