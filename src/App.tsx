@@ -33,6 +33,7 @@ import { AdminKycPage } from './admin/pages/AdminKycPage.tsx';
 import { AdminCommissionPage } from './admin/pages/AdminCommissionPage.tsx';
 import { AdminReportsPage } from './admin/pages/AdminReportsPage.tsx';
 import { AdminWhiteLabelPage } from './admin/pages/AdminWhiteLabelPage.tsx';
+import { AdminDepositRequestsPage } from './admin/pages/AdminDepositRequestsPage.tsx';
 
 function AppContent() {
   const { user, loading, toasts, dismissToast } = useAuth();
@@ -238,6 +239,38 @@ function AppContent() {
               title="Client Funds & Approvals"
             >
               <AdminFundsPage onNavigate={navigate} />
+            </AdminLayout>
+          </AdminProtectedRoute>
+        );
+
+      case '/admin/deposit-requests':
+        return (
+          <AdminProtectedRoute
+            allowedRoles={['SUPER_ADMIN', 'MASTER', 'BROKER']}
+            onBackToTrading={() => navigate('/dashboard')}
+          >
+            <AdminLayout
+              currentPath={currentRoute}
+              onNavigate={navigate}
+              title="Manual Deposit Requests"
+            >
+              <AdminDepositRequestsPage onNavigate={navigate} />
+            </AdminLayout>
+          </AdminProtectedRoute>
+        );
+
+      case '/admin/payment-settings':
+        return (
+          <AdminProtectedRoute
+            allowedRoles={['SUPER_ADMIN', 'MASTER', 'BROKER']}
+            onBackToTrading={() => navigate('/dashboard')}
+          >
+            <AdminLayout
+              currentPath={currentRoute}
+              onNavigate={navigate}
+              title="Bank & QR Payment Settings"
+            >
+              <AdminDepositRequestsPage onNavigate={navigate} initialTab="SETTINGS" />
             </AdminLayout>
           </AdminProtectedRoute>
         );

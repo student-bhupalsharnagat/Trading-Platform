@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   LayoutDashboard,
   Crown,
@@ -22,10 +22,12 @@ import {
   LogOut,
   ChevronRight,
   TrendingUp,
+  QrCode,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { HierarchyBadge } from './HierarchyBadge';
 import { UserRole } from '../types/adminTypes';
+import { adminApi } from '../services/adminApi';
 
 interface AdminSidebarProps {
   currentPath: string;
@@ -42,6 +44,22 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
 }) => {
   const { user, logout } = useAuth();
   const userRole = (user?.role || 'CLIENT') as UserRole;
+  const [pendingDeposits, setPendingDeposits] = useState<number>(0);
+
+  useEffect(() => {
+    let isMounted = true;
+    adminApi
+      .getDepositRequests({ status: 'PENDING', limit: 1 })
+      .then((res) => {
+        if (isMounted && res && typeof res.pendingCount === 'number') {
+          setPendingDeposits(res.pendingCount);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, [currentPath]);
 
   const navSections = [
     {
@@ -69,6 +87,12 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       title: 'COMPLIANCE',
       items: [
         { label: 'KYC Verification', path: '/admin/kyc', icon: <ShieldCheck className="w-4 h-4" /> },
+        {
+          label: 'Manual Deposits',
+          path: '/admin/deposit-requests',
+          icon: <CreditCard className="w-4 h-4 text-emerald-400" />,
+          badge: pendingDeposits,
+        },
         { label: 'Funds Approval', path: '/admin/funds', icon: <Wallet className="w-4 h-4" /> },
         { label: 'Financial Ledger', path: '/admin/ledger', icon: <BookOpen className="w-4 h-4" /> },
       ],
@@ -94,6 +118,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       items: [
         { label: 'Subscriptions', path: '/admin/subscriptions', icon: <CreditCard className="w-4 h-4" /> },
         { label: 'White Label', path: '/admin/white-label', icon: <Building className="w-4 h-4" /> },
+        { label: 'Bank & QR Settings', path: '/admin/payment-settings', icon: <QrCode className="w-4 h-4 text-purple-400" /> },
         { label: 'Settings', path: '/admin/settings', icon: <Settings className="w-4 h-4" /> },
         { label: 'Audit Logs', path: '/admin/audit-logs', icon: <History className="w-4 h-4" /> },
       ],
@@ -175,7 +200,14 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
                         <span className={isActive ? 'text-blue-400' : 'text-slate-400'}>{item.icon}</span>
                         <span>{item.label}</span>
                       </div>
-                      {isActive && <ChevronRight className="w-3.5 h-3.5 text-blue-400" />}
+                      <div className="flex items-center gap-1.5">
+                        {(item as any).badge !== undefined && Number((item as any).badge) > 0 && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                            {(item as any).badge}
+                          </span>
+                        )}
+                        {isActive && <ChevronRight className="w-3.5 h-3.5 text-blue-400" />}
+                      </div>
                     </button>
                   );
                 })}

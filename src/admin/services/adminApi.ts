@@ -202,4 +202,66 @@ export const adminApi = {
       body: JSON.stringify(payload),
     });
   },
+
+  // Manual Deposit Requests
+  getDepositRequests: async (params: {
+    status?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<{ requests: any[]; total: number; pendingCount: number }> => {
+    const query = new URLSearchParams();
+    if (params.status) query.append('status', params.status);
+    if (params.search) query.append('search', params.search);
+    if (params.limit) query.append('limit', String(params.limit));
+    if (params.offset) query.append('offset', String(params.offset));
+    const qs = query.toString() ? `?${query.toString()}` : '';
+
+    const res: any = await request<any>(`/deposit-requests${qs}`);
+    if (res && res.requests && Array.isArray(res.requests)) {
+      return {
+        requests: res.requests,
+        total: res.total ?? res.requests.length,
+        pendingCount: res.pendingCount ?? 0,
+      };
+    }
+    return {
+      requests: Array.isArray(res) ? res : [],
+      total: Array.isArray(res) ? res.length : 0,
+      pendingCount: 0,
+    };
+  },
+
+  approveDepositRequest: async (id: string): Promise<any> => {
+    return request<any>(`/deposit-requests/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+
+  rejectDepositRequest: async (id: string, rejection_reason?: string): Promise<any> => {
+    return request<any>(`/deposit-requests/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ rejection_reason }),
+    });
+  },
+
+  // Payment Settings
+  getPaymentSettings: async (): Promise<any> => {
+    return request<any>('/payment-settings');
+  },
+
+  updatePaymentSettings: async (payload: {
+    bank_name: string;
+    account_name: string;
+    account_number: string;
+    ifsc_code: string;
+    upi_id: string;
+    qr_code_url?: string;
+  }): Promise<any> => {
+    return request<any>('/payment-settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
 };

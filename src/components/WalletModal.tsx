@@ -23,6 +23,9 @@ import {
   Lock,
   ChevronRight,
   AlertCircle,
+  Upload,
+  XCircle,
+  Eye,
 } from 'lucide-react';
 
 interface WalletModalProps {
@@ -44,7 +47,22 @@ export const WalletModal: React.FC<WalletModalProps> = ({
 
   const [activeTab, setActiveTab] = useState<'DEPOSIT' | 'WITHDRAW' | 'HISTORY'>(initialTab);
   const [depositAmount, setDepositAmount] = useState<string>('50000');
-  const [depositMethod, setDepositMethod] = useState<'UPI' | 'NETBANKING' | 'IMPS'>('UPI');
+  const [depositMethod, setDepositMethod] = useState<'UPI' | 'NETBANKING' | 'IMPS' | 'MANUAL'>('UPI');
+  const [manualSubMethod, setManualSubMethod] = useState<'BANK_TRANSFER' | 'QR_CODE'>('BANK_TRANSFER');
+  const [manualUtr, setManualUtr] = useState<string>('');
+  const [manualProof, setManualProof] = useState<string | null>(null);
+  const [manualProofFileName, setManualProofFileName] = useState<string>('');
+  const [paymentSettings, setPaymentSettings] = useState<{
+    bank_name: string;
+    account_name: string;
+    account_number: string;
+    ifsc_code: string;
+    upi_id: string;
+    qr_code_url: string;
+  } | null>(null);
+  const [myManualRequests, setMyManualRequests] = useState<any[]>([]);
+  const [manualViewTab, setManualViewTab] = useState<'FORM' | 'REQUESTS'>('FORM');
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showUpiQr, setShowUpiQr] = useState<boolean>(false);
   const [withdrawAmount, setWithdrawAmount] = useState<string>('');
   const [selectedBank, setSelectedBank] = useState<'HDFC' | 'ICICI' | 'SBI' | 'AXIS' | 'KOTAK'>('HDFC');
@@ -73,12 +91,28 @@ export const WalletModal: React.FC<WalletModalProps> = ({
     return [];
   });
 
+  const loadPaymentDetails = React.useCallback(async () => {
+    try {
+      const res = await authApi.getPaymentDetails();
+      if (res && res.success && res.data) {
+        setPaymentSettings(res.data);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const loadServerHistory = React.useCallback(async () => {
     try {
-      const [res, ledgerRes] = await Promise.all([
+      const [res, ledgerRes, manualRes] = await Promise.all([
         authApi.getFunds().catch(() => ({ transactions: [] })),
         authApi.getLedger().catch(() => ({ ledger: [] })),
+        authApi.getMyDepositRequests().catch(() => ({ data: [] })),
       ]);
+
+      if (manualRes && manualRes.data && Array.isArray(manualRes.data)) {
+        setMyManualRequests(manualRes.data);
+      }
 
       const seenIds = new Set<string>();
       const mapped: Array<{
@@ -158,6 +192,28 @@ export const WalletModal: React.FC<WalletModalProps> = ({
         }
       }
 
+      // 3. Process manual deposit requests
+      if (manualRes && manualRes.data && Array.isArray(manualRes.data)) {
+        for (const m of manualRes.data) {
+          const reqId = `MANUAL-${m.id}`;
+          if (seenIds.has(reqId) || (m.utr_number && seenIds.has(m.utr_number))) continue;
+          seenIds.add(reqId);
+          if (m.utr_number) seenIds.add(m.utr_number);
+
+          const rawStatus = String(m.status || '').toUpperCase();
+          const status = rawStatus === 'APPROVED' ? 'SUCCESS' : rawStatus === 'REJECTED' ? 'REJECTED' : 'PROCESSING';
+          mapped.push({
+            id: reqId,
+            type: 'DEPOSIT',
+            amount: Number(m.amount || 0),
+            method: `Manual (${m.payment_method === 'QR_CODE' ? 'QR Code' : 'Bank Transfer'}) - UTR: ${m.utr_number}`,
+            status,
+            time: m.created_at ? new Date(m.created_at).toLocaleDateString('en-GB') + ' ' + new Date(m.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : 'Today',
+            refId: m.utr_number,
+          });
+        }
+      }
+
       if (mapped.length > 0) {
         setHistory(mapped);
         localStorage.setItem('vtx_wallet_history', JSON.stringify(mapped));
@@ -171,8 +227,93 @@ export const WalletModal: React.FC<WalletModalProps> = ({
         setActiveTab(initialTab);
       }
       loadServerHistory();
+      loadPaymentDetails();
     }
-  }, [isOpen, initialTab, loadServerHistory]);
+  }, [isOpen, initialTab, loadServerHistory, loadPaymentDetails]);
+
+  const handleProofFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      showToast({
+        type: 'error',
+        title: 'Invalid File Format',
+        description: 'Only JPG, PNG, and WEBP screenshot images are accepted.',
+      });
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      showToast({
+        type: 'error',
+        title: 'File Too Large',
+        description: 'Screenshot size must not exceed 5MB.',
+      });
+      return;
+    }
+
+    setManualProofFileName(file.name);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setManualProof(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleManualDepositSubmit = async () => {
+    const amount = Number(depositAmount);
+    if (!amount || amount < 100) {
+      showToast({
+        type: 'error',
+        title: 'Invalid Amount',
+        description: 'Minimum manual deposit amount is ₹100.',
+      });
+      return;
+    }
+    const cleanUtr = manualUtr.trim();
+    if (!cleanUtr || cleanUtr.length < 6) {
+      showToast({
+        type: 'error',
+        title: 'Invalid UTR / Transaction ID',
+        description: 'Please enter a valid Transaction Reference or UTR Number (minimum 6 characters).',
+      });
+      return;
+    }
+
+    setProcessing(true);
+    try {
+      const res = await authApi.submitManualDeposit({
+        amount,
+        utr_number: cleanUtr,
+        payment_method: manualSubMethod,
+        proof_image: manualProof,
+      });
+
+      if (res.success) {
+        showToast({
+          type: 'success',
+          title: 'Manual Deposit Request Submitted',
+          description: `UTR ${cleanUtr} submitted for ₹${amount.toLocaleString('en-IN')}. Our accounts desk will verify and credit your margin.`,
+          duration: 5000,
+        });
+        setManualUtr('');
+        setManualProof(null);
+        setManualProofFileName('');
+        setManualViewTab('REQUESTS');
+        loadServerHistory();
+        loadPaymentDetails();
+      }
+    } catch (err: any) {
+      showToast({
+        type: 'error',
+        title: 'Request Failed',
+        description: err.message || 'Unable to submit manual deposit request.',
+      });
+    } finally {
+      setProcessing(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -650,7 +791,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                 <label className="text-xs font-bold text-slate-300 block">
                   Choose Payment Mode
                 </label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-2.5">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5">
                   {/* UPI */}
                   <button
                     type="button"
@@ -714,6 +855,29 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                     <div>
                       <div className="text-xs sm:text-sm font-black text-white">Virtual Account</div>
                       <span className="text-[10px] text-slate-400">Direct Bank Transfer</span>
+                    </div>
+                  </button>
+
+                  {/* Manual Deposit */}
+                  <button
+                    type="button"
+                    id="wallet-method-manual-btn"
+                    onClick={() => setDepositMethod('MANUAL')}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 relative ${
+                      depositMethod === 'MANUAL'
+                        ? 'border-amber-500 bg-gradient-to-br from-amber-950/50 to-[#14120C] text-amber-400 shadow-md ring-1 ring-amber-500/40'
+                        : 'border-[#1E2E44] bg-[#060B13] text-slate-400 hover:text-white hover:border-[#2D4566]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full">
+                      <ShieldCheck className="w-5 h-5 text-amber-400" />
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        ADMIN VERIF
+                      </span>
+                    </div>
+                    <div>
+                      <div className="text-xs sm:text-sm font-black text-white">Manual Deposit</div>
+                      <span className="text-[10px] text-amber-400/90 font-mono">Bank/QR with UTR</span>
                     </div>
                   </button>
                 </div>
@@ -826,7 +990,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                         className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer text-center ${
                           selectedBank === b
                             ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300 shadow-sm ring-1 ring-emerald-500/40'
-                            : 'border-[#1E2E44] bg-[#0B111C] text-slate-400 hover:text-white'
+                            : 'border-[#1E2E44] bg-[#060B13] text-slate-400 hover:text-white'
                         }`}
                       >
                         {b} Bank
@@ -888,31 +1052,398 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                 </div>
               )}
 
-              {/* Deposit Submit Button */}
-              <button
-                type="button"
-                id="wallet-deposit-submit-btn"
-                disabled={processing || numDepositAmt <= 0}
-                onClick={handleDeposit}
-                className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-slate-950 font-black rounded-2xl text-sm sm:text-base transition-all cursor-pointer shadow-xl shadow-emerald-950/50 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.99]"
-              >
-                {processing ? (
-                  <>
-                    <RefreshCw className="w-5 h-5 animate-spin" />
-                    <span>Processing Secure Gateway...</span>
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-5 h-5 fill-current" />
-                    <span>Pay & Credit ₹{numDepositAmt.toLocaleString('en-IN')} Instantly</span>
-                  </>
-                )}
-              </button>
+              {/* Manual Deposit Flow */}
+              {depositMethod === 'MANUAL' && (
+                <div className="space-y-4">
+                  {/* Sub-navigation: Form vs My Requests */}
+                  <div className="flex items-center justify-between p-1 bg-[#060B13] rounded-xl border border-[#162234]">
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        id="manual-tab-form-btn"
+                        onClick={() => setManualViewTab('FORM')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          manualViewTab === 'FORM'
+                            ? 'bg-amber-500 text-slate-950 font-black'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        1. Bank & QR Transfer
+                      </button>
+                      <button
+                        type="button"
+                        id="manual-tab-requests-btn"
+                        onClick={() => setManualViewTab('REQUESTS')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                          manualViewTab === 'REQUESTS'
+                            ? 'bg-amber-500 text-slate-950 font-black'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <span>2. My Requests</span>
+                        {myManualRequests.filter((r) => r.status === 'PENDING').length > 0 && (
+                          <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black">
+                            {myManualRequests.filter((r) => r.status === 'PENDING').length}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-mono pr-2 hidden sm:inline">
+                      Approval time: ~5-15 mins
+                    </span>
+                  </div>
 
-              <div className="flex items-center justify-center gap-2 text-[11px] text-slate-400 text-center">
-                <Lock className="w-3.5 h-3.5 text-slate-500" />
-                <span>256-bit SSL Bank-Grade Encryption • SEBI & RBI Regulated Gateway</span>
-              </div>
+                  {manualViewTab === 'FORM' && (
+                    <div className="space-y-4 animate-fadeIn">
+                      {/* Sub-method switch */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          id="manual-submethod-bank-btn"
+                          onClick={() => setManualSubMethod('BANK_TRANSFER')}
+                          className={`p-3 rounded-xl border text-center transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                            manualSubMethod === 'BANK_TRANSFER'
+                              ? 'border-amber-500 bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/30 font-bold'
+                              : 'border-[#1E2E44] bg-[#060B13] text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <Building2 className="w-4 h-4" />
+                          <span className="text-xs">Bank Transfer (NEFT/RTGS/IMPS)</span>
+                        </button>
+                        <button
+                          type="button"
+                          id="manual-submethod-qr-btn"
+                          onClick={() => setManualSubMethod('QR_CODE')}
+                          className={`p-3 rounded-xl border text-center transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                            manualSubMethod === 'QR_CODE'
+                              ? 'border-amber-500 bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/30 font-bold'
+                              : 'border-[#1E2E44] bg-[#060B13] text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <QrCode className="w-4 h-4" />
+                          <span className="text-xs">Official QR Code (UPI)</span>
+                        </button>
+                      </div>
+
+                      {/* Bank Details Display */}
+                      {manualSubMethod === 'BANK_TRANSFER' && (
+                        <div className="p-4 bg-[#060B13] border border-[#162234] rounded-2xl space-y-3">
+                          <div className="flex items-center justify-between pb-2 border-b border-[#141E2E]">
+                            <div className="flex items-center gap-2">
+                              <Building2 className="w-4 h-4 text-amber-400" />
+                              <span className="text-xs font-black text-white uppercase tracking-wider">
+                                Official Company Bank Account
+                              </span>
+                            </div>
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 font-bold">
+                              Verified Merchant
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono">
+                            <div className="p-2.5 rounded-xl bg-[#0B111C] border border-[#1E2E44] flex items-center justify-between">
+                              <div>
+                                <span className="text-[10px] text-slate-500 uppercase font-sans block">Bank Name</span>
+                                <span className="font-bold text-white text-xs">{paymentSettings?.bank_name || 'HDFC Bank Ltd'}</span>
+                              </div>
+                            </div>
+
+                            <div className="p-2.5 rounded-xl bg-[#0B111C] border border-[#1E2E44] flex items-center justify-between">
+                              <div>
+                                <span className="text-[10px] text-slate-500 uppercase font-sans block">Account Holder Name</span>
+                                <span className="font-bold text-white text-xs">{paymentSettings?.account_name || 'VERTEX TRADING CORP'}</span>
+                              </div>
+                            </div>
+
+                            <div className="p-2.5 rounded-xl bg-[#0B111C] border border-[#1E2E44] flex items-center justify-between">
+                              <div>
+                                <span className="text-[10px] text-slate-500 uppercase font-sans block">Account Number</span>
+                                <span className="font-bold text-amber-300 text-sm tracking-wider">{paymentSettings?.account_number || '50200088991122'}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleCopy(paymentSettings?.account_number || '50200088991122', 'manual_ac')}
+                                className="px-2 py-1 rounded-md bg-[#142032] hover:bg-[#1E2E44] text-slate-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                              >
+                                {copiedField === 'manual_ac' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                                <span>{copiedField === 'manual_ac' ? 'Copied' : 'Copy'}</span>
+                              </button>
+                            </div>
+
+                            <div className="p-2.5 rounded-xl bg-[#0B111C] border border-[#1E2E44] flex items-center justify-between">
+                              <div>
+                                <span className="text-[10px] text-slate-500 uppercase font-sans block">IFSC Code</span>
+                                <span className="font-bold text-white text-sm">{paymentSettings?.ifsc_code || 'HDFC0000123'}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleCopy(paymentSettings?.ifsc_code || 'HDFC0000123', 'manual_ifsc')}
+                                className="px-2 py-1 rounded-md bg-[#142032] hover:bg-[#1E2E44] text-slate-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                              >
+                                {copiedField === 'manual_ifsc' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                                <span>{copiedField === 'manual_ifsc' ? 'Copied' : 'Copy'}</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {paymentSettings?.upi_id && (
+                            <div className="p-2.5 rounded-xl bg-[#0B111C] border border-[#1E2E44] flex items-center justify-between text-xs font-mono">
+                              <div>
+                                <span className="text-[10px] text-slate-500 uppercase font-sans block">Direct UPI ID / VPA</span>
+                                <span className="font-bold text-emerald-400">{paymentSettings.upi_id}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleCopy(paymentSettings.upi_id, 'manual_upi')}
+                                className="px-2.5 py-1 rounded-md bg-[#142032] hover:bg-[#1E2E44] text-slate-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                              >
+                                {copiedField === 'manual_upi' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                                <span>{copiedField === 'manual_upi' ? 'Copied' : 'Copy'}</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* QR Code Display */}
+                      {manualSubMethod === 'QR_CODE' && (
+                        <div className="p-4 bg-[#060B13] border border-[#162234] rounded-2xl flex flex-col items-center justify-center space-y-3">
+                          <div className="w-48 h-48 bg-white p-2.5 rounded-2xl flex items-center justify-center shadow-2xl relative">
+                            {paymentSettings?.qr_code_url ? (
+                              <img
+                                src={paymentSettings.qr_code_url}
+                                alt="Admin Deposit QR Code"
+                                className="w-full h-full object-contain rounded-lg"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLElement).style.display = 'none';
+                                  const fallback = document.getElementById('manual-qr-fallback');
+                                  if (fallback) fallback.style.display = 'flex';
+                                }}
+                              />
+                            ) : null}
+                            <div
+                              id="manual-qr-fallback"
+                              style={{ display: paymentSettings?.qr_code_url ? 'none' : 'flex' }}
+                              className="w-full h-full flex flex-col items-center justify-center text-slate-900 text-center p-2"
+                            >
+                              <QrCode className="w-20 h-20 text-slate-900 mb-1" />
+                              <span className="text-[10px] font-mono font-black">{paymentSettings?.upi_id || 'vertex.clearing@hdfcbank'}</span>
+                            </div>
+                          </div>
+
+                          <div className="text-center space-y-1">
+                            <p className="text-xs text-slate-200 font-semibold">
+                              Scan using <strong className="text-amber-400">PhonePe, Google Pay, Paytm, or BHIM</strong>
+                            </p>
+                            {paymentSettings?.upi_id && (
+                              <div className="flex items-center justify-center gap-2 pt-1">
+                                <span className="font-mono text-xs text-emerald-400 font-bold">{paymentSettings.upi_id}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopy(paymentSettings.upi_id, 'manual_qr_upi')}
+                                  className="px-2 py-0.5 rounded bg-[#142032] hover:bg-[#1E2E44] text-slate-300 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                >
+                                  {copiedField === 'manual_qr_upi' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                                  <span>{copiedField === 'manual_qr_upi' ? 'Copied' : 'Copy UPI'}</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* User Input: UTR & Proof Upload */}
+                      <div className="p-4 bg-[#060B13] border border-[#162234] rounded-2xl space-y-3">
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-white flex items-center justify-between">
+                            <span>Transaction ID / 12-digit UTR Number <strong className="text-rose-400">*</strong></span>
+                            <span className="text-[10px] text-slate-400 font-normal">Found on bank/UPI receipt</span>
+                          </label>
+                          <input
+                            type="text"
+                            id="manual-utr-input"
+                            value={manualUtr}
+                            onChange={(e) => setManualUtr(e.target.value.toUpperCase())}
+                            placeholder="e.g. 331456789012 or IMPS2024110198"
+                            className="w-full bg-[#0B111C] border border-[#1E2E44] rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-mono text-white outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40 uppercase"
+                          />
+                        </div>
+
+                        {/* Screenshot / Payment Proof Upload */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-white flex items-center justify-between">
+                            <span>Payment Screenshot / Receipt <span className="text-slate-500 font-normal">(Optional, speeds verification)</span></span>
+                            <span className="text-[10px] text-slate-400 font-normal">JPG, PNG, WEBP (Max 5MB)</span>
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <label className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-[#0B111C] border border-dashed border-[#1E2E44] hover:border-amber-500/50 rounded-xl cursor-pointer text-xs text-slate-300 hover:text-white transition-all">
+                              <Upload className="w-4 h-4 text-amber-400" />
+                              <span className="truncate">{manualProofFileName ? manualProofFileName : 'Click to upload payment screenshot'}</span>
+                              <input
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp"
+                                onChange={handleProofFileUpload}
+                                className="hidden"
+                              />
+                            </label>
+                            {manualProof && (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewImage(manualProof)}
+                                  className="p-2.5 rounded-xl bg-[#142032] hover:bg-[#1E2E44] text-amber-400 border border-[#1E2E44] cursor-pointer"
+                                  title="Preview Screenshot"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setManualProof(null);
+                                    setManualProofFileName('');
+                                  }}
+                                  className="p-2.5 rounded-xl bg-[#142032] hover:bg-rose-500/20 text-rose-400 border border-[#1E2E44] cursor-pointer"
+                                  title="Remove File"
+                                >
+                                  <XCircle className="w-4 h-4" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-2 text-[11px] text-amber-300 leading-relaxed">
+                          <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                          <span>
+                            <strong>Notice:</strong> Please enter the authentic UTR generated from your banking app. Once submitted, our accounts desk validates the receipt and credits your wallet atomically.
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Manual Submit Button */}
+                      <button
+                        type="button"
+                        id="manual-deposit-submit-btn"
+                        disabled={processing || numDepositAmt <= 0 || !manualUtr.trim()}
+                        onClick={handleManualDepositSubmit}
+                        className="w-full py-4 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-black rounded-2xl text-sm sm:text-base transition-all cursor-pointer shadow-xl shadow-amber-950/50 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.99]"
+                      >
+                        {processing ? (
+                          <>
+                            <RefreshCw className="w-5 h-5 animate-spin" />
+                            <span>Submitting Deposit Request...</span>
+                          </>
+                        ) : (
+                          <>
+                            <ShieldCheck className="w-5 h-5 text-slate-950" />
+                            <span>Submit Request for ₹{numDepositAmt.toLocaleString('en-IN')} (UTR: {manualUtr.trim() || 'Required'})</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Tab 2: Track Existing Manual Requests */}
+                  {manualViewTab === 'REQUESTS' && (
+                    <div className="space-y-2 max-h-72 overflow-y-auto custom-scrollbar animate-fadeIn">
+                      {myManualRequests.length === 0 ? (
+                        <div className="p-8 text-center bg-[#060B13] border border-[#162234] rounded-2xl space-y-2">
+                          <Clock className="w-8 h-8 text-slate-600 mx-auto" />
+                          <p className="text-xs text-slate-400 font-bold">No Manual Deposit Requests Found</p>
+                          <p className="text-[11px] text-slate-500">Transfer funds to our bank account or scan the QR code to submit a request.</p>
+                          <button
+                            type="button"
+                            onClick={() => setManualViewTab('FORM')}
+                            className="mt-2 px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-bold text-xs"
+                          >
+                            Submit New Request
+                          </button>
+                        </div>
+                      ) : (
+                        myManualRequests.map((req) => (
+                          <div
+                            key={req.id}
+                            className="p-3 bg-[#060B13] border border-[#162234] rounded-xl flex items-center justify-between text-xs gap-3"
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono font-black text-white text-sm">
+                                  ₹{Number(req.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                </span>
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                                    req.status === 'APPROVED'
+                                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                      : req.status === 'REJECTED'
+                                      ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                                      : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                  }`}
+                                >
+                                  {req.status === 'APPROVED' ? 'APPROVED & CREDITED' : req.status === 'REJECTED' ? 'REJECTED' : 'PENDING REVIEW'}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-slate-400 font-mono">
+                                UTR: <strong className="text-slate-200">{req.utr_number}</strong> • {req.payment_method === 'QR_CODE' ? 'QR Code' : 'Bank Transfer'}
+                              </div>
+                              {req.rejection_reason && (
+                                <div className="text-[10px] text-rose-400 font-medium">
+                                  Reason: {req.rejection_reason}
+                                </div>
+                              )}
+                              <div className="text-[9px] text-slate-500 font-mono">
+                                {new Date(req.created_at).toLocaleString('en-IN')}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5">
+                              {req.proof_image_url && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewImage(req.proof_image_url)}
+                                  className="px-2 py-1 rounded bg-[#142032] hover:bg-[#1E2E44] text-amber-400 text-[10px] font-bold flex items-center gap-1"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  <span>Receipt</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Deposit Submit Button for Instant Gateways */}
+              {depositMethod !== 'MANUAL' && (
+                <>
+                  <button
+                    type="button"
+                    id="wallet-deposit-submit-btn"
+                    disabled={processing || numDepositAmt <= 0}
+                    onClick={handleDeposit}
+                    className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-slate-950 font-black rounded-2xl text-sm sm:text-base transition-all cursor-pointer shadow-xl shadow-emerald-950/50 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.99]"
+                  >
+                    {processing ? (
+                      <>
+                        <RefreshCw className="w-5 h-5 animate-spin" />
+                        <span>Processing Secure Gateway...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-5 h-5 fill-current" />
+                        <span>Pay & Credit ₹{numDepositAmt.toLocaleString('en-IN')} Instantly</span>
+                      </>
+                    )}
+                  </button>
+
+                  <div className="flex items-center justify-center gap-2 text-[11px] text-slate-400 text-center">
+                    <Lock className="w-3.5 h-3.5 text-slate-500" />
+                    <span>256-bit SSL Bank-Grade Encryption • SEBI & RBI Regulated Gateway</span>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -1146,6 +1677,32 @@ export const WalletModal: React.FC<WalletModalProps> = ({
             </div>
           )}
         </div>
+
+        {/* Lightbox / Proof Image Preview Modal */}
+        {previewImage && (
+          <div
+            className="fixed inset-0 z-60 bg-black/90 flex items-center justify-center p-4 animate-fadeIn"
+            onClick={() => setPreviewImage(null)}
+          >
+            <div
+              className="relative max-w-xl max-h-[85vh] bg-[#0B111C] border border-[#1E2E44] rounded-2xl p-2 overflow-hidden shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => setPreviewImage(null)}
+                className="absolute top-3 right-3 p-1.5 rounded-lg bg-black/60 text-white hover:bg-black/90 z-10 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <img
+                src={previewImage}
+                alt="Payment Receipt Preview"
+                className="w-full h-auto max-h-[75vh] object-contain rounded-xl"
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

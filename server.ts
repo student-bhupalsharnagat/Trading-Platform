@@ -12,6 +12,7 @@ import tradingRoutes from './src/server/routes/tradingRoutes.ts';
 import adminRoutes from './src/server/routes/admin/index.ts';
 import tenantRoutes from './src/server/routes/tenantRoutes.ts';
 import internalRoutes from './src/server/routes/internal/index.ts';
+import depositRoutes from './src/server/routes/depositRoutes.ts';
 import healthRoutes, { setServerShuttingDown } from './src/server/routes/healthRoutes.ts';
 import { errorHandler } from './src/server/middleware/errorMiddleware.ts';
 import { hierarchyService } from './src/server/services/hierarchyService.ts';
@@ -405,13 +406,13 @@ async function startServer() {
   // Basic security & parsing middlewares with rawBody retention for HMAC verification
   app.use(
     express.json({
-      limit: '1mb',
+      limit: '10mb',
       verify: (req: any, _res, buf) => {
         req.rawBody = buf.toString('utf8');
       },
     })
   );
-  app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
   app.use(cookieParser());
 
   // Production Security Headers & Parameter Sanitization & CORS
@@ -437,6 +438,7 @@ async function startServer() {
   app.use('/api/tenant', tenantRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/trading', tradingRoutes);
+  app.use('/api/deposit', depositRoutes);
   app.use('/api/admin', adminRoutes);
 
   // Catch-all 404 for unmatched /api routes so they return JSON and NEVER fall through to HTML

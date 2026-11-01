@@ -11,6 +11,8 @@ import fundRoutes from './fundRoutes.ts';
 import ledgerRoutes from './ledgerRoutes.ts';
 import kycRoutes from './kycRoutes.ts';
 import whiteLabelRoutes from './whiteLabelRoutes.ts';
+import depositAdminRoutes from './depositAdminRoutes.ts';
+import paymentSettingsAdminRoutes from './paymentSettingsAdminRoutes.ts';
 
 import { requireAuth } from '../../middleware/authMiddleware.ts';
 import { requireAdmin } from '../../middleware/requireRole.ts';
@@ -33,5 +35,7 @@ router.use('/funds', fundRoutes);
 router.use('/ledger', ledgerRoutes);
 router.use('/kyc', kycRoutes);
 router.use('/white-label', whiteLabelRoutes);
+router.use('/deposit-requests', depositAdminRoutes);
+router.use('/payment-settings', paymentSettingsAdminRoutes);
 
 export default router;

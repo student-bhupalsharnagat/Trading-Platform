@@ -283,4 +283,35 @@ export const authApi = {
     const query = userId ? `?userId=${encodeURIComponent(userId)}` : '';
     return fetchJson(`/api/trading/ledger${query}`, { method: 'GET' });
   },
+
+  // Manual Deposit Endpoints
+  async getPaymentDetails(): Promise<{
+    success: boolean;
+    data: {
+      bank_name: string;
+      account_name: string;
+      account_number: string;
+      ifsc_code: string;
+      upi_id: string;
+      qr_code_url: string;
+    };
+  }> {
+    return fetchJson('/api/deposit/payment-details', { method: 'GET' });
+  },
+
+  async submitManualDeposit(body: {
+    amount: number;
+    utr_number: string;
+    payment_method: string;
+    proof_image?: string | null;
+  }): Promise<{ success: boolean; message: string; data: any }> {
+    return fetchJson('/api/deposit/manual-request', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
+  async getMyDepositRequests(): Promise<{ success: boolean; data: any[] }> {
+    return fetchJson('/api/deposit/my-requests', { method: 'GET' });
+  },
 };
