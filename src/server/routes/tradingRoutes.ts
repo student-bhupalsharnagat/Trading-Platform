@@ -153,10 +153,11 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
   }
 
   try {
-    const isDemo = userId === 'vtx_demo' || userId === 'demo-trader' || String(userId).toLowerCase().includes('demo');
-    const pgWallet = await postgresWalletRepository.getOrCreateWallet(tenantId, userId, isDemo ? 1000000 : 0);
-    const pgPositions = await postgresPositionRepository.getPositions(tenantId, userId);
-    const pgOrders = await postgresOrderRepository.getOrders(tenantId, userId);
+    const resolvedUserId = (await authoritativeTradingDataService.resolveTradingUserId(tenantId, userId)) || userId;
+    const isDemo = resolvedUserId === 'vtx_demo' || resolvedUserId === 'demo-trader' || String(resolvedUserId).toLowerCase().includes('demo');
+    const pgWallet = await postgresWalletRepository.getOrCreateWallet(tenantId, resolvedUserId, isDemo ? 1000000 : 0);
+    const pgPositions = await postgresPositionRepository.getPositions(tenantId, resolvedUserId);
+    const pgOrders = await postgresOrderRepository.getOrders(tenantId, resolvedUserId);
 
     const positions = (pgPositions || []).map((p) => {
       const inst = findInstrument(p.instrument_id);
@@ -242,13 +243,30 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
     const totalUnrealizedPnL = updatedPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
     const realizedPnL = pgWallet.realized_pnl || 0;
 
+    let deposited = (pgWallet as any).deposited || 0;
+    let withdrawn = (pgWallet as any).withdrawn || 0;
+    try {
+      const fundTx = await postgresFundTransactionRepository.getTransactions(tenantId, resolvedUserId);
+      for (const tx of fundTx) {
+        if (tx.status === 'APPROVED' || tx.status === 'SUCCESS' || tx.status === 'COMPLETED') {
+          if (tx.type === 'DEPOSIT') deposited += tx.amount;
+          else if (tx.type === 'WITHDRAWAL') withdrawn += tx.amount;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    if (deposited === 0 && pgWallet.available_balance > 0) {
+      deposited = pgWallet.available_balance + (pgWallet.used_margin || 0);
+    }
+
     const wallet = {
       availableBalance: pgWallet.available_balance,
       usedMargin: pgWallet.used_margin,
       totalPnL: Number((realizedPnL + totalUnrealizedPnL).toFixed(2)),
       todayPnL: Number(realizedPnL.toFixed(2)),
-      deposited: (pgWallet as any).deposited || 0,
-      withdrawn: (pgWallet as any).withdrawn || 0,
+      deposited: Number(deposited.toFixed(2)),
+      withdrawn: Number(withdrawn.toFixed(2)),
     };
 
     return res.json({

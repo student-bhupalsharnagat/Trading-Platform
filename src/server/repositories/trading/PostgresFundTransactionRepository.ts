@@ -1,6 +1,8 @@
 import { pgDb, DbClient } from '../../db/postgres.ts';
 import { ITradingFundTransactionRepository, TradingFundTransaction } from './ITradingFundTransactionRepository.ts';
 
+import { getSearchTenants } from '../../utils/tenantHelper.ts';
+
 export class PostgresFundTransactionRepository implements ITradingFundTransactionRepository {
   private mapRow(row: any): TradingFundTransaction {
     return {
@@ -59,8 +61,9 @@ export class PostgresFundTransactionRepository implements ITradingFundTransactio
   }
 
   public async findById(tenantId: string, id: string, client?: DbClient): Promise<TradingFundTransaction | null> {
-    const sql = `SELECT * FROM trading_fund_transactions WHERE tenant_id = $1 AND id = $2 LIMIT 1;`;
-    const res = client ? await client.query(sql, [tenantId, id]) : await pgDb.query(sql, [tenantId, id]);
+    const searchTenants = getSearchTenants(tenantId);
+    const sql = `SELECT * FROM trading_fund_transactions WHERE tenant_id = ANY($1) AND id = $2 LIMIT 1;`;
+    const res = client ? await client.query(sql, [searchTenants, id]) : await pgDb.query(sql, [searchTenants, id]);
     if (res.rows.length === 0) return null;
     return this.mapRow(res.rows[0]);
   }
@@ -72,12 +75,13 @@ export class PostgresFundTransactionRepository implements ITradingFundTransactio
     status?: string,
     client?: DbClient
   ): Promise<TradingFundTransaction[]> {
-    let sql = `SELECT * FROM trading_fund_transactions WHERE tenant_id = $1`;
-    const params: any[] = [tenantId];
+    const searchTenants = getSearchTenants(tenantId);
+    let sql = `SELECT * FROM trading_fund_transactions WHERE tenant_id = ANY($1)`;
+    const params: any[] = [searchTenants];
 
     if (userId) {
       params.push(userId);
-      sql += ` AND user_id = $${params.length}`;
+      sql += ` AND (user_id = $${params.length} OR LOWER(user_id) = LOWER($${params.length}))`;
     }
     if (type) {
       params.push(type);
@@ -92,6 +96,14 @@ export class PostgresFundTransactionRepository implements ITradingFundTransactio
 
     const res = client ? await client.query(sql, params) : await pgDb.query(sql, params);
     return res.rows.map((r) => this.mapRow(r));
+  }
+
+  public async getTransactions(tenantId: string, userId?: string): Promise<any[]> {
+    const records = await this.getByTenant(tenantId, userId);
+    return records.map((r) => ({
+      ...r,
+      type: r.transaction_type,
+    }));
   }
 
   public async updateStatus(

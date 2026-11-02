@@ -1,5 +1,6 @@
 import { pgDb, DbClient } from '../../db/postgres.ts';
 import { ITradingPositionRepository, TradingPosition } from './ITradingPositionRepository.ts';
+import { getSearchTenants } from '../../utils/tenantHelper.ts';
 
 export class PostgresPositionRepository implements ITradingPositionRepository {
   private mapRow(row: any): TradingPosition {
@@ -18,18 +19,29 @@ export class PostgresPositionRepository implements ITradingPositionRepository {
   }
 
   public async getPositions(tenantId: string, userId?: string, client?: DbClient): Promise<TradingPosition[]> {
-    let sql = `SELECT * FROM trading_positions WHERE tenant_id = $1`;
-    const params: any[] = [tenantId];
+    const searchTenants = getSearchTenants(tenantId);
+    let sql = `SELECT * FROM trading_positions WHERE tenant_id = ANY($1)`;
+    const params: any[] = [searchTenants];
 
     if (userId) {
       params.push(userId);
-      sql += ` AND user_id = $${params.length}`;
+      sql += ` AND (user_id = $${params.length} OR LOWER(user_id) = LOWER($${params.length}))`;
     }
 
-    sql += ` ORDER BY updated_at DESC;`;
+    params.push(tenantId);
+    sql += ` ORDER BY (CASE WHEN tenant_id = $${params.length} THEN 0 ELSE 1 END), updated_at DESC;`;
 
     const res = client ? await client.query(sql, params) : await pgDb.query(sql, params);
-    return res.rows.map((r) => this.mapRow(r));
+    const seen = new Set<string>();
+    const uniquePositions: TradingPosition[] = [];
+    for (const r of res.rows) {
+      const key = `${String(r.user_id).toLowerCase()}_${String(r.instrument_id).toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniquePositions.push(this.mapRow(r));
+      }
+    }
+    return uniquePositions;
   }
 
   public async findPosition(
@@ -38,10 +50,18 @@ export class PostgresPositionRepository implements ITradingPositionRepository {
     instrumentId: string,
     client?: DbClient
   ): Promise<TradingPosition | null> {
-    const sql = `SELECT * FROM trading_positions WHERE tenant_id = $1 AND user_id = $2 AND instrument_id = $3 LIMIT 1;`;
+    const searchTenants = getSearchTenants(tenantId);
+    const sql = `
+      SELECT * FROM trading_positions 
+      WHERE tenant_id = ANY($1) 
+        AND (user_id = $2 OR LOWER(user_id) = LOWER($2)) 
+        AND (instrument_id = $3 OR LOWER(instrument_id) = LOWER($3))
+      ORDER BY (CASE WHEN tenant_id = $4 THEN 0 ELSE 1 END), updated_at DESC
+      LIMIT 1;
+    `;
     const res = client
-      ? await client.query(sql, [tenantId, userId, instrumentId])
-      : await pgDb.query(sql, [tenantId, userId, instrumentId]);
+      ? await client.query(sql, [searchTenants, userId, instrumentId, tenantId])
+      : await pgDb.query(sql, [searchTenants, userId, instrumentId, tenantId]);
     if (res.rows.length === 0) return null;
     return this.mapRow(res.rows[0]);
   }
@@ -52,8 +72,11 @@ export class PostgresPositionRepository implements ITradingPositionRepository {
     instrumentId: string,
     client: DbClient
   ): Promise<TradingPosition | null> {
-    const sql = `SELECT * FROM trading_positions WHERE tenant_id = $1 AND user_id = $2 AND instrument_id = $3 FOR UPDATE;`;
-    const res = await client.query(sql, [tenantId, userId, instrumentId]);
+    const existing = await this.findPosition(tenantId, userId, instrumentId, client);
+    if (!existing) return null;
+
+    const sql = `SELECT * FROM trading_positions WHERE tenant_id = $1 AND id = $2 FOR UPDATE;`;
+    const res = await client.query(sql, [existing.tenant_id, existing.id]);
     if (res.rows.length === 0) return null;
     return this.mapRow(res.rows[0]);
   }
@@ -97,9 +120,10 @@ export class PostgresPositionRepository implements ITradingPositionRepository {
   }
 
   public async deletePosition(tenantId: string, id: string, client?: DbClient): Promise<boolean> {
-    const sql = `DELETE FROM trading_positions WHERE tenant_id = $1 AND id = $2;`;
-    const res = client ? await client.query(sql, [tenantId, id]) : await pgDb.query(sql, [tenantId, id]);
-    return res.rowCount > 0;
+    const searchTenants = getSearchTenants(tenantId);
+    const sql = `DELETE FROM trading_positions WHERE tenant_id = ANY($1) AND id = $2;`;
+    const res = client ? await client.query(sql, [searchTenants, id]) : await pgDb.query(sql, [searchTenants, id]);
+    return (res.rowCount || 0) > 0;
   }
 }
 

@@ -1,5 +1,6 @@
 import { pgDb, DbClient } from '../../db/postgres.ts';
 import { ITradingWalletRepository, TradingWallet } from './ITradingWalletRepository.ts';
+import { getSearchTenants } from '../../utils/tenantHelper.ts';
 
 export class PostgresWalletRepository implements ITradingWalletRepository {
   private mapRow(row: any): TradingWallet {
@@ -16,8 +17,16 @@ export class PostgresWalletRepository implements ITradingWalletRepository {
   }
 
   public async getWallet(tenantId: string, userId: string, client?: DbClient): Promise<TradingWallet | null> {
-    const sql = `SELECT * FROM trading_wallets WHERE tenant_id = $1 AND user_id = $2 LIMIT 1;`;
-    const res = client ? await client.query(sql, [tenantId, userId]) : await pgDb.query(sql, [tenantId, userId]);
+    const searchTenants = getSearchTenants(tenantId);
+    const sql = `
+      SELECT * FROM trading_wallets 
+      WHERE tenant_id = ANY($1) AND (user_id = $2 OR LOWER(user_id) = LOWER($2))
+      ORDER BY (CASE WHEN tenant_id = $3 THEN 0 ELSE 1 END), updated_at DESC
+      LIMIT 1;
+    `;
+    const res = client 
+      ? await client.query(sql, [searchTenants, userId, tenantId]) 
+      : await pgDb.query(sql, [searchTenants, userId, tenantId]);
     if (res.rows.length === 0) return null;
     return this.mapRow(res.rows[0]);
   }
@@ -51,15 +60,19 @@ export class PostgresWalletRepository implements ITradingWalletRepository {
   }
 
   public async lockWalletForUpdate(tenantId: string, userId: string, client: DbClient): Promise<TradingWallet> {
-    const sql = `SELECT * FROM trading_wallets WHERE tenant_id = $1 AND user_id = $2 FOR UPDATE;`;
-    let res = await client.query(sql, [tenantId, userId]);
+    const existing = await this.getWallet(tenantId, userId, client);
+    const resolvedTenant = existing?.tenant_id || tenantId;
+    const resolvedUserId = existing?.user_id || userId;
 
-    const isDemo = userId === 'vtx_demo' || userId === 'demo-trader' || String(userId).toLowerCase().includes('demo');
+    const sql = `SELECT * FROM trading_wallets WHERE tenant_id = $1 AND user_id = $2 FOR UPDATE;`;
+    let res = await client.query(sql, [resolvedTenant, resolvedUserId]);
+
+    const isDemo = resolvedUserId === 'vtx_demo' || resolvedUserId === 'demo-trader' || String(resolvedUserId).toLowerCase().includes('demo');
 
     if (res.rows.length === 0) {
       // Create wallet if it didn't exist yet, then lock it
-      await this.getOrCreateWallet(tenantId, userId, isDemo ? 1000000 : 0, client);
-      res = await client.query(sql, [tenantId, userId]);
+      await this.getOrCreateWallet(resolvedTenant, resolvedUserId, isDemo ? 1000000 : 0, client);
+      res = await client.query(sql, [resolvedTenant, resolvedUserId]);
       return this.mapRow(res.rows[0]);
     }
 
@@ -67,9 +80,9 @@ export class PostgresWalletRepository implements ITradingWalletRepository {
     if (isDemo && Number(row.available_balance || 0) === 0 && Number(row.used_margin || 0) === 0) {
       await client.query(
         `UPDATE trading_wallets SET available_balance = 1000000, updated_at = NOW() WHERE tenant_id = $1 AND user_id = $2;`,
-        [tenantId, userId]
+        [resolvedTenant, resolvedUserId]
       );
-      res = await client.query(sql, [tenantId, userId]);
+      res = await client.query(sql, [resolvedTenant, resolvedUserId]);
       return this.mapRow(res.rows[0]);
     }
 
@@ -82,8 +95,12 @@ export class PostgresWalletRepository implements ITradingWalletRepository {
     updates: Partial<TradingWallet>,
     client?: DbClient
   ): Promise<TradingWallet> {
+    const existing = await this.getWallet(tenantId, userId, client);
+    const targetTenant = existing?.tenant_id || tenantId;
+    const targetUser = existing?.user_id || userId;
+
     const setClauses: string[] = ['updated_at = NOW()'];
-    const params: any[] = [tenantId, userId];
+    const params: any[] = [targetTenant, targetUser];
 
     if (updates.available_balance !== undefined) {
       params.push(updates.available_balance);
@@ -112,7 +129,7 @@ export class PostgresWalletRepository implements ITradingWalletRepository {
     const res = client ? await client.query(sql, params) : await pgDb.query(sql, params);
     if (res.rows.length === 0) {
       // If no row was updated, create it with updates
-      return this.getOrCreateWallet(tenantId, userId, updates.available_balance ?? 1000000, client);
+      return this.getOrCreateWallet(targetTenant, targetUser, updates.available_balance ?? 1000000, client);
     }
     return this.mapRow(res.rows[0]);
   }

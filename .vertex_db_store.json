@@ -19,9 +19,9 @@
       "phone_verified_at": "2026-09-16T07:46:37.415Z",
       "status": "active",
       "created_at": "2026-09-16T07:46:37.415Z",
-      "updated_at": "2026-11-01T17:48:35.769Z",
+      "updated_at": "2026-11-02T15:37:34.325Z",
       "demo_balance": 1000000,
-      "last_login_at": "2026-11-01T17:48:35.769Z",
+      "last_login_at": "2026-11-02T15:37:34.325Z",
       "failed_login_attempts": 0,
       "last_login_ip": "127.0.0.1"
     },
@@ -291,7 +291,8 @@
       "failed_login_attempts": 0,
       "created_at": "2026-10-28T18:56:15.515Z",
       "updated_at": "2026-10-28T18:56:15.515Z",
-      "demo_balance": 0
+      "demo_balance": 0,
+      "email": "user_alpha_1793213775515@client.com"
     },
     {
       "id": "demo-user-uuid-0000-000000000001",
@@ -314,7 +315,8 @@
       "demo_balance": 1000000,
       "failed_login_attempts": 0,
       "last_login_at": "2026-10-28T19:21:21.330Z",
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_trader_vu1@client.com"
     },
     {
       "id": "demo-4e7e1c7c-c71c-4684-85a8-8d9d8f832867",
@@ -337,7 +339,8 @@
       "demo_balance": 1000000,
       "failed_login_attempts": 0,
       "last_login_at": "2026-10-28T19:26:07.769Z",
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu1@client.com"
     },
     {
       "id": "demo-8bc762ab-db1b-431b-ba7f-6408682a48b9",
@@ -360,7 +363,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:08.232Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu6@client.com"
     },
     {
       "id": "demo-fbc63d3a-7736-430b-91ad-b95d0f5f1779",
@@ -383,7 +387,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:10.927Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu5@client.com"
     },
     {
       "id": "demo-ff7480ee-46b2-4dee-96fe-d6a6c7588b0f",
@@ -406,7 +411,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:05.895Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu3@client.com"
     },
     {
       "id": "demo-069a6762-31bf-45e7-8eae-31a06a977b14",
@@ -429,7 +435,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:06.861Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu2@client.com"
     },
     {
       "id": "demo-f11ceaec-5c29-4a58-af1f-68c059f7c7dd",
@@ -452,7 +459,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:07.533Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu7@client.com"
     },
     {
       "id": "demo-eb8d79ca-57f2-4d1e-9779-c54fdac131d4",
@@ -475,7 +483,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:07.807Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu11@client.com"
     },
     {
       "id": "demo-64124c41-4112-4219-bd5c-6aa0830c022b",
@@ -498,7 +507,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:05.258Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu8@client.com"
     },
     {
       "id": "demo-57760870-cb15-46ec-836a-9677a7ef6241",
@@ -521,7 +531,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:05.756Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu12@client.com"
     },
     {
       "id": "demo-f5aea159-e25a-484e-95dc-e3d362f1b204",
@@ -544,7 +555,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:07.051Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu14@client.com"
     },
     {
       "id": "demo-731795be-e855-4683-ba37-2c4207b8935e",
@@ -567,7 +579,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:07.333Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu4@client.com"
     },
     {
       "id": "demo-d1bb7be1-9c41-4af8-9ad0-96fe82733d43",
@@ -590,7 +603,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:07.751Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu10@client.com"
     },
     {
       "id": "demo-e55af25c-3c9b-40fc-ba6a-c4b06bbad72b",
@@ -613,7 +627,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:08.369Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu9@client.com"
     },
     {
       "id": "demo-a9c517ca-b589-4a58-b945-2fab40cf6ab3",
@@ -636,7 +651,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:08.328Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu17@client.com"
     },
     {
       "id": "demo-e6715837-b24e-4d72-bfe4-801fded04428",
@@ -659,7 +675,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:05.786Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu21@client.com"
     },
     {
       "id": "demo-cdd2f919-ae84-4a1c-a54b-240e7ebd9e93",
@@ -682,7 +699,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:06.907Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu20@client.com"
     },
     {
       "id": "demo-b75b00d9-a88d-42e3-a1a1-ac3e20a5cfd1",
@@ -705,7 +723,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:06.869Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu16@client.com"
     },
     {
       "id": "demo-77d4b240-0213-48e9-95e9-2d2cc113e74e",
@@ -728,7 +747,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:07.592Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu23@client.com"
     },
     {
       "id": "demo-c84b9b55-5b6b-47ae-b302-f9949056d1fe",
@@ -751,7 +771,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:08.265Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu19@client.com"
     },
     {
       "id": "demo-2fe197b9-5a85-4672-b3e5-feb44f6894fe",
@@ -774,7 +795,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:07.859Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu15@client.com"
     },
     {
       "id": "demo-509c7aee-b211-48e1-b250-5a0f77927c89",
@@ -797,7 +819,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:07.968Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu22@client.com"
     },
     {
       "id": "demo-2b7731dc-54c5-410f-bc09-515567bc9c6b",
@@ -820,7 +843,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:05.793Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu13@client.com"
     },
     {
       "id": "demo-a4baa444-5085-4c5d-b4a0-bfc5f725bb0d",
@@ -843,7 +867,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:05.765Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu26@client.com"
     },
     {
       "id": "demo-c964b360-ff99-4881-ae0a-9d49174bbfa9",
@@ -866,7 +891,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:06.129Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu25@client.com"
     },
     {
       "id": "demo-e9c63439-048b-4492-b1b0-003f4451d621",
@@ -889,7 +915,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:07.123Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu24@client.com"
     },
     {
       "id": "demo-8dd0c2cf-0715-4c88-a3e1-1a205d365bb8",
@@ -912,7 +939,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.343Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu18@client.com"
     },
     {
       "id": "demo-731efd64-35ce-405f-8f13-4310e557e685",
@@ -935,7 +963,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.263Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu29@client.com"
     },
     {
       "id": "demo-8c2f3e90-0257-4b4b-b2c0-3f7c0c47eaaa",
@@ -958,7 +987,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:03.228Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu27@client.com"
     },
     {
       "id": "demo-6c792877-4f9f-46c9-b669-33cf17f33386",
@@ -981,7 +1011,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:05.772Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu28@client.com"
     },
     {
       "id": "demo-b8fb0392-c6f1-4b60-bf86-2e10b11f5296",
@@ -1004,7 +1035,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:05.887Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu32@client.com"
     },
     {
       "id": "demo-845c1271-e2ce-429d-b807-9244baf0ea3c",
@@ -1027,7 +1059,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:05.831Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu34@client.com"
     },
     {
       "id": "demo-b190b79e-ca94-409a-a8a7-7fede3581476",
@@ -1050,7 +1083,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:05.877Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu30@client.com"
     },
     {
       "id": "demo-9d1366b7-572d-4aa3-927e-af43854c1174",
@@ -1073,7 +1107,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.140Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu33@client.com"
     },
     {
       "id": "demo-1cb0ffb6-b600-4421-a887-4d03418091a8",
@@ -1096,7 +1131,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.195Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu35@client.com"
     },
     {
       "id": "demo-8f0e8800-da37-4271-b494-6a50c3e3f3d2",
@@ -1119,7 +1155,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.783Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu36@client.com"
     },
     {
       "id": "demo-4a03ae59-9474-4317-bd83-54a72b8ee470",
@@ -1142,7 +1179,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.736Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu37@client.com"
     },
     {
       "id": "demo-86b46c83-d3e2-4b68-8084-e9f9f10a1f61",
@@ -1165,7 +1203,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:05.747Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu31@client.com"
     },
     {
       "id": "demo-c18a5a67-0180-49b3-ab5c-e2202ec1a120",
@@ -1188,7 +1227,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:05.619Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu38@client.com"
     },
     {
       "id": "demo-4e892160-213f-4ba2-8c33-4092d6a3f06c",
@@ -1211,7 +1251,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:01.592Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu39@client.com"
     },
     {
       "id": "demo-c352c1c9-9b7e-469c-a97e-031ec290ecf7",
@@ -1234,7 +1275,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:01.362Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu45@client.com"
     },
     {
       "id": "demo-44c56b4b-ec10-4e74-8b37-a95f8ba89adc",
@@ -1257,7 +1299,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.165Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu47@client.com"
     },
     {
       "id": "demo-d8748ac4-7c30-4430-aac8-e5e6366a3b7f",
@@ -1280,7 +1323,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.233Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu43@client.com"
     },
     {
       "id": "demo-398984ab-be4a-4d71-b591-a39918b5c2f8",
@@ -1303,7 +1347,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.838Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu46@client.com"
     },
     {
       "id": "demo-1b9182b4-2aa0-41f2-b028-9fb7003010ce",
@@ -1326,7 +1371,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.826Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu42@client.com"
     },
     {
       "id": "demo-e1a19af8-1602-4500-ba8a-d58fa2326621",
@@ -1349,7 +1395,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:59.398Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu40@client.com"
     },
     {
       "id": "demo-c47e3e33-b3e0-4dee-87f1-05e929d4b5ad",
@@ -1372,7 +1419,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:59.407Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu44@client.com"
     },
     {
       "id": "demo-4fc54e5e-a98d-402d-b0c4-0cee74e8b5c0",
@@ -1395,7 +1443,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:00.239Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu41@client.com"
     },
     {
       "id": "demo-25a8ff72-0baf-4f33-80e7-5baa137fce80",
@@ -1418,7 +1467,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.129Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu48@client.com"
     },
     {
       "id": "demo-0561a0cc-fca9-44be-ab83-1c8b62d4e73a",
@@ -1441,7 +1491,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.487Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu49@client.com"
     },
     {
       "id": "demo-6f42205b-0a72-4c10-b28d-ce0e0114d39d",
@@ -1464,7 +1515,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.271Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu50@client.com"
     },
     {
       "id": "demo-1c29cf07-4aef-444b-a73a-1b65e44e3a88",
@@ -1487,7 +1539,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.188Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu53@client.com"
     },
     {
       "id": "demo-178ba9ca-ceed-4a72-9cfd-2885b93959fe",
@@ -1510,7 +1563,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.225Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu52@client.com"
     },
     {
       "id": "demo-d006daba-6e0a-47e4-9af5-e58bffe6b01f",
@@ -1533,7 +1587,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.307Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu55@client.com"
     },
     {
       "id": "demo-3c9634a6-e2d5-4df7-9dc3-24192b489b8f",
@@ -1556,7 +1611,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.564Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu51@client.com"
     },
     {
       "id": "demo-59748f0c-080a-4b69-b433-d81fe44edde3",
@@ -1579,7 +1635,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.863Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu56@client.com"
     },
     {
       "id": "demo-a53dec5c-353d-496a-abb4-a5df1fd7fa2f",
@@ -1602,7 +1659,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:57.493Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu57@client.com"
     },
     {
       "id": "demo-6f1fb9d3-ed86-4889-b8e1-f98b16f3726c",
@@ -1625,7 +1683,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:59.066Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu58@client.com"
     },
     {
       "id": "demo-2062b134-fb20-417f-8f1a-42a32a17992e",
@@ -1648,7 +1707,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:59.367Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu59@client.com"
     },
     {
       "id": "demo-4856cbb8-4815-4eae-9531-cb00edef8df4",
@@ -1671,7 +1731,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:59.897Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu54@client.com"
     },
     {
       "id": "demo-ea228953-e122-40ea-a6ac-ba5236f2caad",
@@ -1694,7 +1755,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:00.194Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu63@client.com"
     },
     {
       "id": "demo-c7ebc1ac-ece8-4a18-b833-ff03728479d3",
@@ -1717,7 +1779,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:01.369Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu60@client.com"
     },
     {
       "id": "demo-3b272615-7e39-47ec-a8f3-4f58b190dc84",
@@ -1740,7 +1803,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.148Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu62@client.com"
     },
     {
       "id": "demo-91bc7f30-92f7-46c3-a810-59e6f87dd85a",
@@ -1763,7 +1827,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:02.181Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu66@client.com"
     },
     {
       "id": "demo-b24786ee-d19a-4263-a9e7-c0920bbfeced",
@@ -1786,7 +1851,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:56.386Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu65@client.com"
     },
     {
       "id": "demo-8a783724-9edf-4fa5-8c6f-c4a557ee4c0b",
@@ -1809,7 +1875,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:56.474Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu61@client.com"
     },
     {
       "id": "demo-8f93859d-4966-438b-ac7c-9830098a2308",
@@ -1832,7 +1899,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:56.544Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu67@client.com"
     },
     {
       "id": "demo-bbc877c0-6af0-4852-8add-6abecf5fdcd6",
@@ -1855,7 +1923,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:56.821Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu69@client.com"
     },
     {
       "id": "demo-c81feb2c-cb5a-4bd4-bb2f-25c7efd917eb",
@@ -1878,7 +1947,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:57.378Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu68@client.com"
     },
     {
       "id": "demo-f5269ff4-4347-4bcb-a73f-f9b7f716316b",
@@ -1901,7 +1971,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:57.518Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu73@client.com"
     },
     {
       "id": "demo-fc9cec8b-843a-4d86-84d8-6069eceefaaa",
@@ -1924,7 +1995,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:59.093Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu75@client.com"
     },
     {
       "id": "demo-baa1516c-ea34-4abe-b226-37c98da3045d",
@@ -1947,7 +2019,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:59.375Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu74@client.com"
     },
     {
       "id": "demo-3e6277a4-3c85-4af3-b182-072971ef750f",
@@ -1970,7 +2043,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:59.988Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu72@client.com"
     },
     {
       "id": "demo-4eabf071-d9a1-4dd3-94a6-4bf499e74e36",
@@ -1993,7 +2067,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:00.213Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu70@client.com"
     },
     {
       "id": "demo-f02e04f0-b3fd-49c4-a1f1-82992591db44",
@@ -2016,7 +2091,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:26:01.376Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu76@client.com"
     },
     {
       "id": "demo-733d8ce6-04bc-4c1f-82de-f0ab9eefa99e",
@@ -2039,7 +2115,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:55.676Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu71@client.com"
     },
     {
       "id": "demo-d3b332ae-a6f0-4706-9308-0b9e344b50bd",
@@ -2062,7 +2139,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:55.802Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu64@client.com"
     },
     {
       "id": "demo-35cd35ee-189c-4097-b5ae-7d341fc12af8",
@@ -2085,7 +2163,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:56.412Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu81@client.com"
     },
     {
       "id": "demo-d629da78-7e44-4492-bc3d-15c45ffec737",
@@ -2108,7 +2187,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:56.450Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu79@client.com"
     },
     {
       "id": "demo-7b695291-f616-43dd-bb45-6b705a505ddc",
@@ -2131,7 +2211,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:56.658Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu82@client.com"
     },
     {
       "id": "demo-994e8517-46e6-4a0d-869a-8e31abaaee8d",
@@ -2154,7 +2235,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:56.922Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu83@client.com"
     },
     {
       "id": "demo-3dc51ed6-3ce7-47cb-b3c4-df2e83e51f6a",
@@ -2177,7 +2259,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:57.421Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu77@client.com"
     },
     {
       "id": "demo-d31983fa-a096-429c-91a3-9f0b160d2230",
@@ -2200,7 +2283,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:57.510Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu84@client.com"
     },
     {
       "id": "demo-3bc8bbcc-5306-4c4e-8969-2e039c456cf0",
@@ -2223,7 +2307,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:53.545Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu78@client.com"
     },
     {
       "id": "demo-d8131c6a-4734-44ab-8b56-60798c0a90a2",
@@ -2246,7 +2331,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:53.809Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu80@client.com"
     },
     {
       "id": "demo-c1f60bf7-d946-45cc-867f-7ee9987db3c6",
@@ -2269,7 +2355,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:53.964Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu86@client.com"
     },
     {
       "id": "demo-0dc69956-9292-47eb-be4f-9e05ffd8c761",
@@ -2292,7 +2379,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:54.061Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu89@client.com"
     },
     {
       "id": "demo-0851323e-55b9-4e51-afe4-431ba9ff2474",
@@ -2315,7 +2403,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:54.625Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu85@client.com"
     },
     {
       "id": "demo-2dbdc25f-4ff3-4655-9a61-d6a859aab5be",
@@ -2338,7 +2427,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:55.683Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu90@client.com"
     },
     {
       "id": "demo-c05938fd-90c2-42b0-a48e-5488f13ba239",
@@ -2361,7 +2451,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:55.864Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu93@client.com"
     },
     {
       "id": "demo-84c33c84-c765-49ae-a3b3-11ec04684f16",
@@ -2384,7 +2475,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:56.378Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu91@client.com"
     },
     {
       "id": "demo-c5e4d050-f9ed-40e5-998f-335d818ea999",
@@ -2407,7 +2499,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:56.442Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu87@client.com"
     },
     {
       "id": "demo-31896cda-8940-45ef-8334-0a63f8be70af",
@@ -2430,7 +2523,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:56.608Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu95@client.com"
     },
     {
       "id": "demo-ade08a23-d403-46a3-803a-e2b987caafac",
@@ -2453,7 +2547,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:56.981Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu94@client.com"
     },
     {
       "id": "demo-a4b86964-0861-4b39-9233-606870d7e49f",
@@ -2476,7 +2571,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:57.455Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu97@client.com"
     },
     {
       "id": "demo-45fbda3d-80a5-4d3f-823f-5b251f068a4c",
@@ -2499,7 +2595,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:51.684Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu88@client.com"
     },
     {
       "id": "demo-0077adac-1111-49b4-89f2-128c1ce57340",
@@ -2522,7 +2619,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:53.776Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu96@client.com"
     },
     {
       "id": "demo-a3263a3f-ce32-4330-b322-155520f783bf",
@@ -2545,7 +2643,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:53.787Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu92@client.com"
     },
     {
       "id": "demo-e21022bf-d7c1-414e-91a8-be5d0f46e5f2",
@@ -2568,7 +2667,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:53.942Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu99@client.com"
     },
     {
       "id": "demo-c57dbeeb-39a1-4dc9-b6ea-1d36b74ce583",
@@ -2591,7 +2691,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:54.072Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu98@client.com"
     },
     {
       "id": "demo-6934014c-b986-4247-a013-1198fc9e6e2b",
@@ -2614,7 +2715,8 @@
       "demo_balance": 1000000,
       "last_login_at": "2026-10-28T19:25:54.633Z",
       "failed_login_attempts": 0,
-      "last_login_ip": "127.0.0.1"
+      "last_login_ip": "127.0.0.1",
+      "email": "k6_demo_vu100@client.com"
     },
     {
       "id": "9f343cd0-cc9e-4b76-b708-f97103f5d1bc",
@@ -2634,7 +2736,8 @@
       "failed_login_attempts": 0,
       "created_at": "2026-10-28T19:27:28.928Z",
       "updated_at": "2026-10-28T19:27:28.928Z",
-      "demo_balance": 0
+      "demo_balance": 0,
+      "email": "user_alpha_1793215648927@client.com"
     },
     {
       "id": "3bb79b24-ba60-4567-bd9b-ab7a5f61036d",
@@ -2654,7 +2757,8 @@
       "failed_login_attempts": 0,
       "created_at": "2026-10-29T06:57:34.887Z",
       "updated_at": "2026-10-29T06:57:34.887Z",
-      "demo_balance": 0
+      "demo_balance": 0,
+      "email": "user_alpha_1793257054887@client.com"
     },
     {
       "id": "7189b1d1-6502-4efb-b4c7-55d80ef0d481",
@@ -2725,7 +2829,8 @@
       "created_at": "2026-10-31T05:57:54.507Z",
       "updated_at": "2026-10-31T05:57:55.263Z",
       "demo_balance": 0,
-      "locked_until": "2026-10-31T06:12:55.263Z"
+      "locked_until": "2026-10-31T06:12:55.263Z",
+      "email": "lockout_user_1793426274360@client.com"
     },
     {
       "id": "2644632c-e9ed-4f31-a966-0b8e8fc9e15c",
@@ -2781,7 +2886,7 @@
       "user_id": "usr_test_1793554554691",
       "country_code": "+91",
       "mobile": "9876543210",
-      "email": null,
+      "email": "usr_test_1793554554691@client.com",
       "role": "CLIENT",
       "parent_id": null,
       "hierarchy_path": "root.usr_test_1793554554691",
@@ -2799,7 +2904,7 @@
       "user_id": "admin_1",
       "country_code": "+91",
       "mobile": "9999999999",
-      "email": null,
+      "email": "admin_1@client.com",
       "role": "SUPER_ADMIN",
       "parent_id": null,
       "hierarchy_path": "root.admin_1",
@@ -2825,14 +2930,14 @@
       "status": "ACTIVE",
       "tenant_id": "vertex-default",
       "created_at": "2026-11-01T17:45:11.674Z",
-      "updated_at": "2026-11-01T17:48:37.079Z",
+      "updated_at": "2026-11-02T15:37:35.733Z",
       "account_type": "demo",
-      "demo_balance": 1050000,
+      "demo_balance": 1075000,
       "password_hash": "",
       "failed_login_attempts": 0,
       "client_code": "VTX_DEMO",
       "broker_id": "BRK-001",
-      "last_login_at": "2026-11-01T17:48:35.704Z",
+      "last_login_at": "2026-11-02T15:37:34.192Z",
       "last_login_ip": "127.0.0.1"
     },
     {
@@ -2930,6 +3035,153 @@
       "created_at": "2026-11-01T17:49:01.047Z",
       "updated_at": "2026-11-01T17:49:01.047Z",
       "demo_balance": 0
+    },
+    {
+      "id": "usr-ajay-001",
+      "full_name": "Ajay",
+      "user_id": "Ajay12",
+      "country_code": "+91",
+      "mobile": "+919876543299",
+      "phone_e164": "+919876543299",
+      "email": "ajay@goldfut.com",
+      "role": "CLIENT",
+      "parent_id": "master-node-0001",
+      "hierarchy_path": "root.master_alpha.ajay12",
+      "is_verified": true,
+      "status": "ACTIVE",
+      "tenant_id": "vertex-default",
+      "created_at": "2026-11-01T15:34:51.625Z",
+      "updated_at": "2026-11-02T15:39:22.256Z",
+      "account_type": "real",
+      "demo_balance": 500000,
+      "password_hash": "$argon2id$v=19$m=19456,p=1,t=2$6usGjUNRPEF6n+q83YWQDg$9tu95l1+GRJLbV9UzqwJJXoBt8hIcjLeqevyDvg/iPk",
+      "failed_login_attempts": 0,
+      "client_code": "AJAY12",
+      "broker_id": "BRK-001",
+      "last_login_at": "2026-11-02T15:39:22.256Z",
+      "last_login_ip": "127.0.0.1"
+    },
+    {
+      "id": "5c18be27-ecb9-49be-8a8f-be96f2d669a3",
+      "tenant_id": "vertex-default",
+      "full_name": "Alexander Hamilton",
+      "user_id": "trader_1793633773568",
+      "email": "trader_1793633773568@client.com",
+      "country_code": "+1",
+      "mobile": "4155551109",
+      "phone_e164": "+14155551109",
+      "password_hash": "$argon2id$v=19$m=19456,p=1,t=2$vfj0OUEez7MgqVwxioWRBQ$TuRmDPhSJDbk4+2UeswzqubFpRckNi+M+0uKqZxDAPs",
+      "role": "CLIENT",
+      "parent_id": null,
+      "hierarchy_path": "root.trader_1793633773568",
+      "is_verified": true,
+      "email_verified_at": "2026-11-02T15:36:13.703Z",
+      "phone_verified_at": "2026-11-02T15:36:13.703Z",
+      "status": "ACTIVE",
+      "is_frozen": false,
+      "failed_login_attempts": 0,
+      "referral_code": "VTX6056",
+      "referred_by": "VERTEXPRO",
+      "created_at": "2026-11-02T15:36:13.703Z",
+      "updated_at": "2026-11-02T15:36:15.615Z",
+      "demo_balance": 0,
+      "last_login_at": "2026-11-02T15:36:15.615Z",
+      "last_login_ip": "127.0.0.1",
+      "client_code": "trader_1793633773568"
+    },
+    {
+      "id": "2433cf05-50ad-41b4-8aac-728a7a700fec",
+      "tenant_id": "vertex-default",
+      "full_name": "Resend Tester",
+      "user_id": "resend_test_1793633774785",
+      "country_code": "+1",
+      "mobile": "4155552153",
+      "phone_e164": "+14155552153",
+      "password_hash": "$argon2id$v=19$m=19456,p=1,t=2$YsohLiUUni4wg3j+rUgdTw$YaPxXoVa8hxesQZP5QEJatoWqwa8q2YNsp+sCTV2MPw",
+      "role": "CLIENT",
+      "parent_id": null,
+      "hierarchy_path": "root.resend_test_1793633774785",
+      "is_verified": false,
+      "status": "PENDING_PHONE_VERIFICATION",
+      "is_frozen": false,
+      "failed_login_attempts": 0,
+      "created_at": "2026-11-02T15:36:14.847Z",
+      "updated_at": "2026-11-02T15:36:14.847Z",
+      "demo_balance": 0
+    },
+    {
+      "id": "412e80d0-4cd6-491a-9f3c-1ad1dd1ab242",
+      "tenant_id": "vertex-default",
+      "full_name": "Lockout Target",
+      "user_id": "lockout_user_1793633775056",
+      "country_code": "+91",
+      "mobile": "4548688533",
+      "phone_e164": "+914548688533",
+      "password_hash": "$argon2id$v=19$m=19456,p=1,t=2$2I6GeGcf4NFA3owPYZV8aQ$uamU2WYJjpfw6C65xLFaEiYZh/mb7HQQvSwel9kv7TU",
+      "role": "CLIENT",
+      "parent_id": null,
+      "hierarchy_path": "root.lockout_user_1793633775056",
+      "is_verified": true,
+      "email_verified_at": "2026-11-02T15:36:15.106Z",
+      "phone_verified_at": "2026-11-02T15:36:15.106Z",
+      "status": "LOCKED",
+      "is_frozen": false,
+      "failed_login_attempts": 5,
+      "created_at": "2026-11-02T15:36:15.106Z",
+      "updated_at": "2026-11-02T15:36:15.399Z",
+      "demo_balance": 0,
+      "locked_until": "2026-11-02T15:51:15.399Z",
+      "email": "lockout_user_1793633775056@client.com"
+    },
+    {
+      "id": "d62dc007-5c4e-447d-8e37-dbb0b25abffd",
+      "tenant_id": "vertex-default",
+      "full_name": "Provider Swappable User",
+      "user_id": "swap_tester_1793633775629",
+      "email": "swap_tester_1793633775629@client.com",
+      "country_code": "+1",
+      "mobile": "4155553302",
+      "phone_e164": "+14155553302",
+      "password_hash": "$argon2id$v=19$m=19456,p=1,t=2$kWaQ/iN620s1U7hMMW+Jvw$rx2Q1b26vkUDcsR8xrSzHxch86OcxTr6ydOTCHeZN24",
+      "role": "CLIENT",
+      "parent_id": null,
+      "hierarchy_path": "root.swap_tester_1793633775629",
+      "is_verified": true,
+      "email_verified_at": "2026-11-02T15:36:15.695Z",
+      "phone_verified_at": "2026-11-02T15:36:15.695Z",
+      "status": "ACTIVE",
+      "is_frozen": false,
+      "failed_login_attempts": 0,
+      "referral_code": "VTX8106",
+      "created_at": "2026-11-02T15:36:15.695Z",
+      "updated_at": "2026-11-02T15:36:15.695Z",
+      "demo_balance": 0,
+      "client_code": "swap_tester_1793633775629"
+    },
+    {
+      "id": "1348e484-fc4a-4908-a368-24124bcb37a4",
+      "tenant_id": "vertex-default",
+      "full_name": "Fail Safe User",
+      "user_id": "fail_1793633775730",
+      "email": "fail_1793633775730@client.com",
+      "country_code": "+1",
+      "mobile": "4155559915",
+      "phone_e164": "+14155559915",
+      "password_hash": "$argon2id$v=19$m=19456,p=1,t=2$q+3TiL1DgU2LrUYOdndMKQ$MTQ33+RlFuMJy2KfAuL0Vyuf4ZeWVp0HR9Zr87L1Tts",
+      "role": "CLIENT",
+      "parent_id": null,
+      "hierarchy_path": "root.fail_1793633775730",
+      "is_verified": true,
+      "email_verified_at": "2026-11-02T15:36:15.839Z",
+      "phone_verified_at": "2026-11-02T15:36:15.839Z",
+      "status": "ACTIVE",
+      "is_frozen": false,
+      "failed_login_attempts": 0,
+      "referral_code": "VTX3168",
+      "created_at": "2026-11-02T15:36:15.839Z",
+      "updated_at": "2026-11-02T15:36:15.839Z",
+      "demo_balance": 0,
+      "client_code": "fail_1793633775730"
     }
   ],
   "otp_verifications": [
@@ -3042,6 +3294,70 @@
       "max_attempts": 5,
       "created_at": "2026-11-01T17:49:01.084Z",
       "dev_otp_preview": "386085"
+    },
+    {
+      "id": "01a69e06-5ae9-4641-91ec-0570030c2276",
+      "user_id": "trader_1793633773568",
+      "phone_e164": "+14155551109",
+      "otp_hash": "f5a74428ae906a9bbcbdcb6272b742597f16ca70ab39046fd89f700599068fd9",
+      "purpose": "registration",
+      "expires_at": "2026-11-02T15:41:14.514Z",
+      "attempts": 0,
+      "max_attempts": 5,
+      "ip_address": "127.0.0.1",
+      "created_at": "2026-11-02T15:36:14.522Z",
+      "dev_otp_preview": "109005"
+    },
+    {
+      "id": "2428f8b9-6441-42e6-906f-7e45a54ead23",
+      "user_id": "resend_test_1793633774785",
+      "phone_e164": "+14155552153",
+      "otp_hash": "109df5154f39063aeffb5a54f7e613266bebb1d1cfa16511d3ebd78523ec083e",
+      "purpose": "registration",
+      "expires_at": "2026-11-02T15:41:14.854Z",
+      "attempts": 0,
+      "max_attempts": 5,
+      "ip_address": "127.0.0.1",
+      "created_at": "2026-11-02T15:36:14.856Z",
+      "dev_otp_preview": "813246"
+    },
+    {
+      "id": "09671782-3948-41c5-98bd-48dcc7ef1bc1",
+      "user_id": "trader_1793633773568",
+      "phone_e164": "+14155551109",
+      "otp_hash": "ce584bcad2a8e3a6f7b3e8f8da2dc05f7f9b1f380201bf6e3dba2a2790c597dd",
+      "purpose": "password_reset",
+      "expires_at": "2026-11-02T15:41:15.436Z",
+      "attempts": 0,
+      "max_attempts": 5,
+      "ip_address": "127.0.0.1",
+      "created_at": "2026-11-02T15:36:15.439Z",
+      "dev_otp_preview": "115405",
+      "verified_at": "2026-11-02T15:36:15.477Z"
+    },
+    {
+      "id": "6a116a92-13ce-4867-8c54-2bbe0b8ab611",
+      "user_id": "swap_tester_1793633775629",
+      "phone_e164": "+14155553302",
+      "otp_hash": "b5e525e74f7a7de0a2f5d1a879938c2d99ab2ae283536d91cc236695ec1b04e2",
+      "purpose": "registration",
+      "expires_at": "2026-11-02T15:41:15.723Z",
+      "attempts": 0,
+      "max_attempts": 5,
+      "created_at": "2026-11-02T15:36:15.726Z",
+      "dev_otp_preview": "852539"
+    },
+    {
+      "id": "f659080d-cdd5-4d58-bee2-68187f5b6f8f",
+      "user_id": "fail_1793633775730",
+      "phone_e164": "+14155559915",
+      "otp_hash": "140ba205fb9eb186101f0952ed5d72684504ae4c6789a3cfb6b4b12cf5148827",
+      "purpose": "registration",
+      "expires_at": "2026-11-02T15:41:15.876Z",
+      "attempts": 0,
+      "max_attempts": 5,
+      "created_at": "2026-11-02T15:36:15.884Z",
+      "dev_otp_preview": "993126"
     }
   ],
   "referral_codes": [

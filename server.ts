@@ -35,6 +35,7 @@ import { pgDb } from './src/server/db/postgres.ts';
 import { db } from './src/server/db/database.ts';
 import { clearDummyTradingStoreRecords } from './src/server/trading/tradingStore.ts';
 import { postgresClientMappingRepository } from './src/server/repositories/PostgresClientMappingRepository.ts';
+import { seedAjayAccount } from './src/server/services/seedAjayService.ts';
 
 /**
  * Purges all test/dummy users, test client mappings, and seeded records
@@ -163,9 +164,9 @@ export async function purgeDummyAndTestRecords(): Promise<{
     const nameLower = name.toLowerCase();
     const email = (typeof u === 'string' ? '' : u.email || '').toLowerCase().trim();
 
-    // Always preserve core system nodes and default demo accounts
-    if (['superadmin', 'master_alpha', 'master_zenith', 'broker_metro', 'subbroker_kalyan', 'vtx_demo', 'vtx123', 'arrav', 'aarav'].includes(uid)) return false;
-    if (['admin@goldfut.com', 'alpha.master@goldfut.com', 'zenith.master@goldfut.com', 'metro@securities.com', 'kalyan.branch@goldfut.com', 'demo@vertex.trade', 'vtx_demo@nextrade.com', 'arrav@vertex.trade'].includes(email)) return false;
+    // Always preserve core system nodes, default demo accounts, and Ajay
+    if (['superadmin', 'master_alpha', 'master_zenith', 'broker_metro', 'subbroker_kalyan', 'vtx_demo', 'vtx123', 'arrav', 'aarav', 'ajay', 'ajay12'].includes(uid)) return false;
+    if (['admin@goldfut.com', 'alpha.master@goldfut.com', 'zenith.master@goldfut.com', 'metro@securities.com', 'kalyan.branch@goldfut.com', 'demo@vertex.trade', 'vtx_demo@nextrade.com', 'arrav@vertex.trade', 'ajay@goldfut.com'].includes(email)) return false;
 
     // Dummy email patterns
     if (email.includes('@test.') || email.includes('@demo.') || email.includes('@example.') || email.includes('audit.trader') || email.includes('@vertex.trade')) return true;
@@ -183,7 +184,7 @@ export async function purgeDummyAndTestRecords(): Promise<{
     if (dummyNames.includes(nameLower)) return true;
 
     // Dummy user_id patterns
-    if (['vtx_demo', 'vtx123', 'arrav', 'aarav'].includes(uid)) return false;
+    if (['vtx_demo', 'vtx123', 'arrav', 'aarav', 'ajay', 'ajay12'].includes(uid)) return false;
     if (uid.startsWith('vtx') || uid.startsWith('demo') || uid.startsWith('test') || uid.includes('audit')) return true;
     if (uid.startsWith('trd_17') || uid.startsWith('admin_sync_') || uid.startsWith('client_17') || uid.startsWith('trader_17') || uid.startsWith('ub_trader_') || uid.startsWith('user_fall_') || uid.startsWith('fast_user_') || uid.startsWith('master_5j_') || uid.startsWith('broker_5j_') || uid.startsWith('trader_5j_') || uid.startsWith('trader-')) return true;
     if (['demo-trader', 'test_demo_trader_01', 'vtx999', 'vtx456', 'vtx101'].includes(uid)) return true;
@@ -244,83 +245,71 @@ export async function purgeDummyAndTestRecords(): Promise<{
         OR user_id ILIKE 'trader_beta%'
         OR user_id IN ('demo-trader', 'vtx_demo', 'test_demo_trader_01', 'vtx999', 'vtx123', 'vtx456', 'vtx101')
       )
-      AND user_id NOT IN ('superadmin', 'master_alpha', 'master_zenith', 'broker_metro', 'subbroker_kalyan', 'vtx_demo', 'vtx123', 'arrav', 'aarav')
-      AND id NOT IN ('super-admin-root-0001', 'master-node-0001', 'master-node-0002', 'broker-node-0001', 'subbroker-node-0001')
-      AND (email IS NULL OR email NOT IN ('admin@goldfut.com', 'alpha.master@goldfut.com', 'zenith.master@goldfut.com', 'metro@securities.com', 'kalyan.branch@goldfut.com', 'demo@vertex.trade', 'vtx_demo@nextrade.com', 'arrav@vertex.trade'));
+      AND user_id NOT IN ('superadmin', 'master_alpha', 'master_zenith', 'broker_metro', 'subbroker_kalyan', 'vtx_demo', 'vtx123', 'arrav', 'aarav', 'ajay', 'ajay12', 'Ajay12')
+      AND id NOT IN ('super-admin-root-0001', 'master-node-0001', 'master-node-0002', 'broker-node-0001', 'subbroker-node-0001', 'usr-ajay-001')
+      AND (email IS NULL OR email NOT IN ('admin@goldfut.com', 'alpha.master@goldfut.com', 'zenith.master@goldfut.com', 'metro@securities.com', 'kalyan.branch@goldfut.com', 'demo@vertex.trade', 'vtx_demo@nextrade.com', 'arrav@vertex.trade', 'ajay@goldfut.com'));
     `).catch(() => ({ rows: [] }));
 
     const matchingUserIds = (dummyUsersRes.rows || []).map((r: any) => r.user_id);
     const matchingIds = (dummyUsersRes.rows || []).map((r: any) => r.id);
-    const allDummyUserIds = Array.from(new Set([...matchingUserIds, 'vtx999', 'vtx456', 'vtx101', 'demo-trader', 'test_demo_trader_01'])).filter((u) => !['vtx_demo', 'vtx123', 'arrav', 'aarav'].includes(String(u).toLowerCase()));
-    const allDummyIds = Array.from(new Set([...matchingIds]));
+    const allDummyUserIds = Array.from(new Set([...matchingUserIds, 'vtx999', 'vtx456', 'vtx101', 'demo-trader', 'test_demo_trader_01'])).filter((u) => !['vtx_demo', 'vtx123', 'arrav', 'aarav', 'ajay', 'ajay12'].includes(String(u).toLowerCase()));
+    const allDummyIds = Array.from(new Set([...matchingIds])).filter((id) => id !== 'usr-ajay-001');
 
     if (allDummyUserIds.length > 0 || allDummyIds.length > 0) {
       await pgDb.query(`DELETE FROM client_mappings WHERE user_id = ANY($1) OR client_id = ANY($1) OR client_id = ANY($2);`, [allDummyUserIds, allDummyIds]).catch(() => {});
       await pgDb.query(`DELETE FROM client_identity_mappings WHERE trading_user_id = ANY($1) OR external_client_id = ANY($1) OR external_client_id = ANY($2);`, [allDummyUserIds, allDummyIds]).catch(() => {});
       await pgDb.query(`DELETE FROM trading_wallets WHERE user_id = ANY($1);`, [allDummyUserIds]).catch(() => {});
+
+      const ordDel = await pgDb.query(`
+        DELETE FROM trading_orders 
+        WHERE user_id = ANY($1) 
+           OR id LIKE 'ORD-vtx%' 
+           OR id LIKE 'ORD-demo%';
+      `, [allDummyUserIds]).catch(() => ({ rowCount: 0 }));
+      ordersPurged = ordDel.rowCount || 0;
+
+      const posDel = await pgDb.query(`
+        DELETE FROM trading_positions 
+        WHERE user_id = ANY($1) 
+           OR id LIKE 'POS-vtx%' 
+           OR id LIKE 'POS-demo%';
+      `, [allDummyUserIds]).catch(() => ({ rowCount: 0 }));
+      positionsPurged = posDel.rowCount || 0;
+
+      const trdDel = await pgDb.query(`
+        DELETE FROM trading_trades 
+        WHERE user_id = ANY($1) 
+           OR id LIKE 'TRD-vtx%' 
+           OR id LIKE 'TRD-demo%';
+      `, [allDummyUserIds]).catch(() => ({ rowCount: 0 }));
+      tradesPurged = trdDel.rowCount || 0;
+
+      const fundDel = await pgDb.query(`
+        DELETE FROM trading_fund_transactions 
+        WHERE user_id = ANY($1);
+      `, [allDummyUserIds]).catch(() => ({ rowCount: 0 }));
+      fundsPurged = fundDel.rowCount || 0;
+
+      const ledDel = await pgDb.query(`
+        DELETE FROM trading_ledger_entries 
+        WHERE user_id = ANY($1);
+      `, [allDummyUserIds]).catch(() => ({ rowCount: 0 }));
+      ledgerPurged = ledDel.rowCount || 0;
+
+      await pgDb.query(`
+        DELETE FROM trading_outbox_events 
+        WHERE payload->>'userId' = ANY($1) 
+           OR payload->>'tradingUserId' = ANY($1);
+      `, [allDummyUserIds]).catch(() => {});
+
+      const uDel = await pgDb.query(`
+        DELETE FROM users 
+        WHERE (id = ANY($2) OR user_id = ANY($1))
+          AND user_id NOT IN ('superadmin', 'master_alpha', 'master_zenith', 'broker_metro', 'subbroker_kalyan', 'ajay', 'ajay12', 'Ajay12')
+          AND id NOT IN ('super-admin-root-0001', 'master-node-0001', 'master-node-0002', 'broker-node-0001', 'subbroker-node-0001', 'usr-ajay-001');
+      `, [allDummyUserIds, allDummyIds]).catch(() => ({ rowCount: 0 }));
+      usersPurged = uDel.rowCount || 0;
     }
-
-    const ordDel = await pgDb.query(`
-      DELETE FROM trading_orders 
-      WHERE user_id = ANY($1) 
-         OR id LIKE 'ORD-vtx%' 
-         OR id LIKE 'ORD-demo%' 
-         OR client_order_id LIKE 'cli-ORD-%';
-    `, [allDummyUserIds]).catch(() => ({ rowCount: 0 }));
-    ordersPurged = ordDel.rowCount || 0;
-
-    const posDel = await pgDb.query(`
-      DELETE FROM trading_positions 
-      WHERE user_id = ANY($1) 
-         OR id LIKE 'POS-vtx%' 
-         OR id LIKE 'POS-demo%';
-    `, [allDummyUserIds]).catch(() => ({ rowCount: 0 }));
-    positionsPurged = posDel.rowCount || 0;
-
-    const trdDel = await pgDb.query(`
-      DELETE FROM trading_trades 
-      WHERE user_id = ANY($1) 
-         OR id LIKE 'TRD-vtx%' 
-         OR id LIKE 'TRD-demo%';
-    `, [allDummyUserIds]).catch(() => ({ rowCount: 0 }));
-    tradesPurged = trdDel.rowCount || 0;
-
-    const fundDel = await pgDb.query(`
-      DELETE FROM trading_fund_transactions 
-      WHERE user_id = ANY($1) 
-         OR id LIKE 'TX-DEP-%' 
-         OR id LIKE 'TX-WDR-%' 
-         OR reference_id LIKE 'DEP-%' 
-         OR reference_id LIKE 'WDR-%';
-    `, [allDummyUserIds]).catch(() => ({ rowCount: 0 }));
-    fundsPurged = fundDel.rowCount || 0;
-
-    const ledDel = await pgDb.query(`
-      DELETE FROM trading_ledger_entries 
-      WHERE user_id = ANY($1) 
-         OR id LIKE 'LED-TX-%' 
-         OR transaction_id LIKE 'TX-DEP-%' 
-         OR transaction_id LIKE 'TX-WDR-%' 
-         OR reference LIKE 'Authoritative %';
-    `, [allDummyUserIds]).catch(() => ({ rowCount: 0 }));
-    ledgerPurged = ledDel.rowCount || 0;
-
-    await pgDb.query(`
-      DELETE FROM trading_outbox_events 
-      WHERE payload->>'userId' = ANY($1) 
-         OR payload->>'tradingUserId' = ANY($1) 
-         OR event_id LIKE 'sync-ord-ORD-vtx%' 
-         OR event_id LIKE 'sync-pos-POS-vtx%' 
-         OR event_id LIKE 'sync-fund-TX-%';
-    `, [allDummyUserIds]).catch(() => {});
-
-    const uDel = await pgDb.query(`
-      DELETE FROM users 
-      WHERE (id = ANY($2) OR user_id = ANY($1))
-        AND user_id NOT IN ('superadmin', 'master_alpha', 'master_zenith', 'broker_metro', 'subbroker_kalyan')
-        AND id NOT IN ('super-admin-root-0001', 'master-node-0001', 'master-node-0002', 'broker-node-0001', 'subbroker-node-0001');
-    `, [allDummyUserIds, allDummyIds]).catch(() => ({ rowCount: 0 }));
-    usersPurged = uDel.rowCount || 0;
 
     if (usersPurged > 0 || ordersPurged > 0 || positionsPurged > 0 || fundsPurged > 0 || ledgerPurged > 0) {
       console.log(`[PURGE] Successfully purged ${usersPurged} dummy users, ${ordersPurged} fake orders, ${positionsPurged} fake positions, ${tradesPurged} fake trades, ${fundsPurged} fake funds, ${ledgerPurged} fake ledger entries.`);
@@ -376,11 +365,16 @@ async function startServer() {
     console.error('[DB] Migration error during startup:', migErr.message);
   }
 
-  // Purge all test/dummy users & seeded records from PostgreSQL, tradingStore, and .vertex_db_store.json
-  await purgeDummyAndTestRecords();
+  // Purge test/dummy users only if explicitly requested via environment variable
+  if (process.env.PURGE_TEST_RECORDS === 'true') {
+    await purgeDummyAndTestRecords();
+  }
 
   // Seed default ready-to-use demo accounts (vtx_demo, vtx123, arrav) with Password@123
   await seedDefaultDemoAccounts();
+
+  // Seed / verify Ajay account (Ajay12, Ajay@123) with funds, executed stock orders, and positions
+  await seedAjayAccount();
 
   // Synchronize authoritative users from PostgreSQL into memory for stateless multi-instance operation
   await db.syncUsersFromPostgres();

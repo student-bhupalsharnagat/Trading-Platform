@@ -75,7 +75,8 @@ class PostgresDatabase {
       } catch {
         // Fallback to memory
       }
-    } else {
+    }
+    if (fs.existsSync(dataDir)) {
       const pidFile = path.join(dataDir, 'postmaster.pid');
       if (fs.existsSync(pidFile)) {
         try {
@@ -84,20 +85,33 @@ class PostgresDatabase {
           // ignore
         }
       }
+      // If dataDir exists but PG_VERSION is missing, the cluster is incomplete/corrupted; clean for fresh persistent init
+      if (!fs.existsSync(path.join(dataDir, 'PG_VERSION'))) {
+        try {
+          fs.rmSync(dataDir, { recursive: true, force: true });
+        } catch {}
+      }
     }
 
     try {
       this.pglite = new PGlite(dataDir);
       await this.pglite.waitReady;
     } catch (err: any) {
-      console.warn('[Postgres] Failed to initialize persistent PGlite dataDir, falling back to in-memory:', err?.message || err);
+      console.warn('[Postgres] Persistent PGlite dataDir error, performing persistent cluster recovery:', err?.message || err);
       try {
         if (this.pglite) {
           await this.pglite.close().catch(() => {});
         }
-      } catch {}
-      this.pglite = new PGlite();
-      await this.pglite.waitReady;
+        if (fs.existsSync(dataDir)) {
+          fs.rmSync(dataDir, { recursive: true, force: true });
+        }
+        this.pglite = new PGlite(dataDir);
+        await this.pglite.waitReady;
+      } catch (recoveryErr: any) {
+        console.warn('[Postgres] Persistent recovery error, falling back to memory:', recoveryErr?.message || recoveryErr);
+        this.pglite = new PGlite();
+        await this.pglite.waitReady;
+      }
     }
     this.isPgLite = true;
     console.log('[Postgres] Initialized embedded PostgreSQL engine (PGlite)');

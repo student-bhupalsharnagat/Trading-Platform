@@ -1,5 +1,6 @@
 import { pgDb, DbClient } from '../../db/postgres.ts';
 import { ITradingOrderRepository, TradingOrder } from './ITradingOrderRepository.ts';
+import { getSearchTenants } from '../../utils/tenantHelper.ts';
 
 export class PostgresOrderRepository implements ITradingOrderRepository {
   private mapRow(row: any): TradingOrder {
@@ -70,8 +71,9 @@ export class PostgresOrderRepository implements ITradingOrderRepository {
   }
 
   public async findById(tenantId: string, id: string, client?: DbClient): Promise<TradingOrder | null> {
-    const sql = `SELECT * FROM trading_orders WHERE tenant_id = $1 AND id = $2 LIMIT 1;`;
-    const res = client ? await client.query(sql, [tenantId, id]) : await pgDb.query(sql, [tenantId, id]);
+    const searchTenants = getSearchTenants(tenantId);
+    const sql = `SELECT * FROM trading_orders WHERE tenant_id = ANY($1) AND id = $2 LIMIT 1;`;
+    const res = client ? await client.query(sql, [searchTenants, id]) : await pgDb.query(sql, [searchTenants, id]);
     if (res.rows.length === 0) return null;
     return this.mapRow(res.rows[0]);
   }
@@ -82,31 +84,49 @@ export class PostgresOrderRepository implements ITradingOrderRepository {
     clientOrderId: string,
     client?: DbClient
   ): Promise<TradingOrder | null> {
-    const sql = `SELECT * FROM trading_orders WHERE tenant_id = $1 AND user_id = $2 AND client_order_id = $3 LIMIT 1;`;
+    const searchTenants = getSearchTenants(tenantId);
+    const sql = `
+      SELECT * FROM trading_orders 
+      WHERE tenant_id = ANY($1) 
+        AND (user_id = $2 OR LOWER(user_id) = LOWER($2)) 
+        AND client_order_id = $3 
+      LIMIT 1;
+    `;
     const res = client
-      ? await client.query(sql, [tenantId, userId, clientOrderId])
-      : await pgDb.query(sql, [tenantId, userId, clientOrderId]);
+      ? await client.query(sql, [searchTenants, userId, clientOrderId])
+      : await pgDb.query(sql, [searchTenants, userId, clientOrderId]);
     if (res.rows.length === 0) return null;
     return this.mapRow(res.rows[0]);
   }
 
   public async getOrders(tenantId: string, userId?: string, status?: string, client?: DbClient): Promise<TradingOrder[]> {
-    let sql = `SELECT * FROM trading_orders WHERE tenant_id = $1`;
-    const params: any[] = [tenantId];
+    const searchTenants = getSearchTenants(tenantId);
+    let sql = `SELECT * FROM trading_orders WHERE tenant_id = ANY($1)`;
+    const params: any[] = [searchTenants];
 
     if (userId) {
       params.push(userId);
-      sql += ` AND user_id = $${params.length}`;
+      sql += ` AND (user_id = $${params.length} OR LOWER(user_id) = LOWER($${params.length}))`;
     }
     if (status) {
       params.push(status);
       sql += ` AND status = $${params.length}`;
     }
 
-    sql += ` ORDER BY created_at DESC;`;
+    params.push(tenantId);
+    sql += ` ORDER BY (CASE WHEN tenant_id = $${params.length} THEN 0 ELSE 1 END), created_at DESC;`;
 
     const res = client ? await client.query(sql, params) : await pgDb.query(sql, params);
-    return res.rows.map((r) => this.mapRow(r));
+    const seen = new Set<string>();
+    const uniqueOrders: TradingOrder[] = [];
+    for (const r of res.rows) {
+      const key = (r.client_order_id ? String(r.client_order_id).replace(/-(TNT-001|vertex-default)$/i, '') : String(r.id)).toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueOrders.push(this.mapRow(r));
+      }
+    }
+    return uniqueOrders;
   }
 
   public async update(
@@ -115,8 +135,9 @@ export class PostgresOrderRepository implements ITradingOrderRepository {
     updates: Partial<TradingOrder>,
     client?: DbClient
   ): Promise<TradingOrder | null> {
+    const searchTenants = getSearchTenants(tenantId);
     const setClauses: string[] = ['updated_at = NOW()'];
-    const params: any[] = [tenantId, id];
+    const params: any[] = [searchTenants, id];
 
     if (updates.status !== undefined) {
       params.push(updates.status);
@@ -158,7 +179,7 @@ export class PostgresOrderRepository implements ITradingOrderRepository {
     const sql = `
       UPDATE trading_orders
       SET ${setClauses.join(', ')}
-      WHERE tenant_id = $1 AND id = $2
+      WHERE tenant_id = ANY($1) AND id = $2
       RETURNING *;
     `;
 
@@ -173,16 +194,17 @@ export class PostgresOrderRepository implements ITradingOrderRepository {
     userId?: string,
     client?: DbClient
   ): Promise<number> {
+    const searchTenants = getSearchTenants(tenantId);
     let sql = `
       UPDATE trading_orders
       SET status = 'CANCELLED', updated_at = NOW(), cancelled_at = NOW()
-      WHERE tenant_id = $1 AND status = 'PENDING'
+      WHERE tenant_id = ANY($1) AND status = 'PENDING'
     `;
-    const params: any[] = [tenantId];
+    const params: any[] = [searchTenants];
 
     if (scope === 'USER' && userId) {
       params.push(userId);
-      sql += ` AND user_id = $${params.length}`;
+      sql += ` AND (user_id = $${params.length} OR LOWER(user_id) = LOWER($${params.length}))`;
     }
 
     sql += ` RETURNING id;`;
