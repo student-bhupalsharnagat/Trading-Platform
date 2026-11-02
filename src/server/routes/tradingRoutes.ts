@@ -389,6 +389,15 @@ router.post(
         return;
       }
 
+      if (quantity !== undefined && (!Number.isFinite(Number(quantity)) || Number(quantity) <= 0)) {
+        res.status(400).json({ success: false, message: 'Invalid order quantity: quantity must be a positive number.' });
+        return;
+      }
+      if (lots !== undefined && (!Number.isFinite(Number(lots)) || Number(lots) <= 0)) {
+        res.status(400).json({ success: false, message: 'Invalid order lots: lots must be a positive number.' });
+        return;
+      }
+
       const lotSize = inst?.lotSize || 1;
       const orderLots = Number(lots) > 0 ? Number(lots) : (quantity ? Math.max(1, Math.round(Number(quantity) / lotSize)) : 0);
 
