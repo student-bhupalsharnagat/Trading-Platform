@@ -134,14 +134,31 @@ const DEFAULT_TENANT_SUMMARIES: TenantSummary[] = [
 
 export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [tenant, setTenant] = useState<Tenant>(() => {
+    try {
+      const savedData = localStorage.getItem('vtx_active_tenant_data');
+      if (savedData) {
+        const parsed = JSON.parse(savedData);
+        if (parsed?.tenant?.id) return parsed.tenant;
+      }
+    } catch {}
     const saved = localStorage.getItem('vtx_active_tenant_id');
     const matched = DEFAULT_TENANT_SUMMARIES.find((t) => t.id === saved);
     if (matched) {
       return { ...DEFAULT_TENANT, id: matched.id, name: matched.name, slug: matched.slug };
     }
+    if (saved) {
+      return { ...DEFAULT_TENANT, id: saved, name: saved === 'TNT-001' ? 'Apex Capital Markets' : saved };
+    }
     return DEFAULT_TENANT;
   });
   const [branding, setBranding] = useState<TenantBranding>(() => {
+    try {
+      const savedData = localStorage.getItem('vtx_active_tenant_data');
+      if (savedData) {
+        const parsed = JSON.parse(savedData);
+        if (parsed?.branding?.brandName) return parsed.branding;
+      }
+    } catch {}
     const saved = localStorage.getItem('vtx_active_tenant_id');
     const matched = DEFAULT_TENANT_SUMMARIES.find((t) => t.id === saved);
     if (matched) {
@@ -226,6 +243,11 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (d.branding) {
           setBranding(d.branding);
           applyBrandingToDocument(d.branding);
+        }
+        if (d.tenant && d.branding) {
+          try {
+            localStorage.setItem('vtx_active_tenant_data', JSON.stringify({ tenant: d.tenant, branding: d.branding }));
+          } catch {}
         }
         if (d.config) setConfig(d.config);
         if (d.status) setStatus(d.status);
@@ -323,27 +345,29 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         DEFAULT_TENANT_SUMMARIES.find((t) => t.id === tenantId);
 
       if (matched) {
-        setTenant((prev) => ({
-          ...prev,
+        const nextTenant = {
+          ...DEFAULT_TENANT,
           id: matched.id,
           name: matched.name,
           slug: matched.slug,
-        }));
-        setBranding((prev) => {
-          const next: TenantBranding = {
-            ...prev,
-            brandName: matched.brandName || matched.name,
-            shortName: matched.shortName || matched.slug.toUpperCase(),
-            primaryColor: matched.primaryColor || '#F59E0B',
-            loginBranding: {
-              ...prev.loginBranding,
-              title: `${matched.brandName} Multi-Asset Engine`,
-              subtitle: 'High-frequency Execution. Professional Liquidity.',
-            },
-          };
-          applyBrandingToDocument(next);
-          return next;
-        });
+        };
+        const nextBranding: TenantBranding = {
+          ...DEFAULT_BRANDING,
+          brandName: matched.brandName || matched.name,
+          shortName: matched.shortName || matched.slug.toUpperCase(),
+          primaryColor: matched.primaryColor || '#F59E0B',
+          loginBranding: {
+            ...DEFAULT_BRANDING.loginBranding,
+            title: `${matched.brandName} Multi-Asset Engine`,
+            subtitle: 'High-frequency Execution. Professional Liquidity.',
+          },
+        };
+        setTenant(nextTenant);
+        setBranding(nextBranding);
+        applyBrandingToDocument(nextBranding);
+        try {
+          localStorage.setItem('vtx_active_tenant_data', JSON.stringify({ tenant: nextTenant, branding: nextBranding }));
+        } catch {}
       }
 
       // Also sync with backend
@@ -383,6 +407,13 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const toggleDevFeature = async (feature: string, value: boolean, userId?: string) => {
+    // Bug #05: Optimistic state update for instant toggle responsiveness
+    if (feature in status) {
+      setStatus((prev) => ({ ...prev, [feature]: value }));
+    }
+    if (feature in config) {
+      setConfig((prev) => ({ ...prev, [feature]: value }));
+    }
     try {
       const res = await fetch('/api/tenant/dev/toggle-feature', {
         method: 'POST',

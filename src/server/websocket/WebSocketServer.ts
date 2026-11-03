@@ -15,6 +15,7 @@ export interface AuthenticatedWebSocket extends WebSocket {
   connectedAt: string;
   messageCount: number;
   lastMessageWindow: number;
+  subscribedSymbols?: Set<string>;
 }
 
 export interface WebSocketEventMessage {
@@ -171,12 +172,30 @@ export class TradingWebSocketServer {
           }
           const parsed = JSON.parse(text);
           if (parsed.type === 'ping') {
+            authWs.isAlive = true;
             this.sendToSocket(authWs, {
               event: 'pong',
               tenantId: authWs.tenantId,
               payload: { clientTimestamp: parsed.timestamp, serverTimestamp: Date.now() },
               timestamp: new Date().toISOString(),
             });
+          } else if (parsed.type === 'subscribe' || parsed.action === 'subscribe') {
+            authWs.isAlive = true;
+            if (!authWs.subscribedSymbols) authWs.subscribedSymbols = new Set();
+            const syms = Array.isArray(parsed.symbols) ? parsed.symbols : [parsed.symbol];
+            syms.filter(Boolean).forEach((s) => authWs.subscribedSymbols.add(String(s).toUpperCase()));
+            this.sendToSocket(authWs, {
+              event: 'subscription.ack',
+              tenantId: authWs.tenantId,
+              payload: { subscribed: Array.from(authWs.subscribedSymbols) },
+              timestamp: new Date().toISOString(),
+            });
+          } else if (parsed.type === 'unsubscribe' || parsed.action === 'unsubscribe') {
+            authWs.isAlive = true;
+            if (authWs.subscribedSymbols) {
+              const syms = Array.isArray(parsed.symbols) ? parsed.symbols : [parsed.symbol];
+              syms.filter(Boolean).forEach((s) => authWs.subscribedSymbols.delete(String(s).toUpperCase()));
+            }
           }
         } catch {
           // Ignore malformed text

@@ -303,7 +303,7 @@ router.post('/dev/toggle-feature', async (req: TenantRequest, res: Response) => 
     const tenantId = req.tenant?.tenant.id || 'vertex-default';
     const { feature, value, userId } = req.body;
 
-    if (feature === 'trading_enabled' || feature === 'registration_enabled' || feature === 'api_enabled' || feature === 'maintenance_mode') {
+    if (feature === 'trading_enabled' || feature === 'registration_enabled' || feature === 'api_enabled' || feature === 'maintenance_mode' || feature === 'options_trading_enabled') {
       const updated = await centralApiService.updatePlatformConfig(tenantId, {
         [feature]: Boolean(value),
       });

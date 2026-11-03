@@ -44,6 +44,9 @@ export const WalletModal: React.FC<WalletModalProps> = ({
   initialTab = 'DEPOSIT',
 }) => {
   const { user, showToast } = useAuth();
+  // Bug #15: Isolate client state so newly created accounts do not inherit previous demo/shared history
+  const activeUserId = user?.userId || (user as any)?.user_id || user?.id;
+  const historyStorageKey = activeUserId ? `vtx_wallet_history_${activeUserId}` : 'vtx_wallet_history';
 
   const [activeTab, setActiveTab] = useState<'DEPOSIT' | 'WITHDRAW' | 'HISTORY'>(initialTab);
   const [depositAmount, setDepositAmount] = useState<string>('50000');
@@ -85,7 +88,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
     }>
   >(() => {
     try {
-      const saved = localStorage.getItem('vtx_wallet_history');
+      const saved = localStorage.getItem(historyStorageKey);
       if (saved) return JSON.parse(saved);
     } catch {}
     return [];
@@ -216,7 +219,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
 
       if (mapped.length > 0) {
         setHistory(mapped);
-        localStorage.setItem('vtx_wallet_history', JSON.stringify(mapped));
+        localStorage.setItem(historyStorageKey, JSON.stringify(mapped));
       }
     } catch {}
   }, []);
@@ -397,7 +400,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
       // Add to local history & persist immediately
       setHistory((prev) => {
         const next = [newTxItem, ...prev.filter((it) => it.id !== newTxItem.id)];
-        localStorage.setItem('vtx_wallet_history', JSON.stringify(next));
+        localStorage.setItem(historyStorageKey, JSON.stringify(next));
         return next;
       });
 
@@ -459,7 +462,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
 
       setHistory((prev) => {
         const next = [newWdrItem, ...prev.filter((it) => it.id !== newWdrItem.id)];
-        localStorage.setItem('vtx_wallet_history', JSON.stringify(next));
+        localStorage.setItem(historyStorageKey, JSON.stringify(next));
         return next;
       });
 
@@ -1218,26 +1221,11 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                       {manualSubMethod === 'QR_CODE' && (
                         <div className="p-4 bg-[#060B13] border border-[#162234] rounded-2xl flex flex-col items-center justify-center space-y-3">
                           <div className="w-48 h-48 bg-white p-2.5 rounded-2xl flex items-center justify-center shadow-2xl relative">
-                            {paymentSettings?.qr_code_url ? (
-                              <img
-                                src={paymentSettings.qr_code_url}
-                                alt="Admin Deposit QR Code"
-                                className="w-full h-full object-contain rounded-lg"
-                                onError={(e) => {
-                                  (e.currentTarget as HTMLElement).style.display = 'none';
-                                  const fallback = document.getElementById('manual-qr-fallback');
-                                  if (fallback) fallback.style.display = 'flex';
-                                }}
-                              />
-                            ) : null}
-                            <div
-                              id="manual-qr-fallback"
-                              style={{ display: paymentSettings?.qr_code_url ? 'none' : 'flex' }}
-                              className="w-full h-full flex flex-col items-center justify-center text-slate-900 text-center p-2"
-                            >
-                              <QrCode className="w-20 h-20 text-slate-900 mb-1" />
-                              <span className="text-[10px] font-mono font-black">{paymentSettings?.upi_id || 'vertex.clearing@hdfcbank'}</span>
-                            </div>
+                            <img
+                              src={paymentSettings?.qr_code_url || `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(`upi://pay?pa=${paymentSettings?.upi_id || 'vertex.clearing@hdfcbank'}&pn=VERTEX+Trading&am=${depositAmount || '50000'}&cu=INR`)}`}
+                              alt="Official Deposit UPI QR Code"
+                              className="w-full h-full object-contain rounded-lg"
+                            />
                           </div>
 
                           <div className="text-center space-y-1">

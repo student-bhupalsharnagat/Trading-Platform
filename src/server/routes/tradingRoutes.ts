@@ -176,7 +176,7 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
         : 0;
 
       const rawProd = String((p as any).product || (p as any).product_type || '').toUpperCase();
-      const isHolding = rawProd === 'HOLDING' || rawProd === 'CNC' || (inst?.category === 'EQUITY' && posType === 'BUY' && rawProd !== 'INTRADAY');
+      const isHolding = rawProd === 'HOLDING' || rawProd === 'CNC' || rawProd === 'NRML' || (inst?.category === 'EQUITY' && posType === 'BUY' && rawProd !== 'INTRADAY' && rawProd !== 'MIS');
       const product = isHolding ? ('HOLDING' as const) : ('INTRADAY' as const);
       const decimals = (inst?.category === 'FOREX' || avgPrice < 10) ? 4 : 2;
 
@@ -202,7 +202,7 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
       const inst = findInstrument(o.instrument_id);
       const lotSize = inst?.lotSize || 100;
       const rawOrderProd = String((o as any).product || (o as any).product_type || '').toUpperCase();
-      const isHoldingOrder = rawOrderProd === 'HOLDING' || rawOrderProd === 'CNC';
+      const isHoldingOrder = rawOrderProd === 'HOLDING' || rawOrderProd === 'CNC' || rawOrderProd === 'NRML';
       const product = isHoldingOrder ? ('HOLDING' as const) : ('INTRADAY' as const);
 
       return {
@@ -700,7 +700,7 @@ router.post(
           const lots = Math.max(1, Math.round(qty / lotSize));
           const pnl = posType === 'BUY' ? (ltp - avgPrice) * qty : (avgPrice - ltp) * qty;
           const rawProd = String((p as any).product || (p as any).product_type || '').toUpperCase();
-          const isHolding = rawProd === 'HOLDING' || rawProd === 'CNC' || (pInst?.category === 'EQUITY' && posType === 'BUY' && rawProd !== 'INTRADAY');
+          const isHolding = rawProd === 'HOLDING' || rawProd === 'CNC' || rawProd === 'NRML' || (pInst?.category === 'EQUITY' && posType === 'BUY' && rawProd !== 'INTRADAY' && rawProd !== 'MIS');
           const product = isHolding ? ('HOLDING' as const) : ('INTRADAY' as const);
 
           return {
@@ -1071,11 +1071,15 @@ router.get(['/funds', '/funds/transactions'], requireAuth, async (req: Authentic
       allPgTxs = [...pgTxs, ...altTxs];
     }
 
+    const isDemoTarget = targetUserId === 'vtx_demo' || targetUserId === 'demo-trader' || String(targetUserId).toLowerCase().includes('demo');
     const memTxs = [
       ...getTenantFundTransactions(tenantId),
-      ...getTenantFundTransactions('TNT-001'),
-      ...getTenantFundTransactions('vertex-default'),
-    ].filter((t: any) => !t.userId || t.userId === targetUserId || t.userId === resolvedTargetUserId || t.userId === 'vtx_demo' || t.userId === 'demo-trader');
+      ...(tenantId !== 'TNT-001' ? getTenantFundTransactions('TNT-001') : []),
+    ].filter((t: any) => {
+      if (!t.userId) return false;
+      if (isDemoTarget) return t.userId === targetUserId || t.userId === resolvedTargetUserId || t.userId === 'vtx_demo' || t.userId === 'demo-trader';
+      return t.userId === targetUserId || t.userId === resolvedTargetUserId;
+    });
 
     const seenIds = new Set<string>();
     const transactions: any[] = [];
@@ -1122,9 +1126,12 @@ router.get('/wallet', optionalAuth, async (req: TenantRequest, res: Response) =>
     const pgTransactions = await postgresFundTransactionRepository.getByTenant(tenantId, userId);
     const memTransactions = [
       ...getTenantFundTransactions(tenantId),
-      ...getTenantFundTransactions('TNT-001'),
-      ...getTenantFundTransactions('vertex-default'),
-    ].filter((t: any) => !t.userId || t.userId === userId || t.userId === 'vtx_demo' || t.userId === 'demo-trader');
+      ...(tenantId !== 'TNT-001' ? getTenantFundTransactions('TNT-001') : []),
+    ].filter((t: any) => {
+      if (!t.userId) return false;
+      if (isDemo) return t.userId === userId || t.userId === 'vtx_demo' || t.userId === 'demo-trader';
+      return t.userId === userId;
+    });
 
     const seenIds = new Set<string>();
     const allTxs: any[] = [];
@@ -1420,6 +1427,28 @@ router.post('/tickets/:id/reply', optionalAuth, (req: TenantRequest, res: Respon
   if (ticket.status === 'RESOLVED') {
     ticket.status = 'IN_PROGRESS';
   }
+
+  // Bug #28: Persist support specialist reply on server across refreshes
+  let agentReplyText = 'Thank you for providing the details. Our trading operations specialist is reviewing your account logs and will update you shortly.';
+  const lowerMsg = (message + ' ' + (ticket.subject || '')).toLowerCase();
+  if (lowerMsg.includes('gold') || lowerMsg.includes('order') || lowerMsg.includes('margin') || lowerMsg.includes('market')) {
+    agentReplyText = 'We checked the order routing logs. For commodity futures like GOLD FUT, please confirm order type is INTRADAY or HOLDING within official MCX hours (09:00 - 23:30 IST). Our technical desk has logged this incident.';
+  } else if (lowerMsg.includes('withdraw') || lowerMsg.includes('50,000') || lowerMsg.includes('bank') || lowerMsg.includes('payment')) {
+    agentReplyText = 'We have verified the payout batch with our banking partner. The funds have been cleared from our node and should reflect in your account shortly. Transaction UTR has been logged.';
+  } else if (lowerMsg.includes('pan') || lowerMsg.includes('kyc') || lowerMsg.includes('document')) {
+    agentReplyText = 'Your identity documents have been re-validated against the KRA database. Your KYC compliance status is now Verified with full segment access enabled.';
+  }
+
+  const agentMsg = {
+    id: `msg-${Date.now() + 1}`,
+    sender: 'support' as const,
+    senderName: 'Vertex Support',
+    text: agentReplyText,
+    time: timeStr,
+    timestamp: formattedTime,
+  };
+  ticket.messages.push(agentMsg);
+  ticket.status = 'IN_PROGRESS';
 
   const replyUserId = req.user?.userId || req.user?.id || 'CLIENT';
   const replyClientCode = (req.user?.userId || req.user?.id || 'CLIENT').toUpperCase();

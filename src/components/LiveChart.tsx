@@ -18,6 +18,9 @@ import {
   Wallet,
 } from 'lucide-react';
 
+// Bug #12 & #23: Module-level cache so switching tabs/intervals does not wipe historical candle history
+const globalCandleCache = new Map<string, Candle[]>();
+
 interface LiveChartProps {
   instrument: Instrument;
   marketClosedOverride?: boolean | null;
@@ -104,7 +107,14 @@ export const LiveChart: React.FC<LiveChartProps> = ({
     return list;
   };
 
-  const [candles, setCandles] = useState<Candle[]>(() => generateInitialCandles(instrument.lastPrice || 1000, '15m'));
+  const [candles, setCandles] = useState<Candle[]>(() => {
+    const key = `${instrument.symbol}_15m`;
+    const cached = globalCandleCache.get(key);
+    if (cached && cached.length > 0) return cached;
+    const initial = generateInitialCandles(instrument.lastPrice || 1000, '15m');
+    globalCandleCache.set(key, initial);
+    return initial;
+  });
 
   // Market Closed modal
   const [showMarketClosedModal, setShowMarketClosedModal] = useState(false);
@@ -128,6 +138,11 @@ export const LiveChart: React.FC<LiveChartProps> = ({
   const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number }>({ width: 800, height: 480 });
 
   useEffect(() => {
+    const key = `${instrument.symbol}_${timeframe}`;
+    const cached = globalCandleCache.get(key);
+    if (cached && cached.length > 0) {
+      setCandles(cached);
+    }
     let isMounted = true;
     authApi
       .getCandles(instrument.symbol, timeframe)
@@ -135,14 +150,19 @@ export const LiveChart: React.FC<LiveChartProps> = ({
         if (isMounted) {
           if (res.candles && res.candles.length > 0) {
             setCandles(res.candles);
-          } else {
-            setCandles(generateInitialCandles(instrument.lastPrice, timeframe));
+            globalCandleCache.set(key, res.candles);
+          } else if (!globalCandleCache.has(key)) {
+            const initial = generateInitialCandles(instrument.lastPrice, timeframe);
+            setCandles(initial);
+            globalCandleCache.set(key, initial);
           }
         }
       })
       .catch(() => {
-        if (isMounted) {
-          setCandles(generateInitialCandles(instrument.lastPrice, timeframe));
+        if (isMounted && !globalCandleCache.has(key)) {
+          const initial = generateInitialCandles(instrument.lastPrice, timeframe);
+          setCandles(initial);
+          globalCandleCache.set(key, initial);
         }
       });
 
@@ -163,9 +183,10 @@ export const LiveChart: React.FC<LiveChartProps> = ({
       last.low = Math.min(last.low, instrument.lastPrice);
       const updated = [...prev];
       updated[lastIdx] = last;
+      globalCandleCache.set(`${instrument.symbol}_${timeframe}`, updated);
       return updated;
     });
-  }, [instrument.lastPrice]);
+  }, [instrument.lastPrice, instrument.symbol, timeframe]);
 
   // Live ticking candle update
   useEffect(() => {
@@ -338,35 +359,41 @@ export const LiveChart: React.FC<LiveChartProps> = ({
         ctx.fillRect(x - bodyWidth / 2, bodyTop, bodyWidth, bodyHeight);
       });
     } else if (chartType === 'Line' || chartType === 'Area') {
-      const lastX = leftMargin + (visibleCandles.length - 1) * candleWidth + candleWidth / 2;
+      // Bug #25: Robust Line and Area rendering with NaN guards
+      const lastX = leftMargin + Math.max(0, visibleCandles.length - 1) * candleWidth + candleWidth / 2;
       const firstX = leftMargin + candleWidth / 2;
       const baseY = topMargin + chartHeight;
 
-      // Area gradient for both Line and Area styles (so Line draws visible shaded gradient)
-      const gradient = ctx.createLinearGradient(0, topMargin, 0, baseY);
-      gradient.addColorStop(0, chartType === 'Line' ? 'rgba(56, 189, 248, 0.20)' : 'rgba(16, 185, 129, 0.22)');
-      gradient.addColorStop(1, 'rgba(0, 0, 0, 0.0)');
+      if (chartType === 'Area') {
+        const gradient = ctx.createLinearGradient(0, topMargin, 0, baseY);
+        gradient.addColorStop(0, 'rgba(16, 185, 129, 0.25)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0.0)');
 
+        ctx.beginPath();
+        visibleCandles.forEach((c, idx) => {
+          const x = leftMargin + idx * candleWidth + candleWidth / 2;
+          const y = priceToY(c.close);
+          if (isFinite(x) && isFinite(y)) {
+            if (idx === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+        });
+        ctx.lineTo(lastX, baseY);
+        ctx.lineTo(firstX, baseY);
+        ctx.closePath();
+        ctx.fillStyle = gradient;
+        ctx.fill();
+      }
+
+      // Price line path (drawn for both Line and Area)
       ctx.beginPath();
       visibleCandles.forEach((c, idx) => {
         const x = leftMargin + idx * candleWidth + candleWidth / 2;
         const y = priceToY(c.close);
-        if (idx === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
-      ctx.lineTo(lastX, baseY);
-      ctx.lineTo(firstX, baseY);
-      ctx.closePath();
-      ctx.fillStyle = gradient;
-      ctx.fill();
-
-      // Price line path
-      ctx.beginPath();
-      visibleCandles.forEach((c, idx) => {
-        const x = leftMargin + idx * candleWidth + candleWidth / 2;
-        const y = priceToY(c.close);
-        if (idx === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        if (isFinite(x) && isFinite(y)) {
+          if (idx === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
       });
       ctx.strokeStyle = chartType === 'Line' ? '#38BDF8' : '#10B981';
       ctx.lineWidth = 2.5;
@@ -773,7 +800,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
               className="px-2 py-1 rounded-md text-[11px] font-bold border border-slate-700 bg-[#0E1726] text-slate-300 hover:text-white cursor-pointer"
               title="Switch chart view"
             >
-              {engineMode === 'TRADINGVIEW' ? 'TradingView' : 'Standard'}
+              {engineMode === 'TRADINGVIEW' ? 'TradingView Chart' : 'Standard Technical'}
             </button>
 
             {/* Live ASK / BID pills */}

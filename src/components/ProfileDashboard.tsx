@@ -530,7 +530,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Mobile</span>
-                  <span className="font-mono text-slate-200">+{user.countryCode || '91'} {user.mobile || '9876543210'}</span>
+                  <span className="font-mono text-slate-200">{(user.countryCode ? (user.countryCode.startsWith('+') ? user.countryCode : `+${user.countryCode}`) : '+91')} {user.mobile || '9876543210'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">PAN Number</span>

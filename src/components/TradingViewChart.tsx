@@ -50,10 +50,10 @@ export const getTradingViewSymbol = (symbol: string): string => {
   if (clean.includes('SENSEX')) return 'BSE:SENSEX';
   if (clean.includes('BANKEX')) return 'BSE:BANKEX';
 
-  // Crypto
-  if (clean.includes('BTC') || clean.includes('BITCOIN')) return 'BINANCE:BTCUSDT';
-  if (clean.includes('ETH') || clean.includes('ETHEREUM')) return 'BINANCE:ETHUSDT';
-  if (clean.includes('SOL') || clean.includes('SOLANA')) return 'BINANCE:SOLUSDT';
+  // Crypto (Spot & Perpetuals)
+  if (clean.includes('BTC') || clean.includes('BITCOIN')) return (clean.includes('USDT') || clean.includes('PERP')) ? 'BINANCE:BTCUSDTPERP' : 'BINANCE:BTCUSDT';
+  if (clean.includes('ETH') || clean.includes('ETHEREUM')) return (clean.includes('USDT') || clean.includes('PERP')) ? 'BINANCE:ETHUSDTPERP' : 'BINANCE:ETHUSDT';
+  if (clean.includes('SOL') || clean.includes('SOLANA')) return (clean.includes('USDT') || clean.includes('PERP')) ? 'BINANCE:SOLUSDTPERP' : 'BINANCE:SOLUSDT';
   if (clean.includes('BNB')) return 'BINANCE:BNBUSDT';
   if (clean.includes('XRP') || clean.includes('RIPPLE')) return 'BINANCE:XRPUSDT';
   if (clean.includes('DOGE')) return 'BINANCE:DOGEUSDT';
@@ -62,7 +62,8 @@ export const getTradingViewSymbol = (symbol: string): string => {
 
   // Indian Equities
   if (clean.includes('RELIANCE')) return 'NSE:RELIANCE';
-  if (clean.includes('HDFC')) return 'NSE:HDFCBANK';
+  if (clean.includes('HDFCLIFE')) return 'NSE:HDFCLIFE';
+  if (clean.includes('HDFCBANK') || clean.includes('HDFC')) return 'NSE:HDFCBANK';
   if (clean.includes('TCS')) return 'NSE:TCS';
   if (clean.includes('INFY') || clean.includes('INFOSYS')) return 'NSE:INFY';
   if (clean.includes('ICICI')) return 'NSE:ICICIBANK';

@@ -139,8 +139,54 @@ export class TradingExecutionService {
     const requiredMargin = marginPerLot * lots;
     const qty = lotSize > 1 ? (lots * lotSize) : (input.quantity && input.quantity > 0 ? input.quantity : lots * lotSize);
     const rawOrderType = (input.orderType || 'MARKET').toUpperCase();
-    const isPendingOrder = rawOrderType === 'LIMIT' || rawOrderType === 'SL' || rawOrderType === 'SL-M';
     const effectiveOrderType = rawOrderType === 'SL-M' ? 'SL-M' : rawOrderType === 'SL' ? 'SL' : rawOrderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
+
+    // Bug #27: SL-M orders execute immediately when trigger is crossed
+    const isSlmTriggered = rawOrderType === 'SL-M' && input.triggerPrice != null &&
+      ((side === 'BUY' && inst.lastPrice >= input.triggerPrice) || (side === 'SELL' && inst.lastPrice <= input.triggerPrice));
+
+    // Bug #31: Unfillable IOC limit orders cancel immediately
+    const isUnfillableIOC = input.timeInForce === 'IOC' && (
+      rawOrderType === 'SL' || rawOrderType === 'SL-M' ||
+      (rawOrderType === 'LIMIT' && input.price != null && (
+        (side === 'BUY' && input.price < inst.lastPrice) ||
+        (side === 'SELL' && input.price > inst.lastPrice)
+      ))
+    );
+
+    if (isUnfillableIOC) {
+      const cancelledOrder = await postgresOrderRepository.create({
+        id: orderId,
+        tenant_id: tenantId,
+        user_id: userId,
+        client_order_id: clientOrderId ? clientOrderId.trim() : null,
+        instrument_id: inst.symbol,
+        side,
+        order_type: effectiveOrderType,
+        quantity: qty,
+        price: execPrice,
+        trigger_price: input.triggerPrice != null ? input.triggerPrice : null,
+        status: 'CANCELLED',
+        broker_order_id: `ioc-cncl-${Date.now()}`,
+        normalized_status: 'CANCELLED',
+        filled_quantity: 0,
+        remaining_quantity: qty,
+        average_fill_price: null,
+        time_in_force: 'IOC',
+      });
+      const isPrivileged = (role: string) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(role);
+      const userFilter = (ws: any) => ws.userId === userId || isPrivileged(ws.role);
+      tradingWebSocketServer.broadcastToTenant(tenantId, 'order.cancelled', cancelledOrder, userFilter);
+      const wallet = await postgresWalletRepository.getWallet(tenantId, userId);
+      return {
+        success: false,
+        order: cancelledOrder,
+        wallet,
+        message: `IOC limit order for ${inst.symbol} cancelled immediately as price could not be filled.`,
+      };
+    }
+
+    const isPendingOrder = !isSlmTriggered && (rawOrderType === 'LIMIT' || rawOrderType === 'SL' || rawOrderType === 'SL-M');
     const orderId = `ORD-${Math.floor(10000 + Math.random() * 90000)}`;
 
     // Communicate through Execution Gateway
@@ -780,6 +826,64 @@ export class TradingExecutionService {
       console.error('[Event] wallet.updated dispatch error:', e)
     );
 
+    // Bug #03: Create GTT OCO bracket stop-loss and target child orders upon primary buy execution
+    if (result.newOrder && side === 'BUY') {
+      const isPrivileged = (role: string) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(role);
+      const userFilter = (ws: any) => ws.userId === userId || isPrivileged(ws.role);
+      if (input.stopLoss && input.stopLoss > 0) {
+        try {
+          const slChild = await postgresOrderRepository.create({
+            id: `ORD-SL-${Math.floor(10000 + Math.random() * 90000)}`,
+            tenant_id: tenantId,
+            user_id: userId,
+            client_order_id: `gtt-sl-${result.newOrder.id}`,
+            instrument_id: inst.symbol,
+            side: 'SELL',
+            order_type: 'SL-M',
+            quantity: qty,
+            price: input.stopLoss,
+            trigger_price: input.stopLoss,
+            status: 'PENDING',
+            broker_order_id: `gtt-sl-${Date.now()}`,
+            normalized_status: 'NEW',
+            filled_quantity: 0,
+            remaining_quantity: qty,
+            average_fill_price: null,
+            time_in_force: 'GTC',
+          });
+          tradingWebSocketServer.broadcastToTenant(tenantId, 'order.created', slChild, userFilter);
+        } catch (e) {
+          console.error('[GTT] Failed to create stop-loss child order:', e);
+        }
+      }
+      if (input.target && input.target > 0) {
+        try {
+          const tgtChild = await postgresOrderRepository.create({
+            id: `ORD-TGT-${Math.floor(10000 + Math.random() * 90000)}`,
+            tenant_id: tenantId,
+            user_id: userId,
+            client_order_id: `gtt-tgt-${result.newOrder.id}`,
+            instrument_id: inst.symbol,
+            side: 'SELL',
+            order_type: 'LIMIT',
+            quantity: qty,
+            price: input.target,
+            trigger_price: null,
+            status: 'PENDING',
+            broker_order_id: `gtt-tgt-${Date.now()}`,
+            normalized_status: 'NEW',
+            filled_quantity: 0,
+            remaining_quantity: qty,
+            average_fill_price: null,
+            time_in_force: 'GTC',
+          });
+          tradingWebSocketServer.broadcastToTenant(tenantId, 'order.created', tgtChild, userFilter);
+        } catch (e) {
+          console.error('[GTT] Failed to create target child order:', e);
+        }
+      }
+    }
+
     return {
       success: true,
       order: result.newOrder,
@@ -822,7 +926,9 @@ export class TradingExecutionService {
         : (inst?.lastPrice ? Number(inst.lastPrice) : entryAvg);
 
       // Guard against unscaled/mismatched mock instrument prices (>1.5x or <0.67x deviation from entryAvg beyond exchange circuit limits)
-      if (exitPriceOverride === undefined && inst?.lastPrice && entryAvg > 0) {
+      // Bug #17: Exempt options from circuit breaker ratio clamp so market exits calculate realized PnL using current option LTP
+      const isOption = inst?.category === 'OPTIONS' || /-(?:CE|PE)$/i.test(pos.instrument_id) || /\s(?:CE|PE)$/i.test(pos.instrument_id);
+      if (!isOption && exitPriceOverride === undefined && inst?.lastPrice && entryAvg > 0) {
         const ratio = Number(inst.lastPrice) / entryAvg;
         if (ratio < 0.67 || ratio > 1.5) {
           exitPrice = entryAvg;
