@@ -807,8 +807,32 @@ export class TradingExecutionService {
       const target = { targetUserId: userId };
       tradingWebSocketServer.broadcastToTenant(tenantId, 'order.created', result.newOrder, userFilter, false, target);
       tradingWebSocketServer.broadcastToTenant(tenantId, 'trade.executed', result.newTrade, userFilter, false, target);
-      tradingWebSocketServer.broadcastToTenant(tenantId, 'position.updated', result.updatedPosition, userFilter, false, target);
-      tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', result.updatedWallet, userFilter, false, target);
+
+      const normalizedPositionPayload = {
+        ...result.updatedPosition,
+        ...result.positionPayload,
+        symbol: inst.symbol,
+        instrument_id: inst.symbol,
+        qty: Math.abs(Number(result.updatedPosition.quantity)),
+        quantity: Number(result.updatedPosition.quantity),
+        avgPrice: Number(result.updatedPosition.average_price),
+        average_price: Number(result.updatedPosition.average_price),
+        type: Number(result.updatedPosition.quantity) >= 0 ? 'BUY' : 'SELL',
+        product: input.product || 'INTRADAY',
+        ltp: execPrice,
+      };
+      tradingWebSocketServer.broadcastToTenant(tenantId, 'position.updated', normalizedPositionPayload, userFilter, false, target);
+
+      const normalizedWalletPayload = {
+        ...result.updatedWallet,
+        availableBalance: Number(result.updatedWallet.available_balance),
+        available_balance: Number(result.updatedWallet.available_balance),
+        usedMargin: Number(result.updatedWallet.used_margin),
+        used_margin: Number(result.updatedWallet.used_margin),
+        totalPnL: Number(result.updatedWallet.realized_pnl),
+        todayPnL: Number(result.updatedWallet.realized_pnl),
+      };
+      tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', normalizedWalletPayload, userFilter, false, target);
     } catch (wsErr) {
       console.error('[WebSocket] Broadcast error:', wsErr);
     }
@@ -1155,8 +1179,25 @@ export class TradingExecutionService {
     // Broadcast WebSocket events
     const isPrivileged = (role: string) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(role);
     const target = { targetUserId: userId };
-    tradingWebSocketServer.broadcastToTenant(tenantId, 'position.updated', { ...result.pos, quantity: 0 }, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
-    tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', result.updatedWallet, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
+    const normalizedClosePos = {
+      ...result.pos,
+      symbol: result.pos.instrument_id || result.pos.symbol,
+      instrument_id: result.pos.instrument_id || result.pos.symbol,
+      quantity: 0,
+      qty: 0,
+    };
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'position.updated', normalizedClosePos, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
+    
+    const normalizedCloseWallet = {
+      ...result.updatedWallet,
+      availableBalance: Number(result.updatedWallet.available_balance),
+      available_balance: Number(result.updatedWallet.available_balance),
+      usedMargin: Number(result.updatedWallet.used_margin),
+      used_margin: Number(result.updatedWallet.used_margin),
+      totalPnL: Number(result.updatedWallet.realized_pnl),
+      todayPnL: Number(result.updatedWallet.realized_pnl),
+    };
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', normalizedCloseWallet, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
     tradingWebSocketServer.broadcastToTenant(tenantId, 'order.created', result.closeOrder, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
     tradingWebSocketServer.broadcastToTenant(tenantId, 'trade.executed', result.closeTrade, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
 

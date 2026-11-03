@@ -363,6 +363,8 @@ export class ManualDepositService {
         'wallet.updated',
         {
           userId: approvedRequest.user_id,
+          availableBalance: balanceAfter,
+          available_balance: balanceAfter,
           amountCredited: Number(approvedRequest.amount),
           timestamp: new Date().toISOString(),
         },

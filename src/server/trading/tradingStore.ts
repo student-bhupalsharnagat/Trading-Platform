@@ -548,15 +548,20 @@ const tickTimer = setInterval(() => {
     wallet.todayPnL = Number(realizedPnL.toFixed(2));
     wallet.totalPnL = Number((realizedPnL + livePnL).toFixed(2));
 
-    // Only broadcast portfolio.mtm if there are active connected clients for this tenant
+    // Only broadcast portfolio.mtm to unauthenticated or demo-trader clients so real user portfolios are never overwritten
     if (tradingWebSocketServer.getConnectedClientsCount(tenantId) > 0) {
       try {
-        tradingWebSocketServer.broadcastToTenant(tenantId, 'portfolio.mtm', {
-          positions: tenantPositions[tenantId],
-          wallet,
-          unrealizedPnL: Number(livePnL.toFixed(2)),
-          timestamp: new Date().toISOString(),
-        });
+        tradingWebSocketServer.broadcastToTenant(
+          tenantId,
+          'portfolio.mtm',
+          {
+            positions: tenantPositions[tenantId],
+            wallet,
+            unrealizedPnL: Number(livePnL.toFixed(2)),
+            timestamp: new Date().toISOString(),
+          },
+          (ws: any) => !ws.userId || ws.userId === 'demo-trader' || ws.userId === 'vtx_demo'
+        );
       } catch {
         // Ignore websocket broadcast during initial boot
       }

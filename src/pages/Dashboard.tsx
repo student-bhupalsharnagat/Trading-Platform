@@ -68,6 +68,30 @@ const isEquityInstrument = (inst: Instrument) =>
   inst.sectionName?.includes('NSE') ||
   inst.sectionName?.includes('BSE');
 
+const normalizeOrder = (raw: any): any => {
+  const symbol = raw.symbol || raw.instrument_id || '';
+  const type = (raw.type || raw.side || 'BUY').toUpperCase();
+  const qty = Number(raw.qty ?? raw.quantity ?? 0);
+  const lotSize = Number(raw.lotSize || 1);
+  const lots = Number(raw.lots || Math.max(1, Math.round(qty / lotSize)));
+  const dateObj = raw.created_at ? new Date(raw.created_at) : new Date();
+  return {
+    id: raw.id || `ORD-${Date.now()}`,
+    symbol,
+    type,
+    orderType: raw.orderType || raw.order_type || 'MARKET',
+    product: raw.product || 'INTRADAY',
+    lots,
+    qty,
+    lotSize,
+    price: Number(raw.price || 0),
+    status: raw.status || 'EXECUTED',
+    time: raw.time || dateObj.toTimeString().split(' ')[0],
+    date: raw.date || dateObj.toLocaleDateString('en-GB'),
+    tenantId: raw.tenantId || raw.tenant_id,
+  };
+};
+
 interface DashboardProps {
   onNavigate: (route: string) => void;
 }
@@ -339,8 +363,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 if (updatedOrder) setOrderWindowInstrument(updatedOrder);
               }
             } else if (data.event === 'portfolio.mtm' && data.payload) {
-              // Direct state push: update positions and wallet instantaneously without expensive REST re-fetch
+              // Direct state push: only update demo state or matching user to prevent clobbering real positions
               const { positions: mtmPositions, wallet: mtmWallet } = data.payload;
+              const isDemoUser = !user || (user as any).isDemo || user.userId === 'demo-trader' || user.userId === 'vtx_demo';
+              if (data.payload.userId && user?.userId && data.payload.userId !== user.userId) return;
+              if (!data.payload.userId && !isDemoUser) return;
               setPortfolio((prev) => {
                 if (!prev) return prev;
                 return {
@@ -363,14 +390,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               const w = data.payload;
               setPortfolio((prev) => {
                 if (!prev) return prev;
+                const newBal = w.availableBalance ?? w.available_balance ?? (w.amountCredited ? prev.wallet.availableBalance + Number(w.amountCredited) : prev.wallet.availableBalance);
                 return {
                   ...prev,
                   wallet: {
-                    availableBalance: w.availableBalance ?? w.available_balance ?? prev.wallet.availableBalance,
+                    availableBalance: newBal,
                     usedMargin: w.usedMargin ?? w.used_margin ?? prev.wallet.usedMargin,
                     totalPnL: w.realizedPnl ?? w.realized_pnl ?? w.totalPnL ?? prev.wallet.totalPnL,
                     todayPnL: prev.wallet.todayPnL,
-                    deposited: w.deposited ?? prev.wallet.deposited,
+                    deposited: w.deposited ?? (w.amountCredited ? prev.wallet.deposited + Number(w.amountCredited) : prev.wallet.deposited),
                     withdrawn: w.withdrawn ?? prev.wallet.withdrawn,
                   },
                 };
@@ -381,16 +409,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 if (!prev) return prev;
                 const existing = prev.positions || [];
                 const sym = updatedPos.symbol || updatedPos.instrument_id;
-                const id = updatedPos.id;
-                const idx = existing.findIndex((p: any) => p.id === id || (sym && p.symbol === sym));
+                const id = updatedPos.id || updatedPos.positionId;
+                const idx = existing.findIndex((p: any) => (id && p.id === id) || (sym && (p.symbol === sym || p.instrument_id === sym)));
                 const qty = Math.abs(Number(updatedPos.quantity ?? updatedPos.qty ?? 0));
                 let nextPositions;
                 if (qty === 0) {
                   nextPositions = existing.filter((_, i) => i !== idx);
                 } else if (idx >= 0) {
-                  nextPositions = existing.map((p: any, i: number) => (i === idx ? { ...p, ...updatedPos } : p));
+                  nextPositions = existing.map((p: any, i: number) => (i === idx ? { ...p, ...updatedPos, symbol: sym || p.symbol } : p));
                 } else {
-                  nextPositions = [updatedPos, ...existing];
+                  nextPositions = [{ ...updatedPos, symbol: sym }, ...existing];
                 }
                 return { ...prev, positions: nextPositions };
               });
@@ -402,6 +430,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               data.event === 'manual_deposit.approved' ||
               data.event === 'manual_deposit.rejected'
             ) {
+              if (data.event === 'order.created' && data.payload) {
+                const newOrd = normalizeOrder(data.payload);
+                setPortfolio((prev) => {
+                  if (!prev) return prev;
+                  const existing = prev.orders || [];
+                  if (existing.some((o: any) => o.id === newOrd.id)) return prev;
+                  return { ...prev, orders: [newOrd, ...existing] };
+                });
+              }
               scheduleDebouncedFetch();
               if (data.event.startsWith('manual_deposit.')) {
                 window.dispatchEvent(new CustomEvent('vtx_manual_deposit_updated', { detail: data.payload }));
@@ -508,11 +545,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     if (orderRes) {
       setPortfolio((prev) => {
         if (!prev) return prev;
-        const newOrders = orderRes.order
-          ? [orderRes.order, ...(prev.orders || []).filter((o: any) => o.id !== orderRes.order.id)]
+        const normalizedOrd = orderRes.order ? normalizeOrder(orderRes.order) : null;
+        const newOrders = normalizedOrd
+          ? [normalizedOrd, ...(prev.orders || []).filter((o: any) => o.id !== normalizedOrd.id)]
           : prev.orders;
-        const newPositions = orderRes.positions || prev.positions;
-        const newWallet = orderRes.wallet ? { ...prev.wallet, ...orderRes.wallet } : prev.wallet;
+        
+        let newPositions = Array.isArray(orderRes.positions) ? orderRes.positions : (prev.positions || []);
+        if (orderRes.position) {
+          const p = orderRes.position;
+          const pSym = p.symbol || p.instrument_id;
+          const pQty = Math.abs(Number(p.quantity ?? p.qty ?? 0));
+          const idx = newPositions.findIndex((item: any) => (p.id && item.id === p.id) || (pSym && (item.symbol === pSym || item.instrument_id === pSym)));
+          if (pQty === 0) {
+            newPositions = newPositions.filter((_: any, i: number) => i !== idx);
+          } else if (idx >= 0) {
+            newPositions = newPositions.map((item: any, i: number) => (i === idx ? { ...item, ...p } : item));
+          } else {
+            newPositions = [p, ...newPositions];
+          }
+        }
+
+        const newWallet = orderRes.wallet
+          ? {
+              ...prev.wallet,
+              availableBalance: orderRes.wallet.availableBalance ?? orderRes.wallet.available_balance ?? prev.wallet.availableBalance,
+              usedMargin: orderRes.wallet.usedMargin ?? orderRes.wallet.used_margin ?? prev.wallet.usedMargin,
+              totalPnL: orderRes.wallet.totalPnL ?? orderRes.wallet.realized_pnl ?? prev.wallet.totalPnL,
+            }
+          : prev.wallet;
+
         return {
           ...prev,
           orders: newOrders,
@@ -695,7 +756,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       map.set(inst.id.toUpperCase(), inst);
       const clean = inst.symbol.replace(/^(NSE|BSE|MCX|NFO|BINANCE|TVC):/i, '').trim().toUpperCase();
       map.set(clean, inst);
+      map.set(clean.replace(/\s+/g, ''), inst);
       map.set(inst.symbol.toUpperCase(), inst);
+      map.set(inst.id.toLowerCase(), inst);
+      map.set(inst.symbol.toLowerCase(), inst);
     }
     return map;
   }, [instruments]);
@@ -706,7 +770,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       const sym = pos.symbol || pos.instrument_id || '';
       const cleanSym = sym.replace(/^(NSE|BSE|MCX|NFO|BINANCE|TVC):/i, '').trim().toUpperCase();
 
-      const liveInst = instrumentsMap.get(cleanSym) || instrumentsMap.get(sym.toUpperCase());
+      const noSpaceSym = cleanSym.replace(/\s+/g, '');
+      const liveInst = instrumentsMap.get(cleanSym) || instrumentsMap.get(sym.toUpperCase()) || instrumentsMap.get(noSpaceSym) || instruments.find((i) => i.symbol.toUpperCase() === cleanSym || i.id.toUpperCase() === cleanSym);
 
       const rawQty = pos.qty ?? pos.quantity ?? 0;
       const qty = Math.abs(Number(rawQty) || 0);
@@ -2779,77 +2844,105 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-[#162234]">
-                  {portfolio?.orders?.map((ord) => (
-                    <tr key={ord.id} className="hover:bg-slate-50/75 dark:hover:bg-[#121C2D]/60 transition-colors">
-                      <td className="py-3 px-4 font-mono">
-                        <div className="font-bold text-slate-900 dark:text-white">#{ord.id}</div>
-                        <div className="text-[11px] text-slate-400">{ord.time} · {ord.date}</div>
-                      </td>
-                      <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">{ord.symbol}</td>
-                      <td className="py-3 px-4">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-black tracking-wider ${
-                            ord.type === 'BUY'
-                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
-                              : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
-                          }`}
-                        >
-                          {ord.type}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono font-bold text-slate-800 dark:text-slate-200">
-                        {ord.lots || 1} ({ord.qty})
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 dark:text-white">
-                        ₹{ord.price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <span className="px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 rounded-md text-[11px] font-bold font-mono">
-                          {ord.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {portfolio?.orders?.map((ord: any) => {
+                    const sym = ord.symbol || ord.instrument_id || '-';
+                    const side = (ord.type || ord.side || 'BUY').toUpperCase();
+                    const qty = ord.qty ?? ord.quantity ?? 0;
+                    const lots = ord.lots || Math.max(1, Math.round(Number(qty) / (ord.lotSize || 1)));
+                    const timeStr = ord.time && ord.date ? `${ord.time} · ${ord.date}` : ord.created_at ? new Date(ord.created_at).toLocaleString('en-IN') : '-';
+                    const status = ord.status || 'EXECUTED';
+                    return (
+                      <tr key={ord.id} className="hover:bg-slate-50/75 dark:hover:bg-[#121C2D]/60 transition-colors">
+                        <td className="py-3 px-4 font-mono">
+                          <div className="font-bold text-slate-900 dark:text-white">#{ord.id}</div>
+                          <div className="text-[11px] text-slate-400">{timeStr}</div>
+                        </td>
+                        <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">{sym}</td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-black tracking-wider ${
+                              side === 'BUY'
+                                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                                : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                            }`}
+                          >
+                            {side}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono font-bold text-slate-800 dark:text-slate-200">
+                          {lots} ({qty})
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 dark:text-white">
+                          ₹{Number(ord.price || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <span className={`px-2.5 py-1 border rounded-md text-[11px] font-bold font-mono ${
+                            status === 'EXECUTED'
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                              : status === 'PENDING'
+                              ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                              : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                          }`}>
+                            {status}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
             {/* Mobile Cards View */}
             <div className="md:hidden space-y-2.5">
-              {portfolio?.orders?.map((ord) => (
-                <div
-                  key={ord.id}
-                  className="p-4 bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1A2638] rounded-xl flex items-center justify-between flex-wrap gap-2 shadow-xs"
-                >
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-black ${
-                          ord.type === 'BUY'
-                            ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/40'
-                            : 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40'
-                        }`}
-                      >
-                        {ord.type}
+              {portfolio?.orders?.map((ord: any) => {
+                const sym = ord.symbol || ord.instrument_id || '-';
+                const side = (ord.type || ord.side || 'BUY').toUpperCase();
+                const qty = ord.qty ?? ord.quantity ?? 0;
+                const lots = ord.lots || Math.max(1, Math.round(Number(qty) / (ord.lotSize || 1)));
+                const timeStr = ord.time && ord.date ? `${ord.time} · ${ord.date}` : ord.created_at ? new Date(ord.created_at).toLocaleString('en-IN') : '-';
+                const status = ord.status || 'EXECUTED';
+                return (
+                  <div
+                    key={ord.id}
+                    className="p-4 bg-white dark:bg-[#0B111C] border border-slate-200 dark:border-[#1A2638] rounded-xl flex items-center justify-between flex-wrap gap-2 shadow-xs"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                            side === 'BUY'
+                              ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/40'
+                              : 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40'
+                          }`}
+                        >
+                          {side}
+                        </span>
+                        <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">{sym}</h3>
+                        <span className="text-xs text-slate-400 font-mono">#{ord.id}</span>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-mono">
+                        Lots: <span className="text-slate-900 dark:text-white font-bold">{lots}</span> ({qty} Qty) • Rate: ₹
+                        {Number(ord.price || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className={`px-2 py-1 border rounded text-xs font-bold font-mono ${
+                        status === 'EXECUTED'
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                          : status === 'PENDING'
+                          ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                          : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                      }`}>
+                        {status}
                       </span>
-                      <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">{ord.symbol}</h3>
-                      <span className="text-xs text-slate-400 font-mono">#{ord.id}</span>
-                    </div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-mono">
-                      Lots: <span className="text-slate-900 dark:text-white font-bold">{ord.lots || 1}</span> ({ord.qty} Qty) • Rate: ₹
-                      {ord.price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <span className="px-2 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 rounded text-xs font-bold font-mono">
-                      {ord.status}
-                    </span>
-                    <div className="text-[10px] text-slate-400 font-mono mt-1">
-                      {ord.time} · {ord.date}
+                      <div className="text-[10px] text-slate-400 font-mono mt-1">
+                        {timeStr}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {(!portfolio?.orders || portfolio.orders.length === 0) && (
