@@ -1096,7 +1096,7 @@ export class AuthService {
         iat: Math.floor(Date.now() / 1000),
       },
       getJwtSecret(),
-      { expiresIn: JWT_EXPIRES_IN }
+      { algorithm: 'HS256', expiresIn: JWT_EXPIRES_IN }
     );
   }
 
@@ -1106,7 +1106,7 @@ export class AuthService {
   public verifyToken(token: string): any {
     try {
       if (this.isTokenRevoked(token)) return null;
-      const decoded = jwt.verify(token, getJwtSecret()) as any;
+      const decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] }) as any;
       if (!decoded) return null;
 
       // Check if user account was updated/invalidated after token issue

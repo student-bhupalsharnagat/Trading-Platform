@@ -1,6 +1,30 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
 
+export function safeErrorMessage(err: any, fallback = 'An unexpected server error occurred.'): string {
+  const isProd = process.env.NODE_ENV === 'production';
+  const rawMessage = err?.message || fallback;
+  const isInternalDbError = Boolean(
+    err?.routine ||
+    err?.severity ||
+    (typeof rawMessage === 'string' && (
+      rawMessage.includes('relation "') ||
+      rawMessage.includes('syntax error at') ||
+      rawMessage.includes('column "') ||
+      rawMessage.includes('foreign key') ||
+      rawMessage.includes('PGlite') ||
+      rawMessage.includes('SELECT ') ||
+      rawMessage.includes('INSERT INTO') ||
+      rawMessage.includes('UPDATE ')
+    ))
+  );
+
+  if (isProd || isInternalDbError) {
+    return isInternalDbError ? 'An internal database error occurred.' : fallback;
+  }
+  return rawMessage;
+}
+
 export function sanitizeErrorResponse(
   err: any,
   isProd = process.env.NODE_ENV === 'production'

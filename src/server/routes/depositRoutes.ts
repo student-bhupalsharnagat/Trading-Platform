@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import { requireAuth, AuthenticatedRequest } from '../middleware/authMiddleware.ts';
+import { fundsRateLimiter } from '../middleware/rateLimitMiddleware.ts';
 import { manualDepositService } from '../services/ManualDepositService.ts';
 
 const router = Router();
@@ -45,7 +46,7 @@ router.get('/payment-details', async (req: AuthenticatedRequest, res: Response) 
  * POST /api/deposit/manual-request
  * User: Submit a manual deposit request (Bank Transfer / QR Code with UTR)
  */
-router.post('/manual-request', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/manual-request', requireAuth, fundsRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = getReqTenantId(req);
     const user = req.user;

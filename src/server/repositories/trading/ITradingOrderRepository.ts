@@ -27,7 +27,7 @@ export interface ITradingOrderRepository {
   create(order: Omit<TradingOrder, 'created_at' | 'updated_at'>, client?: DbClient): Promise<TradingOrder>;
   findById(tenantId: string, id: string, client?: DbClient): Promise<TradingOrder | null>;
   findByClientOrderId(tenantId: string, userId: string, clientOrderId: string, client?: DbClient): Promise<TradingOrder | null>;
-  getOrders(tenantId: string, userId?: string, status?: string, client?: DbClient): Promise<TradingOrder[]>;
+  getOrders(tenantId: string, userId?: string, status?: string, client?: DbClient, limit?: number, offset?: number): Promise<TradingOrder[]>;
   update(tenantId: string, id: string, updates: Partial<TradingOrder>, client?: DbClient): Promise<TradingOrder | null>;
   cancelOrders(tenantId: string, scope: 'TENANT' | 'USER', userId?: string, client?: DbClient): Promise<number>;
 }

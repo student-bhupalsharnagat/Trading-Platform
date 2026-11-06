@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import { requireAuth, optionalAuth, AuthenticatedRequest } from '../middleware/authMiddleware.ts';
+import { requireRole } from '../middleware/requireRole.ts';
 import {
   TenantRequest,
   requireTradingEnabled,
@@ -621,8 +622,18 @@ router.post(
       try {
         result = await tradingExecutionService.closePosition(tenantId, userId, positionId, exitPrice);
       } catch (dbErr: any) {
+        if ((dbErr as any).statusCode === 403 || (dbErr as any).statusCode === 404) {
+          throw dbErr;
+        }
         // Fallback to in-memory position close
-        const memClose = closeSinglePosition(tenantId, positionId);
+        const memPositions = getTenantPositions(tenantId);
+        const memPos = memPositions.find((p) => p.id === positionId || p.symbol === positionId);
+        if (memPos && (memPos as any).userId && (memPos as any).userId !== userId && userId !== 'demo-trader') {
+          const forbiddenErr = new Error("You cannot close another user's position.");
+          (forbiddenErr as any).statusCode = 403;
+          throw forbiddenErr;
+        }
+        const memClose = closeSinglePosition(tenantId, positionId, userId);
         if (!memClose.success) {
           throw dbErr;
         }
@@ -822,10 +833,18 @@ router.post(
       try {
         result = await tradingExecutionService.cancelOrder(tenantId, userId, orderId);
       } catch (e: any) {
+        if ((e as any).statusCode === 403 || (e as any).statusCode === 400 || (e as any).statusCode === 404) {
+          throw e;
+        }
         // Fallback for in-memory orders
         const orders = getTenantOrders(tenantId);
         const ord = orders.find((o) => o.id === orderId);
         if (ord) {
+          if (ord.userId && ord.userId !== userId && userId !== 'demo-trader') {
+            const forbiddenErr = new Error("You cannot cancel another user's order.");
+            (forbiddenErr as any).statusCode = 403;
+            throw forbiddenErr;
+          }
           ord.status = 'CANCELLED' as any;
           result = { success: true, message: `Order ${orderId} has been cancelled.` };
         } else {
@@ -1622,7 +1641,7 @@ router.get('/orders/:id/broker-status', requireAuth, async (req: AuthenticatedRe
 });
 
 // Tenant-scoped Provider Configuration
-router.get('/gateways/config', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/gateways/config', requireAuth, requireRole('SUPER_ADMIN', 'MASTER', 'BROKER', 'OPERATIONS'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = getReqTenantId(req);
     const providerId = (req.query.providerId as string) || 'mock-broker';
@@ -1671,7 +1690,7 @@ router.post('/gateways/config', requireAuth, async (req: AuthenticatedRequest, r
 });
 
 // Credentials Metadata (Secrets are exclusively in server-side env vars)
-router.get('/gateways/credentials-metadata', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/gateways/credentials-metadata', requireAuth, requireRole('SUPER_ADMIN', 'MASTER', 'BROKER', 'OPERATIONS'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = getReqTenantId(req);
     const providerId = (req.query.providerId as string) || 'mock-broker';
@@ -1684,7 +1703,7 @@ router.get('/gateways/credentials-metadata', requireAuth, async (req: Authentica
   }
 });
 
-router.post('/gateways/credentials-metadata', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/gateways/credentials-metadata', requireAuth, requireRole('SUPER_ADMIN', 'MASTER', 'BROKER', 'OPERATIONS'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = getReqTenantId(req);
     const { providerId, keyIdentifier, authScheme, secretEnvVar, status } = req.body || {};
@@ -1709,7 +1728,7 @@ router.post('/gateways/credentials-metadata', requireAuth, async (req: Authentic
 });
 
 // Execution Audits (strictly sanitized, zero secrets)
-router.get('/gateways/audits', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/gateways/audits', requireAuth, requireRole('SUPER_ADMIN', 'MASTER', 'BROKER', 'OPERATIONS'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = getReqTenantId(req);
     const limit = Number(req.query.limit || 50);
@@ -1721,7 +1740,7 @@ router.get('/gateways/audits', requireAuth, async (req: AuthenticatedRequest, re
 });
 
 // Phase 5H: Gateway Broker Authentication
-router.post('/gateways/authenticate', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/gateways/authenticate', requireAuth, requireRole('SUPER_ADMIN', 'MASTER', 'BROKER', 'OPERATIONS'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = getReqTenantId(req);
     const authResult = await executionGateway.authenticate(tenantId);
@@ -1738,7 +1757,7 @@ router.post('/gateways/authenticate', requireAuth, async (req: AuthenticatedRequ
 });
 
 // Phase 5H: Open Orders via Execution Gateway
-router.get('/gateways/orders/open', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/gateways/orders/open', requireAuth, requireRole('SUPER_ADMIN', 'MASTER', 'BROKER', 'OPERATIONS'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = getReqTenantId(req);
     const orders = await executionGateway.getOpenOrders(tenantId);
@@ -1749,7 +1768,7 @@ router.get('/gateways/orders/open', requireAuth, async (req: AuthenticatedReques
 });
 
 // Phase 5H: Broker Positions via Execution Gateway
-router.get('/gateways/positions', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/gateways/positions', requireAuth, requireRole('SUPER_ADMIN', 'MASTER', 'BROKER', 'OPERATIONS'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = getReqTenantId(req);
     const positions = await executionGateway.getPositions(tenantId);
@@ -1797,7 +1816,7 @@ router.post('/gateways/reconcile', requireAuth, async (req: AuthenticatedRequest
 });
 
 // Phase 5H: State Reconciliation Audits
-router.get('/gateways/reconciliation/audits', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/gateways/reconciliation/audits', requireAuth, requireRole('SUPER_ADMIN', 'MASTER', 'BROKER', 'OPERATIONS'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = getReqTenantId(req);
     const limit = Number(req.query.limit || 20);

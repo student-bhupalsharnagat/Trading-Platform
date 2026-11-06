@@ -57,7 +57,7 @@ export class PostgresTradeRepository implements ITradingTradeRepository {
     return this.mapRow(res.rows[0]);
   }
 
-  public async getTrades(tenantId: string, userId?: string, client?: DbClient): Promise<TradingTrade[]> {
+  public async getTrades(tenantId: string, userId?: string, client?: DbClient, limit: number = 500, offset: number = 0): Promise<TradingTrade[]> {
     let sql = `SELECT * FROM trading_trades WHERE tenant_id = $1`;
     const params: any[] = [tenantId];
 
@@ -66,7 +66,17 @@ export class PostgresTradeRepository implements ITradingTradeRepository {
       sql += ` AND user_id = $${params.length}`;
     }
 
-    sql += ` ORDER BY executed_at DESC;`;
+    sql += ` ORDER BY executed_at DESC`;
+
+    if (limit > 0) {
+      params.push(limit);
+      sql += ` LIMIT $${params.length}`;
+      if (offset > 0) {
+        params.push(offset);
+        sql += ` OFFSET $${params.length}`;
+      }
+    }
+    sql += `;`;
 
     const res = client ? await client.query(sql, params) : await pgDb.query(sql, params);
     return res.rows.map((r) => this.mapRow(r));

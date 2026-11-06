@@ -99,7 +99,7 @@ export class PostgresOrderRepository implements ITradingOrderRepository {
     return this.mapRow(res.rows[0]);
   }
 
-  public async getOrders(tenantId: string, userId?: string, status?: string, client?: DbClient): Promise<TradingOrder[]> {
+  public async getOrders(tenantId: string, userId?: string, status?: string, client?: DbClient, limit: number = 500, offset: number = 0): Promise<TradingOrder[]> {
     const searchTenants = getSearchTenants(tenantId);
     let sql = `SELECT * FROM trading_orders WHERE tenant_id = ANY($1)`;
     const params: any[] = [searchTenants];
@@ -114,7 +114,17 @@ export class PostgresOrderRepository implements ITradingOrderRepository {
     }
 
     params.push(tenantId);
-    sql += ` ORDER BY (CASE WHEN tenant_id = $${params.length} THEN 0 ELSE 1 END), created_at DESC;`;
+    sql += ` ORDER BY (CASE WHEN tenant_id = $${params.length} THEN 0 ELSE 1 END), created_at DESC`;
+
+    if (limit > 0) {
+      params.push(limit);
+      sql += ` LIMIT $${params.length}`;
+      if (offset > 0) {
+        params.push(offset);
+        sql += ` OFFSET $${params.length}`;
+      }
+    }
+    sql += `;`;
 
     const res = client ? await client.query(sql, params) : await pgDb.query(sql, params);
     const seen = new Set<string>();

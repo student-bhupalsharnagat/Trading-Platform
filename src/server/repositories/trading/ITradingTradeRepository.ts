@@ -18,6 +18,6 @@ export interface TradingTrade {
 export interface ITradingTradeRepository {
   create(trade: Omit<TradingTrade, 'created_at'>, client?: DbClient): Promise<TradingTrade>;
   findById(tenantId: string, id: string, client?: DbClient): Promise<TradingTrade | null>;
-  getTrades(tenantId: string, userId?: string, client?: DbClient): Promise<TradingTrade[]>;
+  getTrades(tenantId: string, userId?: string, client?: DbClient, limit?: number, offset?: number): Promise<TradingTrade[]>;
   getTradesByOrder(tenantId: string, orderId: string, client?: DbClient): Promise<TradingTrade[]>;
 }

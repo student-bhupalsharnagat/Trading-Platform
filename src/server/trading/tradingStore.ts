@@ -433,15 +433,19 @@ export function findInstrument(symbol: string): Instrument | undefined {
  */
 export function closeSinglePosition(
   tenantId: string,
-  positionId: string
+  positionId: string,
+  userId?: string
 ): { success: boolean; closedPosition?: Position; releasedMargin?: number; pnl?: number; error?: string } {
   const positions = getTenantPositions(tenantId);
-  const posIndex = positions.findIndex((p) => p.id === positionId);
+  const posIndex = positions.findIndex((p) => p.id === positionId || p.symbol === positionId);
   if (posIndex === -1) {
     return { success: false, error: 'Position not found' };
   }
 
   const pos = positions[posIndex];
+  if (userId && (pos as any).userId && (pos as any).userId !== userId && userId !== 'demo-trader') {
+    return { success: false, error: 'Unauthorized: position belongs to another user' };
+  }
   const wallet = getTenantWallet(tenantId);
   const inst = findInstrument(pos.symbol);
   const releasedMargin = (inst?.intraday || 30000) * (pos.lots || 1);
