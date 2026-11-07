@@ -142,18 +142,23 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
   const currentPrice =
     orderType === 'MARKET' ? activeInstrument.lastPrice : orderType === 'SL-M' ? numTriggerPrice : numLimitPrice;
 
+  const isForex = activeInstrument.category === 'FOREX' || (activeInstrument.lastPrice || 0) < 10;
+  const isCrypto = activeInstrument.category === 'CRYPTO' || activeInstrument.symbol.includes('USDT');
+  const currencyPrefix = isCrypto ? '$' : (isForex ? '' : '₹');
+  const priceDecimals = isForex ? 4 : 2;
+
   const getButtonSubtitle = () => {
     if (orderType === 'MARKET') return 'Market Order';
     if (orderType === 'SL-M') {
       const displayPrice = triggerPrice !== '' && !isNaN(Number(triggerPrice)) ? Number(triggerPrice) : activeInstrument.lastPrice;
-      return `SL-M @ ₹${displayPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return `SL-M @ ${currencyPrefix}${displayPrice.toLocaleString('en-IN', { minimumFractionDigits: priceDecimals, maximumFractionDigits: priceDecimals })}`;
     }
     if (orderType === 'SL') {
       const displayPrice = limitPrice !== '' && !isNaN(Number(limitPrice)) ? Number(limitPrice) : activeInstrument.lastPrice;
-      return `SL @ ₹${displayPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return `SL @ ${currencyPrefix}${displayPrice.toLocaleString('en-IN', { minimumFractionDigits: priceDecimals, maximumFractionDigits: priceDecimals })}`;
     }
     const displayPrice = limitPrice !== '' && !isNaN(Number(limitPrice)) ? Number(limitPrice) : activeInstrument.lastPrice;
-    return `LIMIT @ ₹${displayPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `LIMIT @ ${currencyPrefix}${displayPrice.toLocaleString('en-IN', { minimumFractionDigits: priceDecimals, maximumFractionDigits: priceDecimals })}`;
   };
 
   // Margin calculation matching Indian discount brokers (Zerodha/Upstox)
@@ -167,25 +172,25 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
   const isMarginShortfall = availableBalance !== undefined && availableBalance < selectedMargin;
   const marginShortfallAmount = isMarginShortfall ? selectedMargin - availableBalance : 0;
 
-  const askPrice = activeInstrument.ask || Number((activeInstrument.lastPrice + 0.63).toFixed(2));
-  const bidPrice = activeInstrument.bid || Number((activeInstrument.lastPrice - 2.49).toFixed(2));
+  const askPrice = activeInstrument.ask || Number((activeInstrument.lastPrice + (isForex ? 0.0003 : 0.63)).toFixed(priceDecimals));
+  const bidPrice = activeInstrument.bid || Number((activeInstrument.lastPrice - (isForex ? 0.0003 : 2.49)).toFixed(priceDecimals));
 
-  // Synthesize 5-level Market Depth (Bid/Ask ladder) around current market spread
+  // Synthesize 5-level Market Depth (Bid/Ask ladder) with best bid/ask strictly matching header quotes (Finding 11)
   const marketDepth = React.useMemo(() => {
-    const spread = Math.max(0.05, Number((instrument.lastPrice * 0.0003).toFixed(2)));
+    const spread = Math.max(isForex ? 0.0002 : 0.05, Number((activeInstrument.lastPrice * (isForex ? 0.0002 : 0.0003)).toFixed(priceDecimals)));
     const bids = [
-      { orders: 42, qty: (instrument.lotSize || 1) * 35, price: Number((instrument.lastPrice - spread * 1).toFixed(2)) },
-      { orders: 28, qty: (instrument.lotSize || 1) * 20, price: Number((instrument.lastPrice - spread * 2).toFixed(2)) },
-      { orders: 19, qty: (instrument.lotSize || 1) * 15, price: Number((instrument.lastPrice - spread * 3).toFixed(2)) },
-      { orders: 14, qty: (instrument.lotSize || 1) * 10, price: Number((instrument.lastPrice - spread * 4).toFixed(2)) },
-      { orders: 9, qty: (instrument.lotSize || 1) * 8, price: Number((instrument.lastPrice - spread * 5).toFixed(2)) },
+      { orders: 42, qty: (activeInstrument.lotSize || 1) * 35, price: bidPrice },
+      { orders: 28, qty: (activeInstrument.lotSize || 1) * 20, price: Number((bidPrice - spread * 1).toFixed(priceDecimals)) },
+      { orders: 19, qty: (activeInstrument.lotSize || 1) * 15, price: Number((bidPrice - spread * 2).toFixed(priceDecimals)) },
+      { orders: 14, qty: (activeInstrument.lotSize || 1) * 10, price: Number((bidPrice - spread * 3).toFixed(priceDecimals)) },
+      { orders: 9, qty: (activeInstrument.lotSize || 1) * 8, price: Number((bidPrice - spread * 4).toFixed(priceDecimals)) },
     ];
     const asks = [
-      { price: Number((instrument.lastPrice + spread * 1).toFixed(2)), qty: (instrument.lotSize || 1) * 30, orders: 38 },
-      { price: Number((instrument.lastPrice + spread * 2).toFixed(2)), qty: (instrument.lotSize || 1) * 25, orders: 24 },
-      { price: Number((instrument.lastPrice + spread * 3).toFixed(2)), qty: (instrument.lotSize || 1) * 18, orders: 16 },
-      { price: Number((instrument.lastPrice + spread * 4).toFixed(2)), qty: (instrument.lotSize || 1) * 12, orders: 11 },
-      { price: Number((instrument.lastPrice + spread * 5).toFixed(2)), qty: (instrument.lotSize || 1) * 7, orders: 6 },
+      { price: askPrice, qty: (activeInstrument.lotSize || 1) * 30, orders: 38 },
+      { price: Number((askPrice + spread * 1).toFixed(priceDecimals)), qty: (activeInstrument.lotSize || 1) * 25, orders: 24 },
+      { price: Number((askPrice + spread * 2).toFixed(priceDecimals)), qty: (activeInstrument.lotSize || 1) * 18, orders: 16 },
+      { price: Number((askPrice + spread * 3).toFixed(priceDecimals)), qty: (activeInstrument.lotSize || 1) * 12, orders: 11 },
+      { price: Number((askPrice + spread * 4).toFixed(priceDecimals)), qty: (activeInstrument.lotSize || 1) * 7, orders: 6 },
     ];
     const totalBuyQty = bids.reduce((acc, b) => acc + b.qty, 0);
     const totalSellQty = asks.reduce((acc, a) => acc + a.qty, 0);
@@ -193,7 +198,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
     const buyPercentage = totalVolume > 0 ? Math.round((totalBuyQty / totalVolume) * 100) : 50;
 
     return { bids, asks, totalBuyQty, totalSellQty, buyPercentage };
-  }, [instrument.lastPrice, instrument.lotSize]);
+  }, [activeInstrument.lastPrice, activeInstrument.lotSize, bidPrice, askPrice, isForex, priceDecimals]);
 
   const handleLotChange = (newLots: number) => {
     const clamped = Math.min(Math.max(1, newLots), instrument.maxLots || 1000);
@@ -539,7 +544,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
                   <div className="space-y-1 pt-1 text-[11px]">
                     {marketDepth.bids.map((b, i) => (
                       <div key={i} className="grid grid-cols-3 text-emerald-500 font-semibold">
-                        <span>₹{b.price.toFixed(2)}</span>
+                        <span>{currencyPrefix}{b.price.toFixed(priceDecimals)}</span>
                         <span className="text-center text-slate-400">{b.orders}</span>
                         <span className="text-right text-slate-300">{b.qty}</span>
                       </div>
@@ -557,7 +562,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
                   <div className="space-y-1 pt-1 text-[11px]">
                     {marketDepth.asks.map((a, i) => (
                       <div key={i} className="grid grid-cols-3 text-rose-400 font-semibold">
-                        <span>₹{a.price.toFixed(2)}</span>
+                        <span>{currencyPrefix}{a.price.toFixed(priceDecimals)}</span>
                         <span className="text-center text-slate-400">{a.orders}</span>
                         <span className="text-right text-slate-300">{a.qty}</span>
                       </div>
@@ -1033,7 +1038,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
             >
               <div className="flex items-center gap-1.5">
                 <ArrowDownRight className="w-4 h-4 stroke-[3]" />
-                <span>SELL BID (₹{bidPrice.toFixed(2)})</span>
+                <span>SELL BID ({currencyPrefix}{bidPrice.toFixed(priceDecimals)})</span>
               </div>
               <span className="text-[11px] font-mono font-medium opacity-90 mt-0.5">
                 {getButtonSubtitle()}
@@ -1051,7 +1056,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
             >
               <div className="flex items-center gap-1.5">
                 <ArrowUpRight className="w-4 h-4 stroke-[3]" />
-                <span>BUY ASK (₹{askPrice.toFixed(2)})</span>
+                <span>BUY ASK ({currencyPrefix}{askPrice.toFixed(priceDecimals)})</span>
               </div>
               <span className="text-[11px] font-mono font-medium opacity-90 mt-0.5">
                 {getButtonSubtitle()}
@@ -1066,9 +1071,11 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
         <OptionChain
           instrument={(() => {
             if (activeInstrument.category !== 'OPTIONS' && !activeInstrument.optionType) return activeInstrument;
-            const rootSymbol = (activeInstrument.symbol || '').split(' ')[0];
+            const clean = (activeInstrument.symbol || '').replace(/\s+(CE|PE|\d+CE|\d+PE).*$/i, '').trim();
             const foundUnderlying = DEFAULT_INSTRUMENTS.find(
-              (i) => i.symbol === rootSymbol || i.name === rootSymbol
+              (i) => i.symbol.toLowerCase() === clean.toLowerCase() ||
+                     clean.toLowerCase().startsWith(i.symbol.toLowerCase()) ||
+                     i.name?.toLowerCase() === clean.toLowerCase()
             );
             return foundUnderlying || (instrument.category !== 'OPTIONS' ? instrument : activeInstrument);
           })()}
@@ -1077,8 +1084,12 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
             setShowOptionChain(false);
             const rootUnderlying = (() => {
               if (activeInstrument.category !== 'OPTIONS' && !activeInstrument.optionType) return activeInstrument;
-              const root = (activeInstrument.symbol || '').split(' ')[0];
-              return DEFAULT_INSTRUMENTS.find((i) => i.symbol === root) || instrument;
+              const clean = (activeInstrument.symbol || '').replace(/\s+(CE|PE|\d+CE|\d+PE).*$/i, '').trim();
+              return DEFAULT_INSTRUMENTS.find(
+                (i) => i.symbol.toLowerCase() === clean.toLowerCase() ||
+                       clean.toLowerCase().startsWith(i.symbol.toLowerCase()) ||
+                       i.name?.toLowerCase() === clean.toLowerCase()
+              ) || instrument;
             })();
             const optExpiry = expiry || '31 Aug';
             const optContract: Instrument = {
@@ -1087,6 +1098,8 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
               symbol: `${rootUnderlying.symbol} ${optExpiry.toUpperCase()} ${strike} ${type}`,
               name: `${rootUnderlying.name || rootUnderlying.symbol} ${optExpiry.toUpperCase()} ${strike} ${type}`,
               lastPrice: price,
+              ask: Number((price + 0.50).toFixed(2)),
+              bid: Number((price - 0.50).toFixed(2)),
               change: Number((price * 0.02).toFixed(2)),
               changePercent: 2.0,
               lotSize: rootUnderlying.lotSize || 1,

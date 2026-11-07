@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { User, WalletFunds, SupportTicket, AppNotification } from '../types.ts';
 import { useAuth } from '../hooks/useAuth.ts';
 import { useTenant } from '../context/TenantContext.tsx';
+import { useLanguage } from '../context/LanguageContext.tsx';
 import { authApi } from '../services/authApi.ts';
 import { SupportTicketsSection } from './SupportTicketsSection.tsx';
 import { WalletModal } from './WalletModal.tsx';
@@ -75,6 +76,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
 }) => {
   const { logout, showToast } = useAuth();
   const { branding } = useTenant();
+  const { t } = useLanguage();
 
   // Active modal state
   const [activeModal, setActiveModal] = useState<
@@ -309,7 +311,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
               <UserIcon className="w-4 h-4" />
             </div>
             <div>
-              <div className="text-sm font-bold text-white">Profile</div>
+              <div className="text-sm font-bold text-white">{t('profile')}</div>
               <div className="text-xs text-slate-400 font-mono">
                 {user.userId} · {user.fullName || 'Demo User'}
               </div>
@@ -332,7 +334,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
               <Wallet className="w-4 h-4" />
             </div>
             <div>
-              <div className="text-sm font-bold text-white">Wallet & Funds</div>
+              <div className="text-sm font-bold text-white">{t('wallet')} & Funds</div>
               <div className="text-xs text-slate-400 font-mono">
                 ₹{wallet.availableBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })} available margin
               </div>
@@ -355,7 +357,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
               <Clock className="w-4 h-4" />
             </div>
             <div>
-              <div className="text-sm font-bold text-white">Wallet Ledger & History</div>
+              <div className="text-sm font-bold text-white">{t('walletLedger')}</div>
               <div className="text-xs text-slate-400">
                 Audit log of all deposits, payouts & trade credits
               </div>
@@ -375,7 +377,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
               <Bell className="w-4 h-4" />
             </div>
             <div>
-              <div className="text-sm font-bold text-white">Notifications</div>
+              <div className="text-sm font-bold text-white">{t('notifications')}</div>
               <div className="text-xs text-slate-400">
                 {unreadCount} unread {unreadCount === 1 ? 'alert' : 'alerts'}
               </div>
@@ -402,7 +404,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
               <Headphones className="w-4 h-4" />
             </div>
             <div>
-              <div className="text-sm font-bold text-white">Support Tickets</div>
+              <div className="text-sm font-bold text-white">{t('supportTickets')}</div>
               <div className="text-xs text-slate-400">
                 {openTicketsCount} open {openTicketsCount === 1 ? 'ticket' : 'tickets'}
               </div>
@@ -429,7 +431,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
               <Settings className="w-4 h-4" />
             </div>
             <div>
-              <div className="text-sm font-bold text-white">Settings</div>
+              <div className="text-sm font-bold text-white">{t('settings')}</div>
               <div className="text-xs text-slate-400">Security, preferences</div>
             </div>
           </div>
@@ -447,7 +449,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
               <FileText className="w-4 h-4" />
             </div>
             <div>
-              <div className="text-sm font-bold text-white">Terms & Privacy</div>
+              <div className="text-sm font-bold text-white">{t('termsAndPrivacy')}</div>
               <div className="text-xs text-slate-400">Legal documents</div>
             </div>
           </div>

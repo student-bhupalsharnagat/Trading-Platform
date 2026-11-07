@@ -18,6 +18,7 @@ import {
   getTenantOrders,
   setTenantOrders,
   getTenantTickets,
+  savePersistedTickets,
   getTenantNotifications,
   setTenantNotifications,
   closeSinglePosition,
@@ -45,29 +46,35 @@ import { postgresLedgerRepository } from '../repositories/trading/PostgresLedger
 
 const router = Router();
 
-// Helper to generate realistic historical candlestick data
+// Helper to generate realistic historical candlestick data tailored by timeframe
 function generateHistoricalCandles(basePrice: number, count: number = 80, intervalMinutes: number = 15): Candle[] {
   const candles: Candle[] = [];
   const now = Date.now();
   const intervalMs = intervalMinutes * 60 * 1000;
-  let currentPrice = basePrice * (1 - (count * 0.0015));
+  const safeBase = Number(basePrice) > 0 ? Number(basePrice) : 1000;
+  // Scale volatility and drift by the square root of time interval (1m: ~0.08%, 15m: ~0.35%, 1D: ~1.8%)
+  const tfRatio = Math.sqrt(Math.max(1, intervalMinutes) / 15);
+  const volatility = safeBase * Math.min(0.025, Math.max(0.0006, 0.0035 * tfRatio));
+  let currentPrice = safeBase * (1 - (count * 0.0005 * tfRatio));
 
   for (let i = count; i >= 0; i--) {
     const time = now - i * intervalMs;
-    const volatility = currentPrice * 0.0035;
-    const change = (Math.random() - 0.48) * volatility;
+    // Harmonic wave based on interval produces distinct patterns per timeframe
+    const wave = Math.sin((i + intervalMinutes) * 0.35) * volatility * 0.4;
+    const change = (Math.random() - 0.48) * volatility + wave;
     const open = currentPrice;
-    const close = Math.max(1, open + change);
+    const close = Math.max(0.01, open + change);
     const high = Math.max(open, close) + Math.random() * volatility * 0.8;
     const low = Math.min(open, close) - Math.random() * volatility * 0.8;
-    const volume = Math.floor(50 + Math.random() * 850);
+    const volume = Math.floor((50 + Math.random() * 850) * Math.min(10, Math.max(1, tfRatio * 2)));
 
+    const decimals = safeBase < 10 ? 4 : 2;
     candles.push({
       time,
-      open: Number(open.toFixed(2)),
-      high: Number(high.toFixed(2)),
-      low: Number(low.toFixed(2)),
-      close: Number(close.toFixed(2)),
+      open: Number(open.toFixed(decimals)),
+      high: Number(high.toFixed(decimals)),
+      low: Number(low.toFixed(decimals)),
+      close: Number(close.toFixed(decimals)),
       volume,
     });
 
@@ -162,9 +169,13 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
 
     const positions = (pgPositions || []).map((p) => {
       const inst = findInstrument(p.instrument_id);
+      const isOption = p.instrument_id.includes(' CE') || p.instrument_id.includes(' PE') || inst?.category === 'OPTIONS';
       const rawAvg = Number(p.average_price);
       const avgPrice = rawAvg > 0 ? rawAvg : (inst?.lastPrice || inst?.openPrice || 1);
-      const ltp = inst ? inst.lastPrice : avgPrice;
+      // Finding 13: For option positions, ensure ltp does not pull the underlying index/future spot price (e.g. ₹24,000 or ₹157,000)
+      const ltp = isOption
+        ? ((inst && inst.category === 'OPTIONS' && inst.lastPrice < 5000) ? inst.lastPrice : avgPrice)
+        : (inst ? inst.lastPrice : avgPrice);
       const posType: 'BUY' | 'SELL' = Number(p.quantity) >= 0 ? 'BUY' : 'SELL';
       const qty = Math.abs(Number(p.quantity));
       const lotSize = inst?.lotSize || 1;
@@ -176,8 +187,12 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
         ? Number(((pnl / (avgPrice * qty)) * 100).toFixed(2))
         : 0;
 
-      const rawProd = String((p as any).product || (p as any).product_type || '').toUpperCase();
-      const isHolding = rawProd === 'HOLDING' || rawProd === 'CNC' || rawProd === 'NRML' || (inst?.category === 'EQUITY' && posType === 'BUY' && rawProd !== 'INTRADAY' && rawProd !== 'MIS');
+      // Findings 08 & 16: Ensure Intraday MIS orders remain distinct from Delivery CNC holdings
+      const memPositions = getTenantPositions(tenantId);
+      const memPos = memPositions.find((mp) => mp.symbol === p.instrument_id || mp.id === p.id);
+      const matchingOrder = (pgOrders || []).find((o) => o.instrument_id === p.instrument_id);
+      const rawProd = String((p as any).product || (p as any).product_type || memPos?.product || (matchingOrder as any)?.product || '').toUpperCase();
+      const isHolding = rawProd === 'HOLDING' || rawProd === 'CNC' || rawProd === 'NRML';
       const product = isHolding ? ('HOLDING' as const) : ('INTRADAY' as const);
       const decimals = (inst?.category === 'FOREX' || avgPrice < 10) ? 4 : 2;
 
@@ -703,15 +718,20 @@ router.post(
         },
         positions: (await postgresPositionRepository.getPositions(tenantId, userId)).map((p) => {
           const pInst = findInstrument(p.instrument_id);
+          const isOption = p.instrument_id.includes(' CE') || p.instrument_id.includes(' PE') || pInst?.category === 'OPTIONS';
           const avgPrice = Number(p.average_price);
-          const ltp = pInst ? pInst.lastPrice : avgPrice;
+          const ltp = isOption
+            ? ((pInst && pInst.category === 'OPTIONS' && pInst.lastPrice < 5000) ? pInst.lastPrice : avgPrice)
+            : (pInst ? pInst.lastPrice : avgPrice);
           const posType: 'BUY' | 'SELL' = Number(p.quantity) >= 0 ? 'BUY' : 'SELL';
           const qty = Math.abs(Number(p.quantity));
           const lotSize = pInst?.lotSize || 1;
           const lots = Math.max(1, Math.round(qty / lotSize));
           const pnl = posType === 'BUY' ? (ltp - avgPrice) * qty : (avgPrice - ltp) * qty;
-          const rawProd = String((p as any).product || (p as any).product_type || '').toUpperCase();
-          const isHolding = rawProd === 'HOLDING' || rawProd === 'CNC' || rawProd === 'NRML' || (pInst?.category === 'EQUITY' && posType === 'BUY' && rawProd !== 'INTRADAY' && rawProd !== 'MIS');
+          const memPositions = getTenantPositions(tenantId);
+          const memPos = memPositions.find((mp) => mp.symbol === p.instrument_id || mp.id === p.id);
+          const rawProd = String((p as any).product || (p as any).product_type || memPos?.product || '').toUpperCase();
+          const isHolding = rawProd === 'HOLDING' || rawProd === 'CNC' || rawProd === 'NRML';
           const product = isHolding ? ('HOLDING' as const) : ('INTRADAY' as const);
 
           return {
@@ -1360,6 +1380,7 @@ router.post('/tickets', optionalAuth, (req: TenantRequest, res: Response) => {
   (newTicket as any).userId = caller.userId || caller.id;
 
   tickets.unshift(newTicket);
+  savePersistedTickets();
 
   // Add system notification for ticket raised
   notifications.unshift({
@@ -1468,6 +1489,7 @@ router.post('/tickets/:id/reply', optionalAuth, (req: TenantRequest, res: Respon
   };
   ticket.messages.push(agentMsg);
   ticket.status = 'IN_PROGRESS';
+  savePersistedTickets();
 
   const replyUserId = req.user?.userId || req.user?.id || 'CLIENT';
   const replyClientCode = (req.user?.userId || req.user?.id || 'CLIENT').toUpperCase();
@@ -1540,6 +1562,7 @@ router.post('/tickets/:id/status', optionalAuth, (req: TenantRequest, res: Respo
     internalEventDispatcher.dispatchSupportTicketUpdated(updatePayload).catch((e) =>
       console.warn('[Event] Support ticket updated dispatch warning:', e)
     );
+    savePersistedTickets();
   }
 
   res.json({ success: true, message: `Ticket status updated to ${ticket.status}.`, ticket });
@@ -1557,6 +1580,7 @@ router.post('/tickets/:id/rate', optionalAuth, (req: TenantRequest, res: Respons
 
   ticket.rating = Number(rating);
   if (feedback) ticket.feedback = feedback;
+  savePersistedTickets();
 
   res.json({ success: true, message: 'Thank you for your rating!', ticket });
 });

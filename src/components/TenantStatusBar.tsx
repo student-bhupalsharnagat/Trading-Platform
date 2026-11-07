@@ -29,6 +29,8 @@ export const TenantStatusBar: React.FC = () => {
     isOptionsEnabled,
     switchTenant,
     toggleDevFeature,
+    devSwitchError,
+    clearDevSwitchError,
   } = useTenant();
 
   const [isSwitcherOpen, setIsSwitcherOpen] = useState(false);
@@ -92,6 +94,30 @@ export const TenantStatusBar: React.FC = () => {
             <span>
               <strong>EMERGENCY KILL-SWITCH ON:</strong> New order submissions are halted by central risk control. Existing positions remain intact.
             </span>
+          </div>
+        </div>
+      )}
+
+      {devSwitchError && (
+        <div
+          id="tenant-switch-error-banner"
+          className="bg-amber-600/90 text-white px-4 py-2 text-xs font-semibold flex items-center justify-between shadow-md"
+        >
+          <div className="flex items-center gap-2 max-w-5xl mx-auto w-full">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-amber-200" />
+            <span className="flex-1">
+              <strong>TENANT SWITCH WARNING:</strong> {devSwitchError}
+            </span>
+            {clearDevSwitchError && (
+              <button
+                type="button"
+                onClick={clearDevSwitchError}
+                className="text-white hover:text-amber-200 p-0.5 rounded cursor-pointer ml-2"
+                title="Dismiss warning"
+              >
+                ✕
+              </button>
+            )}
           </div>
         </div>
       )}

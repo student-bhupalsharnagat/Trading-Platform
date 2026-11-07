@@ -56,41 +56,45 @@ export const LiveChart: React.FC<LiveChartProps> = ({
       setEngineMode('CANVAS');
     }
   }, [isRestricted, instrument.symbol]);
-  // Generate clean realistic fallback candles around instrument price
+  // Generate clean realistic fallback candles around instrument price and timeframe
   const generateInitialCandles = (basePrice: number, tf: string = timeframe, count = 70): Candle[] => {
     const list: Candle[] = [];
     const safeBase = Number(basePrice) > 0 ? Number(basePrice) : 1000;
-    let currentPrice = safeBase * 0.988;
     const now = Date.now();
-    const intervalMs =
+    const tfMinutes =
       tf === '1m'
-        ? 60000
+        ? 1
         : tf === '5m'
-        ? 300000
+        ? 5
         : tf === '15m'
-        ? 900000
+        ? 15
         : tf === '30m'
-        ? 1800000
+        ? 30
         : tf === '1h'
-        ? 3600000
-        : 86400000;
+        ? 60
+        : 1440;
+    const intervalMs = tfMinutes * 60 * 1000;
+    const tfRatio = Math.sqrt(tfMinutes / 15);
+    const volatility = safeBase * Math.min(0.025, Math.max(0.0006, 0.003 * tfRatio));
+    let currentPrice = safeBase * (1 - (count * 0.0005 * tfRatio));
+    const decimals = safeBase < 10 ? 4 : 2;
 
     for (let i = count; i >= 0; i--) {
       const time = now - i * intervalMs;
-      const volatility = safeBase * 0.003;
-      const change = (Math.random() - 0.485) * volatility;
+      const wave = Math.sin((i + tfMinutes) * 0.35) * volatility * 0.4;
+      const change = (Math.random() - 0.485) * volatility + wave;
       const open = currentPrice;
-      const close = Math.max(1, open + change);
+      const close = Math.max(0.001, open + change);
       const high = Math.max(open, close) + Math.random() * (volatility * 0.5);
       const low = Math.min(open, close) - Math.random() * (volatility * 0.5);
-      const volume = Math.floor(20 + Math.random() * 60);
+      const volume = Math.floor((20 + Math.random() * 60) * Math.min(10, Math.max(1, tfRatio * 2)));
 
       list.push({
         time,
-        open: Number(open.toFixed(2)),
-        high: Number(high.toFixed(2)),
-        low: Number(low.toFixed(2)),
-        close: Number(close.toFixed(2)),
+        open: Number(open.toFixed(decimals)),
+        high: Number(high.toFixed(decimals)),
+        low: Number(low.toFixed(decimals)),
+        close: Number(close.toFixed(decimals)),
         volume,
       });
 
@@ -217,9 +221,14 @@ export const LiveChart: React.FC<LiveChartProps> = ({
   const activePrice = latestCandle ? latestCandle.close : instrument.lastPrice;
   const isPositive = instrument.change >= 0;
 
+  const isForex = instrument.category === 'FOREX' || (instrument.lastPrice || 0) < 10;
+  const isCrypto = instrument.category === 'CRYPTO' || instrument.symbol.includes('USDT');
+  const currencyPrefix = isCrypto ? '$' : (isForex ? '' : '₹');
+  const priceDecimals = isForex ? 4 : 2;
+
   // Ask / Bid calculations
-  const askPrice = instrument.ask || Number((activePrice + 0.60).toFixed(2));
-  const bidPrice = instrument.bid || Number((activePrice - 2.50).toFixed(2));
+  const askPrice = instrument.ask || Number((activePrice + (isForex ? 0.0003 : 0.60)).toFixed(priceDecimals));
+  const bidPrice = instrument.bid || Number((activePrice - (isForex ? 0.0003 : 2.50)).toFixed(priceDecimals));
 
   // Canvas Rendering logic for simple, clean trading chart
   useEffect(() => {
@@ -480,7 +489,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
     canvasDimensions,
   ]);
 
-  // Responsive canvas resizing with ResizeObserver
+  // Responsive canvas resizing with ResizeObserver & orientation change listeners
   useEffect(() => {
     if (engineMode === 'TRADINGVIEW' && chartType === 'Candle') return;
     const updateCanvasSize = () => {
@@ -505,8 +514,14 @@ export const LiveChart: React.FC<LiveChartProps> = ({
     updateCanvasSize();
     const observer = new ResizeObserver(updateCanvasSize);
     if (containerRef.current) observer.observe(containerRef.current);
+    window.addEventListener('resize', updateCanvasSize);
+    window.addEventListener('orientationchange', updateCanvasSize);
 
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateCanvasSize);
+      window.removeEventListener('orientationchange', updateCanvasSize);
+    };
   }, [engineMode, chartType]);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -727,7 +742,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
                   isPositive ? 'text-[#10B981]' : 'text-[#EF4444]'
                 }`}
               >
-                {instrument.category === 'CRYPTO' ? '$' : '₹'}{activePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                {currencyPrefix}{activePrice.toLocaleString('en-IN', { minimumFractionDigits: priceDecimals, maximumFractionDigits: priceDecimals })}
               </div>
               <div
                 className={`font-mono text-[11px] font-bold ${
@@ -909,7 +924,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
           className="py-3.5 px-4 bg-[#EF4444] hover:bg-[#DC2626] active:bg-[#B91C1C] text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-lg tracking-wide"
         >
           <ArrowDownRight className="w-4 h-4 stroke-[3]" />
-          <span>SELL BID (₹{bidPrice.toFixed(2)})</span>
+          <span>SELL BID ({currencyPrefix}{bidPrice.toFixed(priceDecimals)})</span>
         </button>
 
         {/* BUY ASK (Emerald Green) */}
@@ -928,7 +943,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
           className="py-3.5 px-4 bg-[#10B981] hover:bg-[#059669] active:bg-[#047857] text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-lg tracking-wide"
         >
           <ArrowUpRight className="w-4 h-4 stroke-[3]" />
-          <span>BUY ASK (₹{askPrice.toFixed(2)})</span>
+          <span>BUY ASK ({currencyPrefix}{askPrice.toFixed(priceDecimals)})</span>
         </button>
       </footer>
 

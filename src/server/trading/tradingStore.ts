@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import {
   Instrument,
   Position,
@@ -86,9 +88,28 @@ const tenantLedgerEntries: Record<string, any[]> = {
   'vertex-default': [],
   'TNT-001': [],
 };
-const tenantTickets: Record<string, SupportTicket[]> = {
-  'vertex-default': [],
-};
+const TICKETS_FILE = path.join(process.cwd(), '.vertex_tickets_store.json');
+
+function loadPersistedTickets(): Record<string, SupportTicket[]> {
+  try {
+    if (fs.existsSync(TICKETS_FILE)) {
+      const raw = fs.readFileSync(TICKETS_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return parsed;
+      }
+    }
+  } catch {}
+  return { 'vertex-default': [] };
+}
+
+export function savePersistedTickets(): void {
+  try {
+    fs.writeFileSync(TICKETS_FILE, JSON.stringify(tenantTickets, null, 2), 'utf-8');
+  } catch {}
+}
+
+const tenantTickets: Record<string, SupportTicket[]> = loadPersistedTickets();
 const tenantNotifications: Record<string, AppNotification[]> = {
   'vertex-default': [],
 };

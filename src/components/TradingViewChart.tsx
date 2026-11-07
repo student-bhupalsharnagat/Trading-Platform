@@ -97,10 +97,10 @@ export const getTradingViewSymbol = (symbol: string): string => {
  */
 export const isTradingViewRestrictedSymbol = (symbol: string, category?: string): boolean => {
   if (!symbol) return false;
-  if (category === 'EQUITY' || category === 'INDEX') return true;
+  if (category === 'EQUITY' || category === 'INDEX' || category === 'COMMODITY' || category === 'OPTIONS') return true;
   const upper = symbol.toUpperCase().trim();
   if (upper.startsWith('NSE:') || upper.startsWith('BSE:') || upper.startsWith('MCX:')) return true;
-  if (upper.includes('GOLD') || upper.includes('SILVER') || upper.includes('CRUDE') || upper.includes('MCX')) return true;
+  if (upper.includes('GOLD') || upper.includes('SILVER') || upper.includes('CRUDE') || upper.includes('MCX') || upper.includes('FUT') || upper.includes('CE') || upper.includes('PE')) return true;
   const indianKeywords = [
     'RELIANCE', 'HDFC', 'TCS', 'INFY', 'INFOSYS', 'ICICI', 'SBIN', 'SBI',
     'BHARTI', 'AIRTEL', 'ITC', 'TATAMOTORS', 'TATASTEEL', 'AXIS', 'KOTAK',
@@ -143,23 +143,27 @@ interface LocalCandle {
   volume: number;
 }
 
-const generateLocalCandles = (basePrice: number): LocalCandle[] => {
-  const safeBase = Math.max(1, basePrice || 1000);
-  const volatility = safeBase * 0.003;
+const generateLocalCandles = (basePrice: number, tf: string = '15m'): LocalCandle[] => {
+  const safeBase = Math.max(0.01, basePrice || 1000);
+  const tfMinutes = tf === '1m' ? 1 : tf === '5m' ? 5 : tf === '15m' ? 15 : tf === '30m' ? 30 : tf === '1h' ? 60 : 1440;
+  const tfSeconds = tfMinutes * 60;
+  const tfRatio = Math.sqrt(tfMinutes / 15);
+  const volatility = safeBase * Math.min(0.025, Math.max(0.0006, 0.003 * tfRatio));
   const now = Math.floor(Date.now() / 1000);
   const generated: LocalCandle[] = [];
 
-  let currentClose = safeBase * 0.98;
+  let currentClose = safeBase * (1 - (60 * 0.0005 * tfRatio));
   const count = 60;
 
   for (let i = count; i >= 0; i--) {
-    const time = now - i * 60 * 15;
-    const change = (Math.random() - 0.49) * volatility * 2;
+    const time = now - i * tfSeconds;
+    const wave = Math.sin((i + tfMinutes) * 0.35) * volatility * 0.5;
+    const change = (Math.random() - 0.49) * volatility * 2 + wave;
     const open = currentClose;
-    const close = Math.max(1, open + change);
+    const close = Math.max(0.001, open + change);
     const high = Math.max(open, close) + Math.random() * volatility;
     const low = Math.min(open, close) - Math.random() * volatility;
-    const volume = Math.floor(Math.random() * 50000 + 10000);
+    const volume = Math.floor((Math.random() * 50000 + 10000) * Math.min(10, Math.max(1, tfRatio * 2)));
 
     generated.push({ time, open, high, low, close, volume });
     currentClose = close;
@@ -250,13 +254,13 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   // Local interactive Canvas Chart state
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [candles, setCandles] = useState<LocalCandle[]>(() => generateLocalCandles(instrument.lastPrice || 1000));
+  const [candles, setCandles] = useState<LocalCandle[]>(() => generateLocalCandles(instrument.lastPrice || 1000, timeframe));
   const [hoveredCandle, setHoveredCandle] = useState<LocalCandle | null>(null);
 
-  // Generate synthetic yet mathematically consistent candles around instrument price
+  // Generate synthetic yet mathematically consistent candles around instrument price and timeframe
   useEffect(() => {
-    setCandles(generateLocalCandles(instrument.lastPrice || 1000));
-  }, [instrument.symbol]);
+    setCandles(generateLocalCandles(instrument.lastPrice || 1000, timeframe));
+  }, [instrument.symbol, timeframe, instrument.lastPrice]);
 
   // Synchronize live incoming price ticks with the latest candle
   useEffect(() => {
@@ -485,7 +489,7 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   return (
     <div
       style={{ height }}
-      className="flex-1 w-full h-full min-h-[500px] flex flex-col bg-[#060B13] rounded-xl overflow-hidden border border-[#121B2B] select-none"
+      className="flex-1 w-full h-full min-h-[260px] sm:min-h-[360px] md:min-h-[460px] flex flex-col bg-[#060B13] rounded-xl overflow-hidden border border-[#121B2B] select-none"
     >
       {/* Top Chart Header / Status Bar */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-[#080E18] border-b border-[#121B2B] text-xs">
@@ -594,6 +598,17 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
                     className="px-2 py-1 bg-slate-800 text-slate-300 rounded hover:text-white cursor-pointer"
                   >
                     Retry
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHasIframeError(false);
+                      setEngine('canvas');
+                    }}
+                    className="p-1 rounded text-slate-400 hover:text-white cursor-pointer"
+                    title="Dismiss and switch to local canvas"
+                  >
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
               </div>

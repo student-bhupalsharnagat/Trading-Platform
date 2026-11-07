@@ -14,12 +14,15 @@ export const OptionChain: React.FC<OptionChainProps> = ({
   onSelectOption,
 }) => {
   const [selectedExpiry, setSelectedExpiry] = useState<string>(instrument.expiry || '31 Aug');
-  // Bug #33: Detect forex / currency exchange rates and generate positive decimal strike steps
+  // Detect forex / crypto exchange rates and generate proper decimal strike steps
   const isForex = (instrument.lastPrice || 0) < 10 || instrument.category === 'FOREX';
+  const isCrypto = instrument.category === 'CRYPTO' || instrument.symbol.includes('USDT');
+  const currencyPrefix = isCrypto ? '$' : (isForex ? '' : '₹');
+  const priceDecimals = isForex ? 4 : 2;
   const basePrice = instrument.lastPrice || (isForex ? 1.0850 : 1000);
 
-  // Generate strike step based on instrument price (Forex EUR/USD ~1.08 uses 0.005 steps)
-  const step = isForex ? 0.005 : (basePrice > 50000 ? 500 : basePrice > 10000 ? 100 : basePrice > 1000 ? 50 : 5);
+  // Generate strike step based on instrument price (Forex EUR/USD ~1.08 uses 0.005 steps, Gold 157k uses 500)
+  const step = isForex ? 0.005 : (basePrice > 100000 ? 500 : basePrice > 50000 ? 200 : basePrice > 10000 ? 100 : basePrice > 1000 ? 50 : 5);
   const atmStrike = isForex
     ? Number((Math.round(basePrice / step) * step).toFixed(4))
     : Math.round(basePrice / step) * step;
@@ -81,7 +84,7 @@ export const OptionChain: React.FC<OptionChainProps> = ({
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-sm sm:text-base md:text-lg font-black text-white truncate">{instrument.symbol} Option Chain</h2>
                 <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono shrink-0">
-                  Spot: ₹{basePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  Spot: {currencyPrefix}{basePrice.toLocaleString('en-IN', { minimumFractionDigits: priceDecimals, maximumFractionDigits: priceDecimals })}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 truncate">Select any Strike to trade Calls (CE) or Puts (PE)</p>

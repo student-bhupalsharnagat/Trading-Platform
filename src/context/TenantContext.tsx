@@ -93,6 +93,8 @@ interface TenantContextType {
   allTenants: TenantSummary[];
   loading: boolean;
   error: string | null;
+  devSwitchError?: string | null;
+  clearDevSwitchError?: () => void;
   isTradingEnabled: boolean;
   isRegistrationEnabled: boolean;
   isMaintenanceActive: boolean;
@@ -177,6 +179,11 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [allTenants, setAllTenants] = useState<TenantSummary[]>(DEFAULT_TENANT_SUMMARIES);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [devSwitchError, setDevSwitchError] = useState<string | null>(null);
+
+  const clearDevSwitchError = useCallback(() => {
+    setDevSwitchError(null);
+  }, []);
 
   const applyBrandingToDocument = (b: TenantBranding) => {
     try {
@@ -379,6 +386,7 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
 
         if (res.ok) {
+          setDevSwitchError(null);
           const json = await res.json();
           if (json.success && json.data) {
             const d = json.data;
@@ -390,6 +398,11 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             if (d.platformConfig) setConfig(d.platformConfig);
             if (d.status) setStatus(d.status);
             if (d.matchedBy) setMatchedBy(d.matchedBy);
+          }
+        } else {
+          const json = await res.json().catch(() => ({}));
+          if (res.status === 403 || json.code === 'DEV_OVERRIDE_FORBIDDEN') {
+            setDevSwitchError(json.message || 'Developer tenant override is strictly forbidden in production mode.');
           }
         }
       } catch (backendErr) {
@@ -463,6 +476,8 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       allTenants,
       loading,
       error,
+      devSwitchError,
+      clearDevSwitchError,
       isTradingEnabled,
       isRegistrationEnabled,
       isMaintenanceActive,
@@ -480,6 +495,8 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       allTenants,
       loading,
       error,
+      devSwitchError,
+      clearDevSwitchError,
       isTradingEnabled,
       isRegistrationEnabled,
       isMaintenanceActive,

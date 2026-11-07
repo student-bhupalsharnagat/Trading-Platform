@@ -145,6 +145,9 @@ export class TradingExecutionService {
     const isSlmTriggered = rawOrderType === 'SL-M' && input.triggerPrice != null &&
       ((side === 'BUY' && inst.lastPrice >= input.triggerPrice) || (side === 'SELL' && inst.lastPrice <= input.triggerPrice));
 
+    // Bug #31 & Finding 24: Generate orderId before unfillable IOC check to prevent TDZ ReferenceError
+    const orderId = `ORD-${Math.floor(10000 + Math.random() * 90000)}`;
+
     // Bug #31: Unfillable IOC limit orders cancel immediately
     const isUnfillableIOC = input.timeInForce === 'IOC' && (
       rawOrderType === 'SL' || rawOrderType === 'SL-M' ||
@@ -187,7 +190,6 @@ export class TradingExecutionService {
     }
 
     const isPendingOrder = !isSlmTriggered && (rawOrderType === 'LIMIT' || rawOrderType === 'SL' || rawOrderType === 'SL-M');
-    const orderId = `ORD-${Math.floor(10000 + Math.random() * 90000)}`;
 
     // Communicate through Execution Gateway
     const gatewayResult = await executionGateway.placeOrder({
