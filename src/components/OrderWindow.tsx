@@ -600,7 +600,7 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
                   TradingView Live Feed
                 </span>
               </div>
-              <div className="w-full h-[52vh] min-h-[380px] bg-[#060B13] p-1">
+              <div className="w-full h-[450px] sm:h-[520px] min-h-[450px] sm:min-h-[520px] bg-[#060B13] p-1">
                 <TradingViewChart instrument={instrument} timeframe={chartTimeframe} />
               </div>
             </div>

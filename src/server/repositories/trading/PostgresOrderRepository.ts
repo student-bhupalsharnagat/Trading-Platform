@@ -1,6 +1,7 @@
 import { pgDb, DbClient } from '../../db/postgres.ts';
 import { ITradingOrderRepository, TradingOrder } from './ITradingOrderRepository.ts';
 import { getSearchTenants } from '../../utils/tenantHelper.ts';
+import { cleanNumeric } from '../../utils/cleanNumeric.ts';
 
 export class PostgresOrderRepository implements ITradingOrderRepository {
   private mapRow(row: any): TradingOrder {
@@ -12,15 +13,15 @@ export class PostgresOrderRepository implements ITradingOrderRepository {
       instrument_id: row.instrument_id,
       side: row.side,
       order_type: row.order_type,
-      quantity: Number(row.quantity),
-      price: Number(row.price),
-      trigger_price: row.trigger_price != null ? Number(row.trigger_price) : null,
+      quantity: cleanNumeric(row.quantity),
+      price: cleanNumeric(row.price),
+      trigger_price: row.trigger_price != null ? cleanNumeric(row.trigger_price) : null,
       status: row.status,
       broker_order_id: row.broker_order_id || null,
       normalized_status: row.normalized_status || null,
-      filled_quantity: Number(row.filled_quantity || 0),
-      remaining_quantity: Number(row.remaining_quantity || 0),
-      average_fill_price: Number(row.average_fill_price || 0),
+      filled_quantity: cleanNumeric(row.filled_quantity || 0),
+      remaining_quantity: cleanNumeric(row.remaining_quantity || 0),
+      average_fill_price: cleanNumeric(row.average_fill_price || 0),
       time_in_force: row.time_in_force || 'DAY',
       created_at: new Date(row.created_at).toISOString(),
       updated_at: new Date(row.updated_at).toISOString(),

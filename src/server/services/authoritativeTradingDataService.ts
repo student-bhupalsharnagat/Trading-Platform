@@ -37,6 +37,7 @@ import {
   getAllTenantWallets,
 } from '../trading/tradingStore.ts';
 import { jsonLedgerRepository } from '../repositories/JsonLedgerRepository.ts';
+import { cleanNumeric } from '../utils/cleanNumeric.ts';
 import crypto from 'crypto';
 
 export const DEFAULT_TENANTS = ['TNT-001', 'TNT-002', 'TNT-003', 'vertex-default', 'default'];
@@ -725,14 +726,33 @@ export class AuthoritativeTradingDataService {
         const cName = p.client_name || '';
         const cEmail = p.client_email || '';
 
-        const qty = Number(p.quantity);
+        const sym = p.symbol || p.instrument_id;
+        const inst = findInstrument(sym);
+        const qty = cleanNumeric(p.quantity);
         const side = qty > 0 ? 'BUY' : qty < 0 ? 'SELL' : 'CLOSED';
         const absQty = Math.abs(qty);
-        const avgPrice = Number(p.average_price);
-        const unrealizedPnl = Number(p.unrealized_pnl || 0);
+
+        let avgPrice = cleanNumeric(p.average_price);
+        if (avgPrice === 0 && absQty > 0) {
+          avgPrice = inst ? cleanNumeric(inst.lastPrice || inst.openPrice) : 1000;
+        }
+
+        const ltp = inst ? cleanNumeric(inst.lastPrice) : avgPrice;
+        const currentPrice = ltp;
+
+        const unrealizedPnl = side === 'BUY'
+          ? (currentPrice - avgPrice) * absQty
+          : (avgPrice - currentPrice) * absQty;
+
+        const realizedPnl = cleanNumeric(p.realized_pnl || 0);
+
+        let usedMargin = cleanNumeric(p.margin_used || 0);
+        if (usedMargin === 0 && absQty > 0) {
+          usedMargin = inst?.intraday ? inst.intraday * absQty : (avgPrice * absQty * 0.2);
+        }
+
         const totalInvested = avgPrice * absQty;
         const unrealizedPnlPct = totalInvested > 0 ? (unrealizedPnl / totalInvested) * 100 : 0;
-        const currentPrice = absQty > 0 ? avgPrice + unrealizedPnl / absQty : avgPrice;
 
         positions.push({
           id: p.id,
@@ -749,19 +769,29 @@ export class AuthoritativeTradingDataService {
           client_email: cEmail,
           tradingUserId: p.user_id,
           trading_user_id: p.user_id,
-          symbol: p.symbol || p.instrument_id,
-          instrument_id: p.instrument_id,
-          exchange: p.exchange || 'NSE',
+          symbol: inst?.symbol || sym,
+          instrument_id: p.instrument_id || sym,
+          exchange: p.exchange || (inst as any)?.exchange || 'NSE',
           side,
           quantity: absQty,
+          qty: absQty,
           raw_quantity: qty,
-          average_price: avgPrice,
-          current_price: currentPrice,
-          used_margin: Number(p.margin_used || 0),
-          margin_used: Number(p.margin_used || 0),
-          unrealized_pnl: unrealizedPnl,
+          avgPrice: Number(avgPrice.toFixed(2)),
+          average_price: Number(avgPrice.toFixed(2)),
+          averagePrice: Number(avgPrice.toFixed(2)),
+          ltp: Number(currentPrice.toFixed(2)),
+          current_price: Number(currentPrice.toFixed(2)),
+          currentPrice: Number(currentPrice.toFixed(2)),
+          used_margin: Number(usedMargin.toFixed(2)),
+          margin_used: Number(usedMargin.toFixed(2)),
+          usedMargin: Number(usedMargin.toFixed(2)),
+          margin: Number(usedMargin.toFixed(2)),
+          unrealized_pnl: Number(unrealizedPnl.toFixed(2)),
+          unrealizedPnl: Number(unrealizedPnl.toFixed(2)),
+          pnl: Number(unrealizedPnl.toFixed(2)),
           unrealized_pnl_percentage: Number(unrealizedPnlPct.toFixed(2)),
-          realized_pnl: Number(p.realized_pnl || 0),
+          realized_pnl: Number(realizedPnl.toFixed(2)),
+          realizedPnl: Number(realizedPnl.toFixed(2)),
           status: qty !== 0 ? 'OPEN' : 'CLOSED',
           updated_at: p.updated_at ? new Date(p.updated_at).toISOString() : new Date().toISOString(),
         });
@@ -808,14 +838,33 @@ export class AuthoritativeTradingDataService {
           const cName = p.client_name || '';
           const cEmail = p.client_email || '';
 
-          const qty = Number(p.quantity);
+          const sym = p.symbol || p.instrument_id;
+          const inst = findInstrument(sym);
+          const qty = cleanNumeric(p.quantity);
           const side = qty > 0 ? 'BUY' : qty < 0 ? 'SELL' : 'CLOSED';
           const absQty = Math.abs(qty);
-          const avgPrice = Number(p.average_price);
-          const unrealizedPnl = Number(p.unrealized_pnl || 0);
+
+          let avgPrice = cleanNumeric(p.average_price);
+          if (avgPrice === 0 && absQty > 0) {
+            avgPrice = inst ? cleanNumeric(inst.lastPrice || inst.openPrice) : 1000;
+          }
+
+          const ltp = inst ? cleanNumeric(inst.lastPrice) : avgPrice;
+          const currentPrice = ltp;
+
+          const unrealizedPnl = side === 'BUY'
+            ? (currentPrice - avgPrice) * absQty
+            : (avgPrice - currentPrice) * absQty;
+
+          const realizedPnl = cleanNumeric(p.realized_pnl || 0);
+
+          let usedMargin = cleanNumeric(p.margin_used || 0);
+          if (usedMargin === 0 && absQty > 0) {
+            usedMargin = inst?.intraday ? inst.intraday * absQty : (avgPrice * absQty * 0.2);
+          }
+
           const totalInvested = avgPrice * absQty;
           const unrealizedPnlPct = totalInvested > 0 ? (unrealizedPnl / totalInvested) * 100 : 0;
-          const currentPrice = absQty > 0 ? avgPrice + unrealizedPnl / absQty : avgPrice;
 
           positions.push({
             id: p.id,
@@ -832,19 +881,29 @@ export class AuthoritativeTradingDataService {
             client_email: cEmail,
             tradingUserId: p.user_id,
             trading_user_id: p.user_id,
-            symbol: p.symbol || p.instrument_id,
-            instrument_id: p.instrument_id,
-            exchange: p.exchange || 'NSE',
+            symbol: inst?.symbol || sym,
+            instrument_id: p.instrument_id || sym,
+            exchange: p.exchange || (inst as any)?.exchange || 'NSE',
             side,
             quantity: absQty,
+            qty: absQty,
             raw_quantity: qty,
-            average_price: avgPrice,
-            current_price: currentPrice,
-            used_margin: Number(p.margin_used || 0),
-            margin_used: Number(p.margin_used || 0),
-            unrealized_pnl: unrealizedPnl,
+            avgPrice: Number(avgPrice.toFixed(2)),
+            average_price: Number(avgPrice.toFixed(2)),
+            averagePrice: Number(avgPrice.toFixed(2)),
+            ltp: Number(currentPrice.toFixed(2)),
+            current_price: Number(currentPrice.toFixed(2)),
+            currentPrice: Number(currentPrice.toFixed(2)),
+            used_margin: Number(usedMargin.toFixed(2)),
+            margin_used: Number(usedMargin.toFixed(2)),
+            usedMargin: Number(usedMargin.toFixed(2)),
+            margin: Number(usedMargin.toFixed(2)),
+            unrealized_pnl: Number(unrealizedPnl.toFixed(2)),
+            unrealizedPnl: Number(unrealizedPnl.toFixed(2)),
+            pnl: Number(unrealizedPnl.toFixed(2)),
             unrealized_pnl_percentage: Number(unrealizedPnlPct.toFixed(2)),
-            realized_pnl: Number(p.realized_pnl || 0),
+            realized_pnl: Number(realizedPnl.toFixed(2)),
+            realizedPnl: Number(realizedPnl.toFixed(2)),
             status: qty !== 0 ? 'OPEN' : 'CLOSED',
             updated_at: p.updated_at ? new Date(p.updated_at).toISOString() : new Date().toISOString(),
           });
@@ -883,14 +942,14 @@ export class AuthoritativeTradingDataService {
         const cEmail = memUser?.email || '';
 
         const inst = findInstrument(p.symbol);
-        const avgPrice = Number(p.avgPrice || (p as any).average_price || 0);
-        const ltp = inst ? inst.lastPrice : Number(p.ltp || avgPrice);
+        const avgPrice = cleanNumeric(p.avgPrice || (p as any).average_price || (p as any).averagePrice || (inst?.lastPrice || 1000));
+        const ltp = inst ? cleanNumeric(inst.lastPrice) : cleanNumeric(p.ltp || (p as any).current_price || (p as any).currentPrice || avgPrice);
         const side = (p.type || (qty >= 0 ? 'BUY' : 'SELL')).toUpperCase() as 'BUY' | 'SELL';
         const absQty = Math.abs(qty);
         const pnl = Number(p.pnl ?? (side === 'BUY' ? (ltp - avgPrice) * absQty : (avgPrice - ltp) * absQty));
         const totalInvested = avgPrice * absQty;
         const unrealizedPnlPct = totalInvested > 0 ? (pnl / totalInvested) * 100 : 0;
-        const marginUsed = (inst?.intraday || 30000) * (p.lots || 1);
+        const marginUsed = cleanNumeric((p as any).margin_used || (p as any).marginUsed || (p as any).usedMargin || ((inst?.intraday || 30000) * (p.lots || 1)));
 
         positions.push({
           id: p.id,
@@ -906,19 +965,29 @@ export class AuthoritativeTradingDataService {
           client_email: cEmail,
           tradingUserId: p.userId || resolvedUserId || 'demo-trader',
           trading_user_id: p.userId || resolvedUserId || 'demo-trader',
-          symbol: p.symbol,
+          symbol: inst?.symbol || p.symbol,
           instrument_id: p.symbol,
           exchange: (inst as any)?.exchange || 'NSE',
           side,
           quantity: absQty,
+          qty: absQty,
           raw_quantity: side === 'BUY' ? absQty : -absQty,
-          average_price: avgPrice,
-          current_price: ltp,
-          used_margin: marginUsed,
-          margin_used: marginUsed,
-          unrealized_pnl: pnl,
+          avgPrice: Number(avgPrice.toFixed(2)),
+          average_price: Number(avgPrice.toFixed(2)),
+          averagePrice: Number(avgPrice.toFixed(2)),
+          ltp: Number(ltp.toFixed(2)),
+          current_price: Number(ltp.toFixed(2)),
+          currentPrice: Number(ltp.toFixed(2)),
+          used_margin: Number(marginUsed.toFixed(2)),
+          margin_used: Number(marginUsed.toFixed(2)),
+          usedMargin: Number(marginUsed.toFixed(2)),
+          margin: Number(marginUsed.toFixed(2)),
+          unrealized_pnl: Number(pnl.toFixed(2)),
+          unrealizedPnl: Number(pnl.toFixed(2)),
+          pnl: Number(pnl.toFixed(2)),
           unrealized_pnl_percentage: Number(unrealizedPnlPct.toFixed(2)),
           realized_pnl: 0,
+          realizedPnl: 0,
           status: isOpen ? 'OPEN' : 'CLOSED',
           updated_at: (p as any).timestamp || new Date().toISOString(),
         });

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { Instrument } from '../types.ts';
 import { useTheme } from '../context/ThemeContext.tsx';
+import { cleanNumeric } from '../utils/cleanNumeric.ts';
 import {
   Wifi,
   RefreshCw,
@@ -96,11 +97,13 @@ export const getTradingViewSymbol = (symbol: string): string => {
  * (e.g. Indian NSE/BSE equities, MCX commodities, and Indian indices)
  */
 export const isTradingViewRestrictedSymbol = (symbol: string, category?: string): boolean => {
-  if (!symbol) return false;
-  if (category === 'EQUITY' || category === 'INDEX') return true;
+  if (!symbol) return true;
   const upper = symbol.toUpperCase().trim();
+  const cat = (category || '').toUpperCase().trim();
+  if (cat === 'EQUITY' || cat === 'INDEX' || cat === 'OPTIONS' || cat === 'OPTION' || cat === 'COMMODITY' || cat === 'COMMODITIES') return true;
   if (upper.startsWith('NSE:') || upper.startsWith('BSE:') || upper.startsWith('MCX:')) return true;
-  if (upper.includes('GOLD') || upper.includes('SILVER') || upper.includes('CRUDE') || upper.includes('MCX')) return true;
+  if (upper.includes('CE') || upper.includes('PE') || upper.includes('OPT')) return true;
+  if (upper.includes('GOLD') || upper.includes('SILVER') || upper.includes('CRUDE') || upper.includes('MCX') || upper.includes('NATURALGAS') || upper.includes('NATGAS') || upper.includes('COPPER') || upper.includes('ZINC') || upper.includes('LEAD') || upper.includes('NICKEL') || upper.includes('ALUMINIUM') || upper.includes('ALUMINUM')) return true;
   const indianKeywords = [
     'RELIANCE', 'HDFC', 'TCS', 'INFY', 'INFOSYS', 'ICICI', 'SBIN', 'SBI',
     'BHARTI', 'AIRTEL', 'ITC', 'TATAMOTORS', 'TATASTEEL', 'AXIS', 'KOTAK',
@@ -144,7 +147,8 @@ interface LocalCandle {
 }
 
 const generateLocalCandles = (basePrice: number): LocalCandle[] => {
-  const safeBase = Math.max(1, basePrice || 1000);
+  const p = cleanNumeric(basePrice);
+  const safeBase = p > 2 ? p : (p > 0 ? p : 1000);
   const volatility = safeBase * 0.003;
   const now = Math.floor(Date.now() / 1000);
   const generated: LocalCandle[] = [];
@@ -156,7 +160,7 @@ const generateLocalCandles = (basePrice: number): LocalCandle[] => {
     const time = now - i * 60 * 15;
     const change = (Math.random() - 0.49) * volatility * 2;
     const open = currentClose;
-    const close = Math.max(1, open + change);
+    const close = Math.max(0.01, open + change);
     const high = Math.max(open, close) + Math.random() * volatility;
     const low = Math.min(open, close) - Math.random() * volatility;
     const volume = Math.floor(Math.random() * 50000 + 10000);
@@ -186,7 +190,7 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   const tvSymbol = useMemo(() => getTradingViewSymbol(instrument.symbol), [instrument.symbol]);
   const interval = useMemo(() => getTradingViewInterval(timeframe), [timeframe]);
   const isRestricted = useMemo(
-    () => isTradingViewRestrictedSymbol(instrument.symbol, instrument.category) || tvSymbol.startsWith('NSE:') || tvSymbol.startsWith('BSE:'),
+    () => isTradingViewRestrictedSymbol(instrument.symbol, instrument.category) || tvSymbol.startsWith('NSE:') || tvSymbol.startsWith('BSE:') || tvSymbol.startsWith('MCX:'),
     [instrument.symbol, instrument.category, tvSymbol]
   );
 
@@ -231,18 +235,18 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
     setIsIframeLoading(true);
     setHasIframeError(false);
 
-    // Timeout watchdog: If iframe doesn't finish loading within 8 seconds,
-    // ensure loading indicator clears and give user fallback options
+    // Timeout watchdog: If iframe doesn't finish loading within 3.5 seconds,
+    // seamlessly fall back to local interactive Canvas engine immediately
     const timer = setTimeout(() => {
       setIsIframeLoading((prev) => {
         if (prev) {
-          // If still loading after 8s, mark as slow/error so fallback is accessible
           setHasIframeError(true);
+          setEngine('canvas');
           return false;
         }
         return false;
       });
-    }, 8000);
+    }, 3500);
 
     return () => clearTimeout(timer);
   }, [tvSymbol, interval, reloadKey]);
@@ -250,22 +254,25 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   // Local interactive Canvas Chart state
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [candles, setCandles] = useState<LocalCandle[]>(() => generateLocalCandles(instrument.lastPrice || 1000));
+  const initialBasePrice = cleanNumeric(instrument.lastPrice) > 2 ? cleanNumeric(instrument.lastPrice) : (cleanNumeric(instrument.openPrice) > 2 ? cleanNumeric(instrument.openPrice) : 1000);
+  const [candles, setCandles] = useState<LocalCandle[]>(() => generateLocalCandles(initialBasePrice));
   const [hoveredCandle, setHoveredCandle] = useState<LocalCandle | null>(null);
 
   // Generate synthetic yet mathematically consistent candles around instrument price
   useEffect(() => {
-    setCandles(generateLocalCandles(instrument.lastPrice || 1000));
+    const p = cleanNumeric(instrument.lastPrice) > 2 ? cleanNumeric(instrument.lastPrice) : (cleanNumeric(instrument.openPrice) > 2 ? cleanNumeric(instrument.openPrice) : 1000);
+    setCandles(generateLocalCandles(p));
   }, [instrument.symbol]);
 
   // Synchronize live incoming price ticks with the latest candle
   useEffect(() => {
-    if (!instrument.lastPrice) return;
+    const livePrice = cleanNumeric(instrument.lastPrice);
+    if (!livePrice || livePrice <= 0) return;
     setCandles((prev) => {
       if (!prev || prev.length === 0) return prev;
       const lastIndex = prev.length - 1;
       const last = prev[lastIndex];
-      const newClose = instrument.lastPrice;
+      const newClose = livePrice;
       const newHigh = Math.max(last.high, newClose);
       const newLow = Math.min(last.low, newClose);
       const updated = [...prev];
@@ -485,7 +492,7 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   return (
     <div
       style={{ height }}
-      className="flex-1 w-full h-full min-h-[500px] flex flex-col bg-[#060B13] rounded-xl overflow-hidden border border-[#121B2B] select-none"
+      className="flex-1 w-full h-[450px] sm:h-[520px] min-h-[450px] sm:min-h-[520px] flex flex-col bg-[#060B13] rounded-xl overflow-hidden border border-[#121B2B] select-none"
     >
       {/* Top Chart Header / Status Bar */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-[#080E18] border-b border-[#121B2B] text-xs">
@@ -614,6 +621,7 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
               onError={() => {
                 setIsIframeLoading(false);
                 setHasIframeError(true);
+                setEngine('canvas');
               }}
             />
           </>

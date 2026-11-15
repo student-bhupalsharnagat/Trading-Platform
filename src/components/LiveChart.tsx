@@ -4,6 +4,7 @@ import { authApi } from '../services/authApi.ts';
 import { TradingViewChart, isTradingViewRestrictedSymbol } from './TradingViewChart.tsx';
 import { MarketClosedModal } from './MarketClosedModal.tsx';
 import { getMarketHoursInfo, MarketHoursInfo } from '../utils/marketHours.ts';
+import { cleanNumeric } from '../utils/cleanNumeric.ts';
 import {
   ArrowLeft,
   ArrowDownRight,
@@ -49,17 +50,22 @@ export const LiveChart: React.FC<LiveChartProps> = ({
     () => isTradingViewRestrictedSymbol(instrument.symbol, instrument.category),
     [instrument.symbol, instrument.category]
   );
-  const [engineMode, setEngineMode] = useState<'TRADINGVIEW' | 'CANVAS'>(() => (isRestricted ? 'CANVAS' : 'TRADINGVIEW'));
+  // Default immediately to CANVAS engine so all symbols render instantly with zero blank grey frame
+  const [engineMode, setEngineMode] = useState<'TRADINGVIEW' | 'CANVAS'>('CANVAS');
 
   useEffect(() => {
     if (isRestricted) {
       setEngineMode('CANVAS');
     }
   }, [isRestricted, instrument.symbol]);
+
   // Generate clean realistic fallback candles around instrument price
   const generateInitialCandles = (basePrice: number, tf: string = timeframe, count = 70): Candle[] => {
     const list: Candle[] = [];
-    const safeBase = Number(basePrice) > 0 ? Number(basePrice) : 1000;
+    const p1 = cleanNumeric(basePrice);
+    const p2 = cleanNumeric(instrument.lastPrice);
+    const p3 = cleanNumeric(instrument.openPrice);
+    const safeBase = p1 > 2 ? p1 : (p2 > 2 ? p2 : (p3 > 2 ? p3 : (p1 > 0 ? p1 : (p2 > 0 ? p2 : 1000))));
     let currentPrice = safeBase * 0.988;
     const now = Date.now();
     const intervalMs =
@@ -111,7 +117,8 @@ export const LiveChart: React.FC<LiveChartProps> = ({
     const key = `${instrument.symbol}_15m`;
     const cached = globalCandleCache.get(key);
     if (cached && cached.length > 0) return cached;
-    const initial = generateInitialCandles(instrument.lastPrice || 1000, '15m');
+    const ltp = cleanNumeric(instrument.lastPrice) > 2 ? cleanNumeric(instrument.lastPrice) : (cleanNumeric(instrument.openPrice) > 2 ? cleanNumeric(instrument.openPrice) : 1000);
+    const initial = generateInitialCandles(ltp, '15m');
     globalCandleCache.set(key, initial);
     return initial;
   });
@@ -144,6 +151,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
       setCandles(cached);
     }
     let isMounted = true;
+    const ltp = cleanNumeric(instrument.lastPrice) > 2 ? cleanNumeric(instrument.lastPrice) : (cleanNumeric(instrument.openPrice) > 2 ? cleanNumeric(instrument.openPrice) : 1000);
     authApi
       .getCandles(instrument.symbol, timeframe)
       .then((res) => {
@@ -152,7 +160,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
             setCandles(res.candles);
             globalCandleCache.set(key, res.candles);
           } else if (!globalCandleCache.has(key)) {
-            const initial = generateInitialCandles(instrument.lastPrice, timeframe);
+            const initial = generateInitialCandles(ltp, timeframe);
             setCandles(initial);
             globalCandleCache.set(key, initial);
           }
@@ -160,7 +168,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
       })
       .catch(() => {
         if (isMounted && !globalCandleCache.has(key)) {
-          const initial = generateInitialCandles(instrument.lastPrice, timeframe);
+          const initial = generateInitialCandles(ltp, timeframe);
           setCandles(initial);
           globalCandleCache.set(key, initial);
         }
@@ -173,14 +181,15 @@ export const LiveChart: React.FC<LiveChartProps> = ({
 
   // Synchronize latest candle on incoming live price ticks
   useEffect(() => {
-    if (!instrument.lastPrice) return;
+    const livePrice = cleanNumeric(instrument.lastPrice);
+    if (!livePrice || livePrice <= 0) return;
     setCandles((prev) => {
       if (!prev || prev.length === 0) return prev;
       const lastIdx = prev.length - 1;
       const last = { ...prev[lastIdx] };
-      last.close = instrument.lastPrice;
-      last.high = Math.max(last.high, instrument.lastPrice);
-      last.low = Math.min(last.low, instrument.lastPrice);
+      last.close = livePrice;
+      last.high = Math.max(last.high, livePrice);
+      last.low = Math.min(last.low, livePrice);
       const updated = [...prev];
       updated[lastIdx] = last;
       globalCandleCache.set(`${instrument.symbol}_${timeframe}`, updated);
@@ -866,15 +875,15 @@ export const LiveChart: React.FC<LiveChartProps> = ({
       )}
 
       {/* 4. Main Chart Canvas / TradingView Area (Clean & No Clutter) */}
-      <main className="flex-1 relative flex flex-col p-1 sm:p-2 pb-16">
+      <main className="flex-1 relative flex flex-col p-1 sm:p-2 pb-16 w-full min-h-[450px] sm:min-h-[520px]">
         {engineMode === 'TRADINGVIEW' && chartType === 'Candle' ? (
-          <div className="flex-1 w-full h-full min-h-[280px] sm:min-h-[380px] md:min-h-[460px] relative rounded-lg border border-[#121B2B] overflow-hidden bg-[#060B13]">
-            <TradingViewChart instrument={instrument} timeframe={timeframe} />
+          <div className="flex-1 w-full h-[450px] sm:h-[520px] min-h-[450px] sm:min-h-[520px] relative rounded-lg border border-[#121B2B] overflow-hidden bg-[#060B13]">
+            <TradingViewChart instrument={instrument} timeframe={timeframe} height="100%" />
           </div>
         ) : (
           <div
             ref={containerRef}
-            className="flex-1 w-full h-full min-h-[280px] sm:min-h-[380px] md:min-h-[460px] relative rounded-lg border border-[#121B2B] overflow-hidden bg-[#060B13] cursor-crosshair"
+            className="flex-1 w-full h-[450px] sm:h-[520px] min-h-[450px] sm:min-h-[520px] relative rounded-lg border border-[#121B2B] overflow-hidden bg-[#060B13] cursor-crosshair"
           >
             <canvas
               ref={canvasRef}

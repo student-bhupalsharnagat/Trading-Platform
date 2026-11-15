@@ -1,7 +1,7 @@
 import { pgDb, DbClient } from '../../db/postgres.ts';
 import { ITradingFundTransactionRepository, TradingFundTransaction } from './ITradingFundTransactionRepository.ts';
-
 import { getSearchTenants } from '../../utils/tenantHelper.ts';
+import { cleanNumeric } from '../../utils/cleanNumeric.ts';
 
 export class PostgresFundTransactionRepository implements ITradingFundTransactionRepository {
   private mapRow(row: any): TradingFundTransaction {
@@ -10,7 +10,7 @@ export class PostgresFundTransactionRepository implements ITradingFundTransactio
       tenant_id: row.tenant_id,
       user_id: row.user_id,
       transaction_type: row.transaction_type,
-      amount: Number(row.amount),
+      amount: cleanNumeric(row.amount),
       status: row.status,
       payment_method: row.payment_method || 'BANK_TRANSFER',
       reference_id: row.reference_id || null,

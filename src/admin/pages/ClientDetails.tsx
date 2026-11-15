@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Users, Wallet, TrendingUp, BookOpen, Clock, RefreshCw, ShieldAlert } from 'lucide-react';
 import { adminApi } from '../services/adminApi';
 import { HierarchyBadge } from '../components/HierarchyBadge';
+import { cleanNumeric } from '../../utils/cleanNumeric.ts';
 
 interface ClientDetailsProps {
   id: string;
@@ -33,7 +34,7 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ id, onBack, onNavi
       if (acc) setAccountData(acc);
       setOrders(ordData?.orders || []);
       setTrades(trdData?.trades || []);
-      setPositions(posData?.positions || []);
+      setPositions(posData?.positions || posData?.data?.positions || (Array.isArray(posData?.data) ? posData?.data : []));
     } catch (err: any) {
       setError(err.message || 'Failed to load client details');
     } fontFinally: {
@@ -311,7 +312,11 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ id, onBack, onNavi
                   </tr>
                 ) : (
                   positions.map((p) => {
-                    const unPnl = Number(p.unrealized_pnl || p.pnl || 0);
+                    const unPnl = cleanNumeric(p.unrealized_pnl ?? p.unrealizedPnl ?? p.pnl ?? 0);
+                    const avgP = cleanNumeric(p.average_price ?? p.avgPrice ?? p.averagePrice ?? 0);
+                    const curP = cleanNumeric(p.current_price ?? p.ltp ?? p.currentPrice ?? avgP);
+                    const marg = cleanNumeric(p.margin_used ?? p.usedMargin ?? p.margin ?? 0);
+                    const q = cleanNumeric(p.quantity ?? p.qty ?? 0);
                     return (
                       <tr key={p.id} className="hover:bg-slate-800/50">
                         <td className="p-3 font-sans font-bold text-white">{p.instrument_id || p.symbol}</td>
@@ -326,17 +331,17 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ id, onBack, onNavi
                             {p.side || p.type}
                           </span>
                         </td>
-                        <td className="p-3 text-right">{p.quantity}</td>
-                        <td className="p-3 text-right">₹{Number(p.average_price || p.avgPrice || 0).toFixed(2)}</td>
-                        <td className="p-3 text-right text-white">₹{Number(p.current_price || p.ltp || 0).toFixed(2)}</td>
+                        <td className="p-3 text-right">{q}</td>
+                        <td className="p-3 text-right">₹{avgP.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td className="p-3 text-right text-white">₹{curP.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                         <td
                           className={`p-3 text-right font-bold ${
                             unPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
                           }`}
                         >
-                          {unPnl >= 0 ? '+' : ''}₹{unPnl.toFixed(2)}
+                          {unPnl >= 0 ? '+' : ''}₹{unPnl.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
-                        <td className="p-3 text-right">₹{Number(p.margin_used || 0).toFixed(2)}</td>
+                        <td className="p-3 text-right">₹{marg.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       </tr>
                     );
                   })

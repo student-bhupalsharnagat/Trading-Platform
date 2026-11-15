@@ -42,6 +42,7 @@ import { brokerReconciliationService } from '../services/BrokerReconciliationSer
 import { authoritativeTradingDataService } from '../services/authoritativeTradingDataService.ts';
 import { postgresFundTransactionRepository } from '../repositories/trading/PostgresFundTransactionRepository.ts';
 import { postgresLedgerRepository } from '../repositories/trading/PostgresLedgerRepository.ts';
+import { cleanNumeric } from '../utils/cleanNumeric.ts';
 
 const router = Router();
 
@@ -161,17 +162,19 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
     const pgOrders = await postgresOrderRepository.getOrders(tenantId, resolvedUserId);
 
     const positions = (pgPositions || []).map((p) => {
-      const inst = findInstrument(p.instrument_id);
-      const rawAvg = Number(p.average_price);
-      const avgPrice = rawAvg > 0 ? rawAvg : (inst?.lastPrice || inst?.openPrice || 1);
-      const ltp = inst ? inst.lastPrice : avgPrice;
-      const posType: 'BUY' | 'SELL' = Number(p.quantity) >= 0 ? 'BUY' : 'SELL';
-      const qty = Math.abs(Number(p.quantity));
+      const sym = p.instrument_id || (p as any).symbol;
+      const inst = findInstrument(sym);
+      const rawAvg = cleanNumeric(p.average_price);
+      const avgPrice = rawAvg > 0 ? rawAvg : (inst ? cleanNumeric(inst.lastPrice || inst.openPrice) : 1000);
+      const ltp = inst ? cleanNumeric(inst.lastPrice) : avgPrice;
+      const currentPrice = ltp;
+      const posType: 'BUY' | 'SELL' = cleanNumeric(p.quantity) >= 0 ? 'BUY' : 'SELL';
+      const qty = Math.abs(cleanNumeric(p.quantity));
       const lotSize = inst?.lotSize || 1;
       const lots = Math.max(1, Math.round(qty / lotSize));
       const pnl = posType === 'BUY'
-        ? (ltp - avgPrice) * qty
-        : (avgPrice - ltp) * qty;
+        ? (currentPrice - avgPrice) * qty
+        : (avgPrice - currentPrice) * qty;
       const pnlPercent = (avgPrice * qty) > 0
         ? Number(((pnl / (avgPrice * qty)) * 100).toFixed(2))
         : 0;
@@ -181,19 +184,42 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
       const product = isHolding ? ('HOLDING' as const) : ('INTRADAY' as const);
       const decimals = (inst?.category === 'FOREX' || avgPrice < 10) ? 4 : 2;
 
+      let usedMargin = cleanNumeric((p as any).margin_used || (p as any).used_margin || 0);
+      if (usedMargin === 0 && qty > 0) {
+        usedMargin = inst?.intraday ? inst.intraday * (lots || 1) : (avgPrice * qty * 0.2);
+      }
+      const realizedPnl = cleanNumeric((p as any).realized_pnl || (p as any).realizedPnl || 0);
+
+      const isOpt = String(sym).toUpperCase().includes('CE') || String(sym).toUpperCase().includes('PE') || String(sym).toUpperCase().includes('OPT');
+      const category = isOpt ? 'OPTIONS' : (inst?.category || 'EQUITY');
+
       return {
         id: p.id,
-        symbol: p.instrument_id,
-        category: inst?.category || 'EQUITY',
+        symbol: inst?.symbol || sym,
+        instrument_id: p.instrument_id || sym,
+        category,
         type: posType,
+        side: posType,
         product,
         lots,
         qty,
+        quantity: qty,
         lotSize,
         avgPrice: Number(avgPrice.toFixed(decimals)),
-        ltp: Number(ltp.toFixed(decimals)),
+        average_price: Number(avgPrice.toFixed(decimals)),
+        averagePrice: Number(avgPrice.toFixed(decimals)),
+        ltp: Number(currentPrice.toFixed(decimals)),
+        current_price: Number(currentPrice.toFixed(decimals)),
+        currentPrice: Number(currentPrice.toFixed(decimals)),
+        unrealizedPnl: Number(pnl.toFixed(2)),
+        unrealized_pnl: Number(pnl.toFixed(2)),
         pnl: Number(pnl.toFixed(2)),
         pnlPercent,
+        realizedPnl: Number(realizedPnl.toFixed(2)),
+        realized_pnl: Number(realizedPnl.toFixed(2)),
+        usedMargin: Number(usedMargin.toFixed(2)),
+        margin: Number(usedMargin.toFixed(2)),
+        margin_used: Number(usedMargin.toFixed(2)),
         timestamp: p.updated_at,
         tenantId: p.tenant_id,
       };
@@ -226,17 +252,22 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
     // Real-time dynamic mark-to-market (MTM) calculation against live instrument prices
     const updatedPositions = positions.map((pos) => {
       const inst = findInstrument(pos.symbol);
-      const ltp = inst ? inst.lastPrice : pos.ltp;
+      const ltp = inst ? cleanNumeric(inst.lastPrice) : pos.ltp;
+      const currentPrice = ltp;
       const pnl = pos.type === 'BUY'
-        ? (ltp - pos.avgPrice) * pos.qty
-        : (pos.avgPrice - ltp) * pos.qty;
+        ? (currentPrice - pos.avgPrice) * pos.qty
+        : (pos.avgPrice - currentPrice) * pos.qty;
       const pnlPercent = (pos.avgPrice * pos.qty) > 0
         ? Number(((pnl / (pos.avgPrice * pos.qty)) * 100).toFixed(2))
         : 0;
       return {
         ...pos,
-        ltp,
+        ltp: Number(currentPrice.toFixed(2)),
+        current_price: Number(currentPrice.toFixed(2)),
+        currentPrice: Number(currentPrice.toFixed(2)),
         pnl: Number(pnl.toFixed(2)),
+        unrealizedPnl: Number(pnl.toFixed(2)),
+        unrealized_pnl: Number(pnl.toFixed(2)),
         pnlPercent,
       };
     });
@@ -266,6 +297,8 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
       usedMargin: pgWallet.used_margin,
       totalPnL: Number((realizedPnL + totalUnrealizedPnL).toFixed(2)),
       todayPnL: Number(realizedPnL.toFixed(2)),
+      unrealizedPnL: Number(totalUnrealizedPnL.toFixed(2)),
+      realizedPnL: Number(realizedPnL.toFixed(2)),
       deposited: Number(deposited.toFixed(2)),
       withdrawn: Number(withdrawn.toFixed(2)),
     };
@@ -562,13 +595,17 @@ router.post(
         },
         positions: (await postgresPositionRepository.getPositions(tenantId, effectiveUserId)).map((p) => {
           const pInst = findInstrument(p.instrument_id);
-          const avgPrice = Number(p.average_price);
-          const ltp = pInst ? pInst.lastPrice : avgPrice;
-          const posType: 'BUY' | 'SELL' = Number(p.quantity) >= 0 ? 'BUY' : 'SELL';
-          const qty = Math.abs(Number(p.quantity));
+          const rawAvg = cleanNumeric(p.average_price);
+          const avgPrice = rawAvg > 0 ? rawAvg : (pInst ? cleanNumeric(pInst.lastPrice || pInst.openPrice) : 1000);
+          const ltp = pInst ? cleanNumeric(pInst.lastPrice) : avgPrice;
+          const posType: 'BUY' | 'SELL' = cleanNumeric(p.quantity) >= 0 ? 'BUY' : 'SELL';
+          const qty = Math.abs(cleanNumeric(p.quantity));
           const lotSize = pInst?.lotSize || 1;
           const lots = Math.max(1, Math.round(qty / lotSize));
           const pnl = posType === 'BUY' ? (ltp - avgPrice) * qty : (avgPrice - ltp) * qty;
+          const unrealizedPnl = Number(pnl.toFixed(2));
+          const realizedPnl = cleanNumeric((p as any).realized_pnl || (p as any).realizedPnl || 0);
+          const usedMargin = cleanNumeric((p as any).margin_used || (p as any).used_margin || (avgPrice * qty * 0.2));
           return {
             id: p.id,
             symbol: p.instrument_id,
@@ -577,10 +614,23 @@ router.post(
             product: 'INTRADAY' as const,
             lots,
             qty,
+            quantity: qty,
+            raw_quantity: qty,
             lotSize,
             avgPrice: Number(avgPrice.toFixed(2)),
+            average_price: Number(avgPrice.toFixed(2)),
+            averagePrice: Number(avgPrice.toFixed(2)),
             ltp: Number(ltp.toFixed(2)),
-            pnl: Number(pnl.toFixed(2)),
+            currentPrice: Number(ltp.toFixed(2)),
+            current_price: Number(ltp.toFixed(2)),
+            pnl: unrealizedPnl,
+            unrealizedPnl,
+            unrealized_pnl: unrealizedPnl,
+            realizedPnl,
+            realized_pnl: realizedPnl,
+            usedMargin,
+            margin: usedMargin,
+            margin_used: usedMargin,
             pnlPercent: (avgPrice * qty) > 0 ? Number(((pnl / (avgPrice * qty)) * 100).toFixed(2)) : 0,
             timestamp: p.updated_at,
             tenantId: p.tenant_id,

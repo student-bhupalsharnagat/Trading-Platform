@@ -15,6 +15,7 @@ import {
   Search,
 } from 'lucide-react';
 import { adminApi } from '../services/adminApi';
+import { cleanNumeric } from '../../utils/cleanNumeric.ts';
 import { useAdminRealtime } from '../context/AdminRealtimeContext';
 
 interface AdminRiskPageProps {
@@ -384,19 +385,19 @@ export const AdminRiskPage: React.FC<AdminRiskPageProps> = ({ onNavigate }) => {
                           {p.side}
                         </span>
                       </td>
-                      <td className="p-3 text-right text-white font-bold">{p.quantity}</td>
-                      <td className="p-3 text-right text-white">₹{Number(p.averagePrice || 0).toFixed(2)}</td>
+                      <td className="p-3 text-right text-white font-bold">{cleanNumeric(p.quantity ?? p.qty)}</td>
+                      <td className="p-3 text-right text-white">₹{cleanNumeric(p.averagePrice ?? p.average_price ?? p.avgPrice).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="p-3 text-right text-white font-bold">
-                        ₹{Number(p.currentPrice || p.ltp || p.averagePrice || 0).toFixed(2)}
+                        ₹{cleanNumeric(p.currentPrice ?? p.current_price ?? p.ltp ?? p.averagePrice).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td
                         className={`p-3 text-right font-bold ${
                           pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
                         }`}
                       >
-                        {pnl >= 0 ? '+' : ''}₹{pnl.toFixed(2)}
+                        {pnl >= 0 ? '+' : ''}₹{cleanNumeric(pnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
-                      <td className="p-3 text-right">₹{Number(p.marginUsed || 0).toFixed(2)}</td>
+                      <td className="p-3 text-right">₹{cleanNumeric(p.marginUsed ?? p.margin_used ?? p.usedMargin ?? p.margin).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="p-3 text-right">
                         <button
                           onClick={() => handleSquareOff(p.userId, p.id)}

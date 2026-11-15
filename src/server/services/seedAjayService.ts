@@ -6,6 +6,8 @@ import { postgresWalletRepository } from '../repositories/trading/PostgresWallet
 import { postgresPositionRepository } from '../repositories/trading/PostgresPositionRepository.ts';
 import { postgresOrderRepository } from '../repositories/trading/PostgresOrderRepository.ts';
 import { postgresFundTransactionRepository } from '../repositories/trading/PostgresFundTransactionRepository.ts';
+import { findInstrument } from '../trading/tradingStore.ts';
+import { cleanNumeric } from '../utils/cleanNumeric.ts';
 
 export async function seedAjayAccount(): Promise<void> {
   const userId = 'Ajay12';
@@ -189,6 +191,10 @@ export async function seedAjayAccount(): Promise<void> {
       ];
 
       for (const pos of positionsToSeed) {
+        const liveInst = findInstrument(pos.instrumentId);
+        const ltp = liveInst ? cleanNumeric(liveInst.lastPrice) : pos.avgPrice;
+        const unrealized = Number(((ltp - pos.avgPrice) * pos.qty).toFixed(2));
+
         await postgresPositionRepository.upsertPosition({
           id: pos.id,
           tenant_id: t,
@@ -197,7 +203,7 @@ export async function seedAjayAccount(): Promise<void> {
           quantity: pos.qty,
           average_price: pos.avgPrice,
           realized_pnl: 0,
-          unrealized_pnl: 0,
+          unrealized_pnl: unrealized,
           margin_used: pos.marginUsed,
         });
       }

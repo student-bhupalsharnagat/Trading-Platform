@@ -5,6 +5,7 @@ import { useTenant } from '../context/TenantContext.tsx';
 import { authApi } from '../services/authApi.ts';
 import { SupportTicketsSection } from './SupportTicketsSection.tsx';
 import { WalletModal } from './WalletModal.tsx';
+import { cleanNumeric } from '../utils/cleanNumeric.ts';
 import {
   User as UserIcon,
   Wallet,
@@ -36,6 +37,8 @@ import {
 interface ProfileDashboardProps {
   user: User;
   wallet: WalletFunds;
+  unrealizedPnL?: number;
+  realizedPnL?: number;
   onRefreshPortfolio?: () => void;
   initialNotifications?: AppNotification[];
 }
@@ -70,6 +73,8 @@ const DEFAULT_PROFILE_NOTIFICATIONS: AppNotification[] = [
 export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
   user,
   wallet,
+  unrealizedPnL,
+  realizedPnL,
   onRefreshPortfolio,
   initialNotifications,
 }) => {
@@ -80,6 +85,14 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
   const [activeModal, setActiveModal] = useState<
     'NONE' | 'PROFILE' | 'WALLET' | 'NOTIFICATIONS' | 'TICKETS' | 'SETTINGS' | 'TERMS'
   >('NONE');
+
+  const openPnL = typeof unrealizedPnL === 'number'
+    ? unrealizedPnL
+    : typeof (wallet as any).unrealizedPnL === 'number'
+    ? (wallet as any).unrealizedPnL
+    : typeof (wallet as any).unrealizedPnl === 'number'
+    ? (wallet as any).unrealizedPnl
+    : cleanNumeric(wallet.totalPnL) - cleanNumeric(wallet.todayPnL);
   const [walletInitialTab, setWalletInitialTab] = useState<'DEPOSIT' | 'WITHDRAW' | 'HISTORY'>('DEPOSIT');
 
   // Tickets state
@@ -281,8 +294,8 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
           {/* Open PnL */}
           <div className="p-2 bg-[#060B13] border border-[#141E2E] rounded-xl">
             <span className="text-[10px] font-bold text-slate-400 tracking-wider block">Open PnL</span>
-            <span className="text-xs sm:text-sm font-mono font-bold text-emerald-400 mt-0.5 block">
-              {(wallet.todayPnL || 0) >= 0 ? '+' : ''}₹{(wallet.todayPnL || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            <span className={`text-xs sm:text-sm font-mono font-bold mt-0.5 block ${openPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {openPnL >= 0 ? '+' : ''}₹{openPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
 
@@ -576,6 +589,8 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
         isOpen={activeModal === 'WALLET'}
         initialTab={walletInitialTab}
         wallet={wallet}
+        unrealizedPnL={openPnL}
+        realizedPnL={realizedPnL}
         onClose={() => setActiveModal('NONE')}
         onRefresh={onRefreshPortfolio}
       />

@@ -33,6 +33,7 @@ import { TradingPosition } from '../repositories/trading/ITradingPositionReposit
 import { TradingWallet } from '../repositories/trading/ITradingWalletRepository.ts';
 import { executionGateway } from '../gateways/ExecutionGateway.ts';
 import { GatewayOrderResult } from '../gateways/types.ts';
+import { cleanNumeric } from '../utils/cleanNumeric.ts';
 
 export interface PlaceOrderInput {
   tenantId: string;
@@ -601,16 +602,20 @@ export class TradingExecutionService {
         symbol: inst.symbol,
         exchange: (inst as any).exchange || 'NSE',
         side: newOrder.side,
-        quantity: Number(newOrder.quantity),
-        qty: Number(newOrder.quantity),
-        price: Number(newOrder.price),
-        executionPrice: Number(newOrder.price),
-        executionValue: Number(executionValue),
-        totalValue: Number(executionValue),
-        turnover: Number(executionValue),
+        quantity: Math.abs(cleanNumeric(newOrder.quantity)),
+        qty: Math.abs(cleanNumeric(newOrder.quantity)),
+        price: cleanNumeric(newOrder.price),
+        executionPrice: cleanNumeric(newOrder.price),
+        ltp: cleanNumeric(newOrder.price),
+        currentPrice: cleanNumeric(newOrder.price),
+        current_price: cleanNumeric(newOrder.price),
+        executionValue: cleanNumeric(executionValue),
+        totalValue: cleanNumeric(executionValue),
+        turnover: cleanNumeric(executionValue),
         fees: Number((executionValue * 0.0003).toFixed(2)),
-        commission: Number((inst as any).commission || 0),
-        realizedPnl: Number(newTrade.realized_pnl || 0),
+        commission: cleanNumeric((inst as any).commission || 0),
+        realizedPnl: cleanNumeric(newTrade.realized_pnl || 0),
+        realized_pnl: cleanNumeric(newTrade.realized_pnl || 0),
         executedAt: newTrade.executed_at,
       };
 
@@ -624,6 +629,17 @@ export class TradingExecutionService {
         client
       );
 
+      const posQty = cleanNumeric(updatedPosition.quantity);
+      const absPosQty = Math.abs(posQty);
+      const posAvg = cleanNumeric(updatedPosition.average_price);
+      const posLtp = cleanNumeric(execPrice);
+      const posSide = newOrder.side || (posQty >= 0 ? 'BUY' : 'SELL');
+      const posUnrealized = posSide === 'BUY'
+        ? (posLtp - posAvg) * absPosQty
+        : (posAvg - posLtp) * absPosQty;
+      const posRealized = cleanNumeric(updatedPosition.realized_pnl);
+      const posMargin = cleanNumeric(updatedPosition.margin_used);
+
       const positionPayload = {
         tenantId,
         userId,
@@ -631,16 +647,28 @@ export class TradingExecutionService {
         tradingUserId: userId,
         positionId: updatedPosition.id,
         symbol: inst.symbol,
-        quantity: Number(updatedPosition.quantity),
-        qty: Number(updatedPosition.quantity),
-        averagePrice: Number(updatedPosition.average_price),
-        avgPrice: Number(updatedPosition.average_price),
-        buyPrice: Number(updatedPosition.average_price),
-        currentPrice: Number(execPrice),
-        ltp: Number(execPrice),
-        realizedPnl: Number(updatedPosition.realized_pnl),
-        unrealizedPnl: Number(updatedPosition.unrealized_pnl || 0),
-        marginUsed: Number(updatedPosition.margin_used),
+        instrumentId: inst.id,
+        quantity: absPosQty,
+        qty: absPosQty,
+        rawQuantity: posQty,
+        side: posSide,
+        type: posSide,
+        averagePrice: posAvg,
+        avgPrice: posAvg,
+        average_price: posAvg,
+        buyPrice: posAvg,
+        currentPrice: posLtp,
+        current_price: posLtp,
+        ltp: posLtp,
+        realizedPnl: posRealized,
+        realized_pnl: posRealized,
+        unrealizedPnl: posUnrealized,
+        unrealized_pnl: posUnrealized,
+        pnl: posUnrealized,
+        marginUsed: posMargin,
+        usedMargin: posMargin,
+        margin: posMargin,
+        margin_used: posMargin,
         status: updatedPosition.quantity === 0 ? ('CLOSED' as const) : ('OPEN' as const),
         updatedAt: new Date().toISOString(),
       };

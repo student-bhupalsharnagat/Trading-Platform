@@ -1,6 +1,7 @@
 import { pgDb, DbClient } from '../../db/postgres.ts';
 import { ITradingWalletRepository, TradingWallet } from './ITradingWalletRepository.ts';
 import { getSearchTenants } from '../../utils/tenantHelper.ts';
+import { cleanNumeric } from '../../utils/cleanNumeric.ts';
 
 export class PostgresWalletRepository implements ITradingWalletRepository {
   private mapRow(row: any): TradingWallet {
@@ -8,10 +9,10 @@ export class PostgresWalletRepository implements ITradingWalletRepository {
       id: row.id,
       tenant_id: row.tenant_id,
       user_id: row.user_id,
-      available_balance: Number(row.available_balance || 0),
-      blocked_balance: Number(row.blocked_balance || 0),
-      used_margin: Number(row.used_margin || 0),
-      realized_pnl: Number(row.realized_pnl || 0),
+      available_balance: cleanNumeric(row.available_balance || 0),
+      blocked_balance: cleanNumeric(row.blocked_balance || 0),
+      used_margin: cleanNumeric(row.used_margin || 0),
+      realized_pnl: cleanNumeric(row.realized_pnl || 0),
       updated_at: new Date(row.updated_at).toISOString(),
     };
   }

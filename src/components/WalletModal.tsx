@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { WalletFunds } from '../types.ts';
 import { authApi } from '../services/authApi.ts';
 import { useAuth } from '../hooks/useAuth.ts';
+import { cleanNumeric } from '../utils/cleanNumeric.ts';
 import {
   Wallet,
   X,
@@ -31,6 +32,8 @@ import {
 interface WalletModalProps {
   isOpen: boolean;
   wallet: WalletFunds;
+  unrealizedPnL?: number;
+  realizedPnL?: number;
   onClose: () => void;
   onRefresh?: () => void;
   initialTab?: 'DEPOSIT' | 'WITHDRAW' | 'HISTORY';
@@ -95,6 +98,8 @@ function compressReceiptImage(file: File, maxDimension = 1200, quality = 0.75): 
 export const WalletModal: React.FC<WalletModalProps> = ({
   isOpen,
   wallet,
+  unrealizedPnL: unrealizedPnLProp,
+  realizedPnL: realizedPnLProp,
   onClose,
   onRefresh,
   initialTab = 'DEPOSIT',
@@ -568,8 +573,24 @@ export const WalletModal: React.FC<WalletModalProps> = ({
   const isWithdrawExceeded = numWithdrawAmt > wallet.availableBalance;
   const isWithdrawBelowMin = numWithdrawAmt > 0 && numWithdrawAmt < 500;
 
-  const unrealizedPnL = typeof wallet.totalPnL === 'number' ? wallet.totalPnL : 0;
-  const realizedPnL = typeof wallet.todayPnL === 'number' ? wallet.todayPnL : 0;
+  const unPnl = typeof unrealizedPnLProp === 'number'
+    ? unrealizedPnLProp
+    : typeof (wallet as any).unrealizedPnL === 'number'
+    ? (wallet as any).unrealizedPnL
+    : typeof (wallet as any).unrealizedPnl === 'number'
+    ? (wallet as any).unrealizedPnl
+    : cleanNumeric(wallet.totalPnL) - cleanNumeric(wallet.todayPnL);
+
+  const relPnl = typeof realizedPnLProp === 'number'
+    ? realizedPnLProp
+    : typeof (wallet as any).realizedPnL === 'number'
+    ? (wallet as any).realizedPnL
+    : typeof (wallet as any).realizedPnl === 'number'
+    ? (wallet as any).realizedPnl
+    : cleanNumeric(wallet.todayPnL);
+
+  const unrealizedPnL = cleanNumeric(unPnl);
+  const realizedPnL = cleanNumeric(relPnl);
   const isUnrealizedPositive = unrealizedPnL >= 0;
   const isRealizedPositive = realizedPnL >= 0;
 

@@ -1,5 +1,6 @@
 import { pgDb, DbClient } from '../../db/postgres.ts';
 import { ITradingTradeRepository, TradingTrade } from './ITradingTradeRepository.ts';
+import { cleanNumeric } from '../../utils/cleanNumeric.ts';
 
 export class PostgresTradeRepository implements ITradingTradeRepository {
   private mapRow(row: any): TradingTrade {
@@ -10,10 +11,10 @@ export class PostgresTradeRepository implements ITradingTradeRepository {
       user_id: row.user_id,
       instrument_id: row.instrument_id,
       side: row.side,
-      quantity: Number(row.quantity),
-      execution_price: Number(row.execution_price),
-      execution_value: Number(row.execution_value),
-      realized_pnl: Number(row.realized_pnl || 0),
+      quantity: cleanNumeric(row.quantity),
+      execution_price: cleanNumeric(row.execution_price),
+      execution_value: cleanNumeric(row.execution_value),
+      realized_pnl: cleanNumeric(row.realized_pnl || 0),
       executed_at: new Date(row.executed_at).toISOString(),
       created_at: new Date(row.created_at).toISOString(),
     };

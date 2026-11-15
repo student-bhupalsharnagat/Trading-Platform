@@ -1,6 +1,7 @@
 import { pgDb, DbClient } from '../../db/postgres.ts';
 import { ITradingPositionRepository, TradingPosition } from './ITradingPositionRepository.ts';
 import { getSearchTenants } from '../../utils/tenantHelper.ts';
+import { cleanNumeric } from '../../utils/cleanNumeric.ts';
 
 export class PostgresPositionRepository implements ITradingPositionRepository {
   private mapRow(row: any): TradingPosition {
@@ -9,11 +10,11 @@ export class PostgresPositionRepository implements ITradingPositionRepository {
       tenant_id: row.tenant_id,
       user_id: row.user_id,
       instrument_id: row.instrument_id,
-      quantity: Number(row.quantity),
-      average_price: Number(row.average_price),
-      realized_pnl: Number(row.realized_pnl || 0),
-      unrealized_pnl: Number(row.unrealized_pnl || 0),
-      margin_used: Number(row.margin_used || 0),
+      quantity: cleanNumeric(row.quantity),
+      average_price: cleanNumeric(row.average_price),
+      realized_pnl: cleanNumeric(row.realized_pnl || 0),
+      unrealized_pnl: cleanNumeric(row.unrealized_pnl || 0),
+      margin_used: cleanNumeric(row.margin_used || 0),
       updated_at: new Date(row.updated_at).toISOString(),
     };
   }

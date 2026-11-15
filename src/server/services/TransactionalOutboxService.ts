@@ -8,6 +8,7 @@ import { CentralAdminEventClient, centralAdminEventClient } from '../events/Cent
 import { CircuitBreaker } from '../events/CircuitBreaker.ts';
 import { InternalEvent } from '../events/types.ts';
 import { auditService } from './auditService.ts';
+import { cleanNumeric } from '../utils/cleanNumeric.ts';
 
 export interface OutboxServiceOptions {
   client?: CentralAdminEventClient;
@@ -206,6 +207,13 @@ export class TransactionalOutboxService {
 
       for (const p of allPositions) {
         positionsCount++;
+        const rawAvg = cleanNumeric((p as any).avgPrice ?? (p as any).average_price ?? (p as any).averagePrice ?? 0);
+        const rawLtp = cleanNumeric((p as any).ltp ?? (p as any).currentPrice ?? (p as any).current_price ?? 0);
+        const rawQty = cleanNumeric((p as any).raw_quantity ?? (p as any).quantity ?? 0);
+        const rawUnrealized = cleanNumeric((p as any).unrealizedPnl ?? (p as any).unrealized_pnl ?? (p as any).pnl ?? 0);
+        const rawRealized = cleanNumeric((p as any).realizedPnl ?? (p as any).realized_pnl ?? 0);
+        const rawMargin = cleanNumeric((p as any).usedMargin ?? (p as any).margin_used ?? (p as any).margin ?? 0);
+
         await this.enqueue({
           eventId: `sync-pos-${p.id}`,
           eventType: 'position.updated',
@@ -216,11 +224,22 @@ export class TransactionalOutboxService {
             userId: p.user_id,
             symbol: p.symbol || p.instrument_id,
             instrumentId: p.instrument_id || p.symbol,
-            quantity: p.raw_quantity !== undefined ? p.raw_quantity : p.quantity,
-            averagePrice: p.average_price,
-            realizedPnl: p.realized_pnl,
-            unrealizedPnl: p.unrealized_pnl,
-            marginUsed: p.margin_used,
+            quantity: rawQty,
+            raw_quantity: rawQty,
+            avgPrice: rawAvg,
+            average_price: rawAvg,
+            averagePrice: rawAvg,
+            ltp: rawLtp,
+            currentPrice: rawLtp,
+            current_price: rawLtp,
+            realizedPnl: rawRealized,
+            realized_pnl: rawRealized,
+            unrealizedPnl: rawUnrealized,
+            unrealized_pnl: rawUnrealized,
+            pnl: rawUnrealized,
+            marginUsed: rawMargin,
+            margin_used: rawMargin,
+            margin: rawMargin,
             updatedAt: p.updated_at,
           },
         }).catch(() => {});

@@ -16,6 +16,7 @@ import { DesktopMarketPanel } from '../components/DesktopMarketPanel.tsx';
 import { useLanguage } from '../context/LanguageContext.tsx';
 import { useTenant } from '../context/TenantContext.tsx';
 import { getMarketHoursInfo, MarketHoursInfo } from '../utils/marketHours.ts';
+import { cleanNumeric } from '../utils/cleanNumeric.ts';
 import {
   Wallet,
   Bell,
@@ -771,18 +772,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       const cleanSym = sym.replace(/^(NSE|BSE|MCX|NFO|BINANCE|TVC):/i, '').trim().toUpperCase();
 
       const noSpaceSym = cleanSym.replace(/\s+/g, '');
-      const liveInst = instrumentsMap.get(cleanSym) || instrumentsMap.get(sym.toUpperCase()) || instrumentsMap.get(noSpaceSym) || instruments.find((i) => i.symbol.toUpperCase() === cleanSym || i.id.toUpperCase() === cleanSym);
+      const liveInst =
+        instrumentsMap.get(cleanSym) ||
+        instrumentsMap.get(sym.toUpperCase()) ||
+        instrumentsMap.get(noSpaceSym) ||
+        instruments.find(
+          (i) =>
+            i.symbol.toUpperCase() === cleanSym ||
+            i.id.toUpperCase() === cleanSym ||
+            i.id.toLowerCase() === sym.toLowerCase() ||
+            i.symbol.toLowerCase() === sym.toLowerCase()
+        );
 
       const rawQty = pos.qty ?? pos.quantity ?? 0;
-      const qty = Math.abs(Number(rawQty) || 0);
-      const rawAvg = Number(pos.avgPrice ?? pos.average_price ?? pos.averagePrice ?? 0);
-      const ltp = liveInst?.lastPrice ? Number(liveInst.lastPrice) : Number(pos.ltp ?? pos.lastPrice ?? rawAvg);
-      const avgPrice = rawAvg > 0 ? rawAvg : (ltp > 0 ? ltp : (liveInst?.openPrice || 1));
+      const qty = Math.abs(cleanNumeric(rawQty));
+      const rawAvg = cleanNumeric(pos.avgPrice ?? pos.average_price ?? pos.averagePrice ?? 0);
+      const ltp = liveInst?.lastPrice
+        ? cleanNumeric(liveInst.lastPrice)
+        : cleanNumeric(pos.ltp ?? pos.lastPrice ?? pos.current_price ?? pos.currentPrice ?? rawAvg);
+      const avgPrice = rawAvg > 0 ? rawAvg : (ltp > 0 ? ltp : cleanNumeric(liveInst?.openPrice || 1000));
       const decimals = (liveInst?.category === 'FOREX' || avgPrice < 10) ? 4 : 2;
 
-      const rawType = (pos.type || (Number(rawQty) >= 0 ? 'BUY' : 'SELL') || 'BUY').toUpperCase();
+      const rawType = (pos.type || pos.side || (cleanNumeric(rawQty) >= 0 ? 'BUY' : 'SELL') || 'BUY').toUpperCase();
       const posType: 'BUY' | 'SELL' = rawType === 'SELL' ? 'SELL' : 'BUY';
-      const product = ((pos.product || 'INTRADAY') as string).toUpperCase() as 'INTRADAY' | 'HOLDING';
+      const product = (((pos.product || pos.product_type || 'INTRADAY') as string).toUpperCase()) as 'INTRADAY' | 'HOLDING';
 
       const lotSize = Number(pos.lotSize || liveInst?.lotSize || (liveInst?.category === 'EQUITY' ? 1 : 100));
       const lots = Number(pos.lots || Math.max(1, Math.round(qty / lotSize)));
@@ -797,11 +810,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         ? Number(((pnl / totalExposure) * 100).toFixed(2))
         : 0;
 
+      const isOpt = cleanSym.includes('CE') || cleanSym.includes('PE') || cleanSym.includes('OPT');
+      const category = isOpt ? 'OPTIONS' : (liveInst?.category || pos.category || 'COMMODITY');
+
       return {
         ...pos,
         id: pos.id || `POS-${sym}`,
-        symbol: sym,
-        category: liveInst?.category || pos.category || 'COMMODITY',
+        symbol: liveInst?.symbol || sym,
+        category,
         type: posType,
         product,
         qty,
@@ -886,7 +902,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   // If Live Chart is active, render full live chart view matching Screenshot 2
   if (selectedChartInstrument) {
     return (
-      <div className="h-screen w-screen bg-[#060B13] flex flex-col overflow-hidden">
+      <div className="fixed inset-0 z-50 h-screen w-screen bg-[#060B13] flex flex-col overflow-hidden">
         <LiveChart
           instrument={selectedChartInstrument}
           marketClosedOverride={marketClosedOverride}
@@ -921,16 +937,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         <WalletModal
           isOpen={isWalletModalOpen}
           initialTab={walletModalInitialTab}
-          wallet={
-            portfolio?.wallet || {
+          wallet={{
+            ...(portfolio?.wallet || {
               availableBalance: 1000000,
               usedMargin: 0,
-              totalPnL: 0,
-              todayPnL: 0,
               deposited: 1000000,
               withdrawn: 0,
-            }
-          }
+            }),
+            totalPnL: netPnL,
+            todayPnL: todayRealizedPnL,
+            unrealizedPnL: totalUnrealizedPnL,
+            realizedPnL: todayRealizedPnL,
+          } as any}
+          unrealizedPnL={totalUnrealizedPnL}
+          realizedPnL={todayRealizedPnL}
           onClose={() => setIsWalletModalOpen(false)}
           onRefresh={fetchData}
         />
@@ -1882,7 +1902,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                           <td className="py-3 px-4">
                             <div className="font-extrabold text-slate-900 dark:text-white text-sm">{ord.symbol}</div>
                             <span className="text-[10px] text-slate-400 font-mono">
-                              {inst?.category || 'COMMODITY'}
+                              {(() => {
+                                const s = String(ord.symbol || '').toUpperCase();
+                                if (s.includes('CE') || s.includes('PE') || s.includes('OPT')) return 'OPTIONS';
+                                return inst?.category || 'COMMODITY';
+                              })()}
                             </span>
                           </td>
                           <td className="py-3 px-4">
@@ -2961,14 +2985,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         {activeNav === 'profile' && user && (
           <ProfileDashboard
             user={user}
-            wallet={portfolio?.wallet || {
-              availableBalance: 142840,
-              usedMargin: 38210,
-              totalPnL: 34386.86,
-              todayPnL: 504.52,
-              deposited: 200000,
-              withdrawn: 50000,
-            }}
+            wallet={{
+              ...(portfolio?.wallet || {
+                availableBalance: 142840,
+                usedMargin: 38210,
+                deposited: 200000,
+                withdrawn: 50000,
+              }),
+              totalPnL: netPnL,
+              todayPnL: todayRealizedPnL,
+              unrealizedPnL: totalUnrealizedPnL,
+              realizedPnL: todayRealizedPnL,
+            } as any}
+            unrealizedPnL={totalUnrealizedPnL}
+            realizedPnL={todayRealizedPnL}
             initialNotifications={notifications}
             onRefreshPortfolio={fetchData}
           />
@@ -3202,16 +3232,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       <WalletModal
         isOpen={isWalletModalOpen}
         initialTab={walletModalInitialTab}
-        wallet={
-          portfolio?.wallet || {
+        wallet={{
+          ...(portfolio?.wallet || {
             availableBalance: 1000000,
             usedMargin: 0,
-            totalPnL: 0,
-            todayPnL: 0,
             deposited: 1000000,
             withdrawn: 0,
-          }
-        }
+          }),
+          totalPnL: netPnL,
+          todayPnL: todayRealizedPnL,
+          unrealizedPnL: totalUnrealizedPnL,
+          realizedPnL: todayRealizedPnL,
+        } as any}
+        unrealizedPnL={totalUnrealizedPnL}
+        realizedPnL={todayRealizedPnL}
         onClose={() => setIsWalletModalOpen(false)}
         onRefresh={fetchData}
       />

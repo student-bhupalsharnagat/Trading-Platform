@@ -9,6 +9,7 @@ import {
 } from '../../types.ts';
 import { DEFAULT_INSTRUMENTS } from '../../data/defaultInstruments.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
+import { cleanNumeric } from '../utils/cleanNumeric.ts';
 
 // Helper to generate realistic historical candle data
 export function generateHistoricalCandles(
@@ -378,7 +379,7 @@ export function findInstrument(symbol: string): Instrument | undefined {
     if (match) {
       const baseName = match[1].trim() || 'NIFTY';
       const expiry = match[2] ? match[2].trim() : 'Current';
-      const strike = parseFloat(match[3]);
+      const strike = cleanNumeric(match[3]);
       const optType = match[4].toUpperCase() as 'CE' | 'PE';
 
       const underlying = INSTRUMENTS.find((i) => {
@@ -531,26 +532,48 @@ const tickTimer = setInterval(() => {
     const positions = tenantPositions[tenantId] || [];
     tenantPositions[tenantId] = positions.map((pos) => {
       const liveInst = findInstrument(pos.symbol);
-      const ltp = liveInst ? liveInst.lastPrice : pos.ltp;
+      const ltp = liveInst ? cleanNumeric(liveInst.lastPrice) : cleanNumeric(pos.ltp);
+      const avgPrice = cleanNumeric(pos.avgPrice || (pos as any).average_price || 0);
+      const qty = cleanNumeric(pos.qty || (pos as any).quantity || 0);
       const pnl =
-        pos.type === 'BUY' ? (ltp - pos.avgPrice) * pos.qty : (pos.avgPrice - ltp) * pos.qty;
-      const pnlPercent = (pos.avgPrice * pos.qty) > 0
-        ? Number(((pnl / (pos.avgPrice * pos.qty)) * 100).toFixed(2))
+        pos.type === 'BUY' ? (ltp - avgPrice) * qty : (avgPrice - ltp) * qty;
+      const pnlPercent = (avgPrice * qty) > 0
+        ? Number(((pnl / (avgPrice * qty)) * 100).toFixed(2))
         : 0;
       livePnL += pnl;
 
+      const unrealizedPnl = Number(pnl.toFixed(2));
+      const realizedPnl = cleanNumeric((pos as any).realizedPnl ?? (pos as any).realized_pnl ?? 0);
+      const usedMargin = cleanNumeric((pos as any).usedMargin ?? (pos as any).margin ?? (pos as any).margin_used ?? (avgPrice * qty * 0.2));
+
       return {
         ...pos,
+        avgPrice,
+        average_price: avgPrice,
+        averagePrice: avgPrice,
         ltp,
-        pnl: Number(pnl.toFixed(2)),
+        currentPrice: ltp,
+        current_price: ltp,
+        qty,
+        quantity: qty,
+        pnl: unrealizedPnl,
+        unrealizedPnl,
+        unrealized_pnl: unrealizedPnl,
+        realizedPnl,
+        realized_pnl: realizedPnl,
+        usedMargin,
+        margin: usedMargin,
+        margin_used: usedMargin,
         pnlPercent,
       };
     });
 
     const wallet = getTenantWallet(tenantId);
-    const realizedPnL = (wallet as any).realizedPnL ?? wallet.todayPnL ?? 0;
+    const realizedPnL = cleanNumeric((wallet as any).realizedPnL ?? wallet.todayPnL ?? 0);
     wallet.todayPnL = Number(realizedPnL.toFixed(2));
     wallet.totalPnL = Number((realizedPnL + livePnL).toFixed(2));
+    (wallet as any).unrealizedPnL = Number(livePnL.toFixed(2));
+    (wallet as any).realizedPnL = Number(realizedPnL.toFixed(2));
 
     // Only broadcast portfolio.mtm to unauthenticated or demo-trader clients so real user portfolios are never overwritten
     if (tradingWebSocketServer.getConnectedClientsCount(tenantId) > 0) {
