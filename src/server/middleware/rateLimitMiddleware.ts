@@ -5,7 +5,7 @@ import { redisService } from '../redis/RedisService.ts';
  * Shared Redis-backed sliding-window rate limit store with resilient in-memory fallback
  */
 export class RedisRateLimitStore implements Store {
-  private prefix: string;
+  prefix: string;
   private windowMs: number = 60000;
   private localFallback = new Map<string, { hits: number; resetTime: number }>();
 

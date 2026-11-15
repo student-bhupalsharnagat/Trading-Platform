@@ -58,6 +58,7 @@ router.post('/manual-request', requireAuth, fundsRateLimiter, async (req: Authen
       utr_number,
       payment_method,
       proof_image: proof_image || proof_image_url,
+      proof_image_url: proof_image_url || proof_image,
     });
 
     res.status(201).json({

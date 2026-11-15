@@ -57,6 +57,12 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'clients.create',
     'kyc.view',
   ],
+  OPERATIONS: [
+    'dashboard.view',
+    'clients.view',
+    'funds.view',
+    'audit_logs.view',
+  ],
   CLIENT: [
     'trading.trade',
     'trading.view_portfolio',

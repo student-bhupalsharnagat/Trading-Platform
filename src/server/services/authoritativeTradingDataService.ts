@@ -6,6 +6,7 @@ import { postgresWalletRepository } from '../repositories/trading/PostgresWallet
 import { postgresMarginRepository } from '../repositories/trading/PostgresMarginRepository.ts';
 import { postgresClientMappingRepository } from '../repositories/trading/PostgresClientMappingRepository.ts';
 import { postgresFundTransactionRepository } from '../repositories/trading/PostgresFundTransactionRepository.ts';
+import { postgresManualDepositRepository } from '../repositories/trading/PostgresManualDepositRepository.ts';
 import type { TradingFundTransaction } from '../repositories/trading/ITradingFundTransactionRepository.ts';
 import { postgresLedgerRepository } from '../repositories/trading/PostgresLedgerRepository.ts';
 import { db } from '../db/database.ts';
@@ -1515,6 +1516,17 @@ export class AuthoritativeTradingDataService {
   ) {
     const tx = await postgresFundTransactionRepository.findById(tenantId, txId);
     if (!tx) {
+      const manualReq = await postgresManualDepositRepository.getById(txId);
+      if (manualReq) {
+        const { manualDepositService } = await import('./ManualDepositService.ts');
+        const effectiveTenant = manualReq.tenant_id || tenantId || 'vertex-default';
+        const adminUserObj = { userId: adminId, role: 'SUPER_ADMIN', fullName: adminId };
+        if (action === 'APPROVE') {
+          return await manualDepositService.approveRequest(effectiveTenant, txId, adminUserObj);
+        } else {
+          return await manualDepositService.rejectRequest(effectiveTenant, txId, adminUserObj, reason);
+        }
+      }
       const err = new Error(`Fund transaction '${txId}' not found for tenant '${tenantId}'.`);
       (err as any).statusCode = 404;
       throw err;
@@ -2462,6 +2474,53 @@ export class AuthoritativeTradingDataService {
         });
       }
     }
+
+    // Merge manual deposit requests
+    try {
+      if (!options.type || options.type === 'DEPOSIT') {
+        const manualDepositsRes = await pgDb.query(
+          `SELECT * FROM manual_deposit_requests 
+           WHERE (tenant_id = ANY($1) OR $2 = true)
+           ${options.status ? 'AND status = $3' : ''}
+           ORDER BY created_at DESC LIMIT $${options.status ? 4 : 3}`,
+          options.status ? [searchTenants, isDefault, options.status, limit] : [searchTenants, isDefault, limit]
+        ).catch(() => ({ rows: [] }));
+
+        for (const m of manualDepositsRes.rows || []) {
+          if (!seenTxIds.has(m.id)) {
+            seenTxIds.add(m.id);
+            transactions.push({
+              id: m.id,
+              transactionId: m.id,
+              clientCode: (m.user_id || '').toUpperCase(),
+              userId: m.user_id,
+              clientId: m.user_id,
+              client_id: m.user_id,
+              clientName: m.user_name || m.user_id,
+              client_name: m.user_name || m.user_id,
+              tradingUserId: m.user_id,
+              trading_user_id: m.user_id,
+              tenantId: m.tenant_id || cleanTenant,
+              amount: Number(m.amount),
+              type: 'DEPOSIT',
+              method: m.payment_method || 'BANK_TRANSFER',
+              paymentMethod: m.payment_method || 'BANK_TRANSFER',
+              reference: m.utr_number || m.id,
+              referenceId: m.utr_number || m.id,
+              utr: m.utr_number,
+              utr_number: m.utr_number,
+              payment_method: m.payment_method || 'BANK_TRANSFER',
+              proof_image_url: m.proof_image_url || null,
+              status: m.status,
+              approvedBy: m.approved_by,
+              rejectionReason: m.rejection_reason,
+              createdAt: m.created_at ? new Date(m.created_at).toISOString() : new Date().toISOString(),
+              updatedAt: m.updated_at ? new Date(m.updated_at).toISOString() : new Date().toISOString(),
+            });
+          }
+        }
+      }
+    } catch {}
 
     const total = transactions.length;
     const pagedTxs = transactions.slice(offset, offset + limit);

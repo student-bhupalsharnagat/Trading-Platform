@@ -36,6 +36,62 @@ interface WalletModalProps {
   initialTab?: 'DEPOSIT' | 'WITHDRAW' | 'HISTORY';
 }
 
+/**
+ * Compresses an image file client-side using an HTML5 Canvas helper.
+ * Scales down to max width/height 1200px while maintaining aspect ratio,
+ * and encodes with quality 0.75 in JPEG/WEBP to keep database payloads small and fast.
+ */
+function compressReceiptImage(file: File, maxDimension = 1200, quality = 0.75): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      let { width, height } = img;
+
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        } else {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+        return;
+      }
+
+      ctx.drawImage(img, 0, 0, width, height);
+
+      const mimeType = file.type === 'image/webp' ? 'image/webp' : 'image/jpeg';
+      const compressedDataUrl = canvas.toDataURL(mimeType, quality);
+      resolve(compressedDataUrl);
+    };
+
+    img.onerror = (err) => {
+      URL.revokeObjectURL(objectUrl);
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    };
+
+    img.src = objectUrl;
+  });
+}
+
 export const WalletModal: React.FC<WalletModalProps> = ({
   isOpen,
   wallet,
@@ -266,11 +322,18 @@ export const WalletModal: React.FC<WalletModalProps> = ({
     }
 
     setManualProofFileName(file.name);
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setManualProof(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    compressReceiptImage(file)
+      .then((compressedBase64) => {
+        setManualProof(compressedBase64);
+      })
+      .catch((err) => {
+        console.warn('[WalletModal] Receipt compression fallback:', err);
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setManualProof(reader.result as string);
+        };
+        reader.readAsDataURL(file);
+      });
   };
 
   const handleManualDepositSubmit = async () => {
@@ -373,6 +436,18 @@ export const WalletModal: React.FC<WalletModalProps> = ({
         description: 'Maximum deposit limit per transaction is ₹1,00,00,000 (1 Crore).',
       });
       return;
+    }
+
+    if (depositMethod === 'UPI') {
+      const vpaRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
+      if (!upiId || !vpaRegex.test(upiId.trim())) {
+        showToast({
+          type: 'error',
+          title: 'Invalid UPI ID',
+          description: 'Please enter a valid UPI ID (e.g. username@okhdfcbank).',
+        });
+        return;
+      }
     }
 
     setProcessing(true);

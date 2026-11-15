@@ -8,6 +8,7 @@ import { postgresWalletRepository } from '../repositories/trading/PostgresWallet
 import { postgresLedgerRepository } from '../repositories/trading/PostgresLedgerRepository.ts';
 import { db } from '../db/database.ts';
 import { auditService } from './auditService.ts';
+import { transactionalOutboxService } from './TransactionalOutboxService.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
 import { getTenantWallet, getTenantNotifications } from '../trading/tradingStore.ts';
 
@@ -172,16 +173,65 @@ export class ManualDepositService {
         'manual_deposit.created',
         {
           id: newRequest.id,
+          depositId: newRequest.id,
+          transactionId: newRequest.id,
           userId,
           userName,
           amount: numAmount,
           utr: sanitizedUtr,
+          utr_number: sanitizedUtr,
+          payment_method: cleanMethod,
+          proof_image_url: proofImageUrl,
           status: 'PENDING',
           createdAt: newRequest.created_at,
         },
         (client) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(client.role)
       );
     } catch {}
+
+    // 8. Outbound S2S Transactional Outbox Event (deposit.created / manual_deposit.created)
+    try {
+      const outboxPayload = {
+        id: newRequest.id,
+        depositId: newRequest.id,
+        transactionId: newRequest.id,
+        clientCode: (userId || '').toUpperCase(),
+        tenantId,
+        userId,
+        clientId: userId,
+        tradingUserId: userId,
+        userName,
+        amount: numAmount,
+        type: 'DEPOSIT',
+        status: 'PENDING',
+        method: cleanMethod,
+        paymentMethod: cleanMethod,
+        reference: sanitizedUtr,
+        referenceId: sanitizedUtr,
+        utr: sanitizedUtr,
+        utr_number: sanitizedUtr,
+        payment_method: cleanMethod,
+        proof_image_url: proofImageUrl,
+        createdAt: newRequest.created_at,
+        timestamp: new Date().toISOString(),
+      };
+
+      await transactionalOutboxService.enqueue({
+        eventId: `evt-deposit-${newRequest.id}`,
+        eventType: 'deposit.created',
+        tenantId,
+        payload: outboxPayload,
+      });
+
+      await transactionalOutboxService.enqueue({
+        eventId: `evt-manual-dep-${newRequest.id}`,
+        eventType: 'manual_deposit.created',
+        tenantId,
+        payload: outboxPayload,
+      }).catch(() => {});
+    } catch (outboxErr) {
+      console.warn('[ManualDeposit] Outbox enqueue notice:', outboxErr);
+    }
 
     return newRequest;
   }
@@ -216,35 +266,46 @@ export class ManualDepositService {
     requestId: string,
     adminUser: any
   ): Promise<ManualDepositRecord> {
-    const adminId = adminUser?.userId || adminUser?.id || 'ADMIN';
-    const adminName = adminUser?.fullName || adminUser?.full_name || 'Administrator';
-    const adminRole = adminUser?.role || 'SUPER_ADMIN';
+    // Normalize parameters if transposed: approveRequest(txId, adminUser, tenantId)
+    let actualTenant = tenantId;
+    let actualReqId = requestId;
+    let actualAdmin = adminUser;
+    if (typeof requestId === 'object' || (!actualAdmin && typeof requestId === 'string')) {
+      actualReqId = tenantId;
+      actualAdmin = requestId;
+      actualTenant = typeof adminUser === 'string' ? adminUser : 'vertex-default';
+    }
+
+    const adminId = actualAdmin?.userId || actualAdmin?.id || (typeof actualAdmin === 'string' ? actualAdmin : 'ADMIN');
+    const adminName = actualAdmin?.fullName || actualAdmin?.full_name || 'Administrator';
+    const adminRole = actualAdmin?.role || 'SUPER_ADMIN';
+    let balanceAfter = 0;
 
     // Atomic execution inside database transaction
     const approvedRequest = await pgDb.transaction(async (client: DbClient) => {
       // 1. Lock the request row FOR UPDATE to prevent race condition or double approval
-      const request = await postgresManualDepositRepository.lockByIdForUpdate(requestId, client);
+      const request = await postgresManualDepositRepository.lockByIdForUpdate(actualReqId, client);
       if (!request) {
-        const err = new Error(`Deposit request with ID "${requestId}" not found`);
+        const err = new Error(`Deposit request with ID "${actualReqId}" not found`);
         (err as any).statusCode = 404;
         throw err;
       }
 
       if (request.status !== 'PENDING') {
         const err = new Error(
-          `Deposit request "${requestId}" has already been processed with status "${request.status}" by ${request.approved_by || 'system'}`
+          `Deposit request "${actualReqId}" has already been processed with status "${request.status}" by ${request.approved_by || 'system'}`
         );
         (err as any).statusCode = 400;
         throw err;
       }
 
       const depositAmount = Number(request.amount);
-      const reqTenant = request.tenant_id || tenantId;
+      const reqTenant = request.tenant_id || actualTenant;
 
       // 2. Lock the user's trading wallet row FOR UPDATE
       const wallet = await postgresWalletRepository.lockWalletForUpdate(reqTenant, request.user_id, client);
       const balanceBefore = Number(wallet.available_balance || 0);
-      const balanceAfter = Number((balanceBefore + depositAmount).toFixed(4));
+      balanceAfter = Number((balanceBefore + depositAmount).toFixed(4));
 
       // 3. Atomically credit the wallet balance
       await postgresWalletRepository.updateWallet(
@@ -386,31 +447,43 @@ export class ManualDepositService {
     adminUser: any,
     reason?: string
   ): Promise<ManualDepositRecord> {
-    const adminId = adminUser?.userId || adminUser?.id || 'ADMIN';
-    const adminName = adminUser?.fullName || adminUser?.full_name || 'Administrator';
-    const adminRole = adminUser?.role || 'SUPER_ADMIN';
+    // Normalize parameters if transposed: rejectRequest(txId, adminUser, reason)
+    let actualTenant = tenantId;
+    let actualReqId = requestId;
+    let actualAdmin = adminUser;
+    let actualReason = reason;
+    if (typeof requestId === 'object' || (!actualAdmin && typeof requestId === 'string')) {
+      actualReqId = tenantId;
+      actualAdmin = requestId;
+      actualReason = typeof adminUser === 'string' ? adminUser : reason;
+      actualTenant = 'vertex-default';
+    }
+
+    const adminId = actualAdmin?.userId || actualAdmin?.id || (typeof actualAdmin === 'string' ? actualAdmin : 'ADMIN');
+    const adminName = actualAdmin?.fullName || actualAdmin?.full_name || 'Administrator';
+    const adminRole = actualAdmin?.role || 'SUPER_ADMIN';
 
     const rejectedRequest = await pgDb.transaction(async (client: DbClient) => {
       // 1. Lock the request row FOR UPDATE
-      const request = await postgresManualDepositRepository.lockByIdForUpdate(requestId, client);
+      const request = await postgresManualDepositRepository.lockByIdForUpdate(actualReqId, client);
       if (!request) {
-        const err = new Error(`Deposit request with ID "${requestId}" not found`);
+        const err = new Error(`Deposit request with ID "${actualReqId}" not found`);
         (err as any).statusCode = 404;
         throw err;
       }
 
       if (request.status !== 'PENDING') {
         const err = new Error(
-          `Deposit request "${requestId}" has already been processed with status "${request.status}"`
+          `Deposit request "${actualReqId}" has already been processed with status "${request.status}"`
         );
         (err as any).statusCode = 400;
         throw err;
       }
 
       // 2. Update status to REJECTED with rejection reason (wallet remains unchanged)
-      const cleanReason = (reason || 'Transaction could not be verified on bank records').trim();
+      const cleanReason = (actualReason || 'Transaction could not be verified on bank records').trim();
       const updated = await postgresManualDepositRepository.updateStatus(
-        requestId,
+        actualReqId,
         'REJECTED',
         adminId,
         cleanReason,
@@ -422,7 +495,7 @@ export class ManualDepositService {
 
     // Post-transaction notifications & audit
     try {
-      const notifs = getTenantNotifications(rejectedRequest.tenant_id || tenantId);
+      const notifs = getTenantNotifications(rejectedRequest.tenant_id || actualTenant);
       notifs.unshift({
         id: `NOTIF-${Date.now()}`,
         title: 'Deposit Request Rejected',

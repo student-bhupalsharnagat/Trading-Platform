@@ -1,6 +1,6 @@
 export * from './types/tenant.ts';
 
-export type UserRole = 'SUPER_ADMIN' | 'MASTER' | 'BROKER' | 'SUB_BROKER' | 'CLIENT';
+export type UserRole = 'SUPER_ADMIN' | 'MASTER' | 'BROKER' | 'SUB_BROKER' | 'OPERATIONS' | 'CLIENT';
 
 export type AccountStatus =
   | 'PENDING_PHONE_VERIFICATION'

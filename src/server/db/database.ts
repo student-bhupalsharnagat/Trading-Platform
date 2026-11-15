@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { pgDb } from './postgres.ts';
 
-export type UserRole = 'SUPER_ADMIN' | 'MASTER' | 'BROKER' | 'SUB_BROKER' | 'CLIENT';
+export type UserRole = 'SUPER_ADMIN' | 'MASTER' | 'BROKER' | 'SUB_BROKER' | 'OPERATIONS' | 'CLIENT';
 
 export type AccountStatus =
   | 'PENDING_EMAIL_VERIFICATION'

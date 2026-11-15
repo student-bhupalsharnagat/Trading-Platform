@@ -27,6 +27,9 @@ export type InternalEventType =
   | 'execution.failure'
   | 'emergency.control_activated'
   | 'reconciliation.mismatch'
+  | 'manual_deposit.created'
+  | 'manual_deposit.approved'
+  | 'manual_deposit.rejected'
   | string;
 
 export interface InternalEvent<T = any> {
@@ -132,12 +135,14 @@ export interface WalletUpdatedPayload {
 
 export interface FundTransactionPayload {
   id?: string;
+  depositId?: string;
   transactionId: string;
   clientCode?: string;
   tenantId: string;
   userId: string;
   clientId: string;
   tradingUserId: string;
+  userName?: string;
   amount: number;
   type: 'DEPOSIT' | 'WITHDRAWAL';
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -151,6 +156,10 @@ export interface FundTransactionPayload {
   reason?: string;
   createdAt?: string;
   timestamp: string;
+  utr?: string;
+  utr_number?: string;
+  payment_method?: string;
+  proof_image_url?: string | null;
 }
 
 export interface KycSubmittedPayload {

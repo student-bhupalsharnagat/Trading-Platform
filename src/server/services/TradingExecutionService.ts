@@ -133,7 +133,9 @@ export class TradingExecutionService {
 
     const execPrice = input.price && input.price > 0 ? input.price : inst.lastPrice;
     const lotSize = inst.lotSize || 1;
-    const marginPerLot = (input.product || '').toUpperCase() === 'HOLDING'
+    const prodUpper = (input.product || '').toUpperCase();
+    const isHolding = prodUpper === 'HOLDING' || prodUpper === 'CNC' || prodUpper === 'DELIVERY' || prodUpper === 'NRML';
+    const marginPerLot = isHolding
       ? (inst.holding || (inst.lastPrice * lotSize))
       : (inst.intraday || Math.round(inst.lastPrice * lotSize * 0.2));
     const requiredMargin = marginPerLot * lots;
@@ -145,7 +147,6 @@ export class TradingExecutionService {
     const isSlmTriggered = rawOrderType === 'SL-M' && input.triggerPrice != null &&
       ((side === 'BUY' && inst.lastPrice >= input.triggerPrice) || (side === 'SELL' && inst.lastPrice <= input.triggerPrice));
 
-    // Bug #31 & Finding 24: Generate orderId before unfillable IOC check to prevent TDZ ReferenceError
     const orderId = `ORD-${Math.floor(10000 + Math.random() * 90000)}`;
 
     // Bug #31: Unfillable IOC limit orders cancel immediately
@@ -1130,12 +1131,13 @@ export class TradingExecutionService {
       }
 
       const inst = findInstrument(result.pos.instrument_id);
+      const posProduct = (result.pos as any).product || 'HOLDING';
       const memOrder = {
         id: result.closeOrder.id,
         symbol: result.pos.instrument_id,
         type: (result.pos.quantity > 0 ? 'SELL' : 'BUY') as 'BUY' | 'SELL',
         orderType: 'MARKET' as any,
-        product: 'INTRADAY' as any,
+        product: posProduct as any,
         lots: Math.max(1, Math.round(Math.abs(result.pos.quantity) / (inst?.lotSize || 1))),
         qty: Math.abs(result.pos.quantity),
         lotSize: inst?.lotSize || 1,
@@ -1149,6 +1151,28 @@ export class TradingExecutionService {
       addTenantOrder(tenantId, memOrder);
       if (tenantId !== 'TNT-001') {
         addTenantOrder('TNT-001', memOrder);
+      }
+
+      // Automatically cancel associated pending OCO/GTT trigger orders at mock broker level
+      try {
+        const pgOrders = await postgresOrderRepository.getOrders(tenantId, userId, 'PENDING');
+        for (const ord of pgOrders) {
+          if (ord.instrument_id === result.pos.instrument_id) {
+            await postgresOrderRepository.update(tenantId, ord.id, {
+              status: 'CANCELLED',
+              cancelled_at: new Date().toISOString()
+            });
+          }
+        }
+      } catch {}
+
+      for (const t of [tenantId, 'TNT-001', 'vertex-default']) {
+        const memOrders = getTenantOrders(t);
+        for (const mo of memOrders) {
+          if (mo.userId === userId && mo.symbol === result.pos.instrument_id && (mo.status === 'PENDING' || (mo.status as string) === 'OPEN')) {
+            mo.status = 'CANCELLED' as any;
+          }
+        }
       }
 
       if (result.closeTrade) {
@@ -1183,8 +1207,8 @@ export class TradingExecutionService {
     const target = { targetUserId: userId };
     const normalizedClosePos = {
       ...result.pos,
-      symbol: result.pos.instrument_id || result.pos.symbol,
-      instrument_id: result.pos.instrument_id || result.pos.symbol,
+      symbol: result.pos.instrument_id || (result.pos as any).symbol,
+      instrument_id: result.pos.instrument_id || (result.pos as any).symbol,
       quantity: 0,
       qty: 0,
     };
