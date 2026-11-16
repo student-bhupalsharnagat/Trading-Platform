@@ -122,6 +122,15 @@ export const adminApi = {
       body: JSON.stringify({ status }),
     });
   },
+  assignClientHierarchy: async (
+    id: string,
+    payload: { brokerId?: string; subBrokerId?: string }
+  ): Promise<any> => {
+    return request<any>(`/clients/${id}/hierarchy`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
 
   // Audit Logs
   getAuditLogs: async (): Promise<AuditLogEntry[]> => {

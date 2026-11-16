@@ -182,4 +182,24 @@ router.patch(
   }
 );
 
+// PUT /api/admin/clients/:id/hierarchy - Assign Broker and/or Sub-Broker to Client
+router.put(
+  ['/:id/hierarchy', '/:id/assign'],
+  requireAuth,
+  requireRole('SUPER_ADMIN', 'MASTER', 'BROKER'),
+  hierarchyGuard('id'),
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { brokerId, subBrokerId } = req.body;
+      const result = await hierarchyService.assignClientHierarchy(req.user as any, req.params.id, {
+        brokerId,
+        subBrokerId,
+      });
+      res.json(result);
+    } catch (err: any) {
+      res.status(err.statusCode || 500).json({ success: false, message: err.message });
+    }
+  }
+);
+
 export default router;

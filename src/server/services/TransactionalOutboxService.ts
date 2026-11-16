@@ -135,11 +135,13 @@ export class TransactionalOutboxService {
 
       // 2. Sync Users / Clients
       const { db } = await import('../db/database.ts');
+      const { authoritativeTradingDataService } = await import('./authoritativeTradingDataService.ts');
       const allUsers = db.getAllUsers();
       for (const u of allUsers) {
         if (u.role === 'CLIENT' || !u.role) {
           clientsCount++;
           const tId = u.tenant_id && u.tenant_id !== 'vertex-default' && u.tenant_id !== 'default' ? u.tenant_id : targetTenantId;
+          const hLinks = authoritativeTradingDataService.resolveHierarchyLinks(u);
           const clientPayload = {
             tenantId: tId,
             tradingUserId: u.user_id,
@@ -154,6 +156,12 @@ export class TransactionalOutboxService {
             accountStatus: u.status || 'ACTIVE',
             kycStatus: u.is_verified ? 'VERIFIED' : 'PENDING',
             createdAt: u.created_at || new Date().toISOString(),
+            masterId: hLinks.masterId,
+            master_id: hLinks.masterId,
+            brokerId: hLinks.brokerId,
+            broker_id: hLinks.brokerId,
+            subBrokerId: hLinks.subBrokerId,
+            sub_broker_id: hLinks.subBrokerId,
           };
 
           await this.enqueue({
@@ -173,12 +181,12 @@ export class TransactionalOutboxService {
       }
 
       // 3. Sync Orders
-      const { authoritativeTradingDataService } = await import('./authoritativeTradingDataService.ts');
       const ordersRes = await authoritativeTradingDataService.getOrders(targetTenantId);
       const allOrders = ordersRes.orders || [];
 
       for (const o of allOrders) {
         ordersCount++;
+        const hLinks = authoritativeTradingDataService.resolveHierarchyLinks(o);
         await this.enqueue({
           eventId: `sync-ord-${o.id}`,
           eventType: 'order.created',
@@ -197,6 +205,12 @@ export class TransactionalOutboxService {
             filledQuantity: o.filled_quantity,
             averagePrice: o.average_fill_price,
             createdAt: o.created_at,
+            masterId: hLinks.masterId,
+            master_id: hLinks.masterId,
+            brokerId: hLinks.brokerId,
+            broker_id: hLinks.brokerId,
+            subBrokerId: hLinks.subBrokerId,
+            sub_broker_id: hLinks.subBrokerId,
           },
         }).catch(() => {});
       }
@@ -207,6 +221,7 @@ export class TransactionalOutboxService {
 
       for (const p of allPositions) {
         positionsCount++;
+        const hLinks = authoritativeTradingDataService.resolveHierarchyLinks(p);
         const rawAvg = cleanNumeric((p as any).avgPrice ?? (p as any).average_price ?? (p as any).averagePrice ?? 0);
         const rawLtp = cleanNumeric((p as any).ltp ?? (p as any).currentPrice ?? (p as any).current_price ?? 0);
         const rawQty = cleanNumeric((p as any).raw_quantity ?? (p as any).quantity ?? 0);
@@ -241,6 +256,12 @@ export class TransactionalOutboxService {
             margin_used: rawMargin,
             margin: rawMargin,
             updatedAt: p.updated_at,
+            masterId: hLinks.masterId,
+            master_id: hLinks.masterId,
+            brokerId: hLinks.brokerId,
+            broker_id: hLinks.brokerId,
+            subBrokerId: hLinks.subBrokerId,
+            sub_broker_id: hLinks.subBrokerId,
           },
         }).catch(() => {});
       }
@@ -249,6 +270,7 @@ export class TransactionalOutboxService {
       const fundsRes = await authoritativeTradingDataService.getFundsPaged(targetTenantId);
       const allFunds = fundsRes.funds || [];
       for (const f of allFunds) {
+        const hLinks = authoritativeTradingDataService.resolveHierarchyLinks(f);
         const evType = f.type === 'DEPOSIT'
           ? (f.status === 'APPROVED' ? 'deposit.approved' : 'deposit.created')
           : (f.status === 'APPROVED' ? 'withdrawal.approved' : 'withdrawal.created');
@@ -273,6 +295,12 @@ export class TransactionalOutboxService {
             referenceId: f.referenceId,
             createdAt: f.createdAt,
             timestamp: f.createdAt,
+            masterId: hLinks.masterId,
+            master_id: hLinks.masterId,
+            brokerId: hLinks.brokerId,
+            broker_id: hLinks.brokerId,
+            subBrokerId: hLinks.subBrokerId,
+            sub_broker_id: hLinks.subBrokerId,
           },
         }).catch(() => {});
       }

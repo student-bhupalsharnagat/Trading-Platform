@@ -3,6 +3,10 @@ import { jsonHierarchyRepository } from '../repositories/JsonHierarchyRepository
 import { auditService } from './auditService.ts';
 import type { UserRecord, UserRole, AccountStatus } from '../db/database.ts';
 import crypto from 'crypto';
+import { pgDb } from '../db/postgres.ts';
+import { PasswordHashUtil } from '../utils/passwordHash.ts';
+import { transactionalOutboxService } from './TransactionalOutboxService.ts';
+import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
 
 export interface HierarchyNodeView {
   id: string;
@@ -218,6 +222,70 @@ export class HierarchyService {
     return this.toNodeView(target);
   }
 
+  private async persistUserToPostgres(user: UserRecord, tenantId = 'vertex-default'): Promise<void> {
+    try {
+      await pgDb.query(`
+        INSERT INTO users (
+          id, tenant_id, full_name, user_id, country_code, mobile, email,
+          password_hash, role, parent_id, hierarchy_path, company, address,
+          commission_rate, is_verified, status, account_type, demo_balance,
+          created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7,
+          $8, $9, $10, $11, $12, $13,
+          $14, $15, $16, $17, $18,
+          NOW(), NOW()
+        )
+        ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+          full_name = EXCLUDED.full_name,
+          mobile = EXCLUDED.mobile,
+          email = EXCLUDED.email,
+          password_hash = COALESCE(NULLIF(EXCLUDED.password_hash, ''), users.password_hash),
+          role = EXCLUDED.role,
+          parent_id = EXCLUDED.parent_id,
+          hierarchy_path = EXCLUDED.hierarchy_path,
+          company = EXCLUDED.company,
+          address = EXCLUDED.address,
+          commission_rate = EXCLUDED.commission_rate,
+          status = EXCLUDED.status,
+          updated_at = NOW();
+      `, [
+        user.id,
+        tenantId,
+        user.full_name,
+        user.user_id,
+        user.country_code || '+91',
+        user.mobile,
+        user.email || `${user.user_id}@goldfut.com`,
+        user.password_hash,
+        user.role || 'CLIENT',
+        user.parent_id,
+        user.hierarchy_path,
+        user.company || null,
+        user.address || null,
+        user.commission_rate ?? 0,
+        user.is_verified ?? true,
+        user.status || 'active',
+        user.account_type || 'real',
+        user.demo_balance || 1000000.0,
+      ]);
+    } catch (pgErr: any) {
+      // Fallback update if conflict target differs
+      await pgDb.query(`
+        UPDATE users SET
+          full_name = $1, mobile = $2, email = $3, role = $4,
+          parent_id = $5, hierarchy_path = $6, company = $7,
+          address = $8, commission_rate = $9, status = $10, updated_at = NOW()
+        WHERE id = $11 OR (tenant_id = $12 AND LOWER(user_id) = LOWER($13))
+      `, [
+        user.full_name, user.mobile, user.email, user.role,
+        user.parent_id, user.hierarchy_path, user.company,
+        user.address, user.commission_rate, user.status,
+        user.id, tenantId, user.user_id
+      ]).catch(() => {});
+    }
+  }
+
   // --- Creation Operations with Strict Hierarchy Inheritance ---
   public async createMaster(
     caller: UserRecord,
@@ -240,9 +308,7 @@ export class HierarchyService {
     }
 
     const normalizedUserId = data.userId.trim().toLowerCase();
-    const passwordHash = data.password
-      ? crypto.createHash('sha256').update(data.password).digest('hex')
-      : '$2a$10$wT8BfZF/Y/wZ84aG9U0t6eYxUo9Jg7v1sYqQ4M4e4K0n0s9N7w5vC';
+    const passwordHash = await PasswordHashUtil.hashPassword(data.password || 'Password@123');
 
     const record = await jsonUserRepository.create({
       full_name: data.fullName,
@@ -259,6 +325,40 @@ export class HierarchyService {
       commission_rate: data.commissionRate ?? 20,
       is_verified: true,
       status: 'active',
+    });
+
+    const tenantId = caller.tenant_id || 'vertex-default';
+    await this.persistUserToPostgres(record, tenantId);
+
+    // Enqueue outbox event for central admin / live synchronization
+    await transactionalOutboxService.enqueue({
+      eventId: `hrc-mst-${record.id}`,
+      eventType: 'hierarchy.updated',
+      tenantId,
+      payload: {
+        action: 'created',
+        type: 'master',
+        id: record.id,
+        userId: record.user_id,
+        name: record.full_name,
+        fullName: record.full_name,
+        email: record.email,
+        phone: record.mobile,
+        role: 'MASTER',
+        parentId: record.parent_id,
+        masterId: record.id,
+        commissionRate: record.commission_rate,
+        tenantId,
+        status: record.status,
+        createdAt: record.created_at,
+      },
+    }).catch(() => {});
+
+    // Broadcast WebSocket event
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'hierarchy.updated', {
+      type: 'master',
+      action: 'created',
+      node: await this.toNodeView(record),
     });
 
     auditService.log({
@@ -307,9 +407,7 @@ export class HierarchyService {
     }
 
     const normalizedUserId = data.userId.trim().toLowerCase();
-    const passwordHash = data.password
-      ? crypto.createHash('sha256').update(data.password).digest('hex')
-      : '$2a$10$wT8BfZF/Y/wZ84aG9U0t6eYxUo9Jg7v1sYqQ4M4e4K0n0s9N7w5vC';
+    const passwordHash = await PasswordHashUtil.hashPassword(data.password || 'Password@123');
 
     const record = await jsonUserRepository.create({
       full_name: data.fullName,
@@ -326,6 +424,41 @@ export class HierarchyService {
       commission_rate: data.commissionRate ?? 12,
       is_verified: true,
       status: 'active',
+    });
+
+    const tenantId = caller.tenant_id || parentMaster.tenant_id || 'vertex-default';
+    await this.persistUserToPostgres(record, tenantId);
+
+    // Enqueue outbox event
+    await transactionalOutboxService.enqueue({
+      eventId: `hrc-brk-${record.id}`,
+      eventType: 'hierarchy.updated',
+      tenantId,
+      payload: {
+        action: 'created',
+        type: 'broker',
+        id: record.id,
+        userId: record.user_id,
+        name: record.full_name,
+        fullName: record.full_name,
+        email: record.email,
+        phone: record.mobile,
+        role: 'BROKER',
+        parentId: parentMaster.id,
+        masterId: parentMaster.id,
+        brokerId: record.id,
+        commissionRate: record.commission_rate,
+        tenantId,
+        status: record.status,
+        createdAt: record.created_at,
+      },
+    }).catch(() => {});
+
+    // Broadcast WebSocket event
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'hierarchy.updated', {
+      type: 'broker',
+      action: 'created',
+      node: await this.toNodeView(record),
     });
 
     auditService.log({
@@ -373,9 +506,7 @@ export class HierarchyService {
     }
 
     const normalizedUserId = data.userId.trim().toLowerCase();
-    const passwordHash = data.password
-      ? crypto.createHash('sha256').update(data.password).digest('hex')
-      : '$2a$10$wT8BfZF/Y/wZ84aG9U0t6eYxUo9Jg7v1sYqQ4M4e4K0n0s9N7w5vC';
+    const passwordHash = await PasswordHashUtil.hashPassword(data.password || 'Password@123');
 
     const record = await jsonUserRepository.create({
       full_name: data.fullName,
@@ -392,6 +523,45 @@ export class HierarchyService {
       commission_rate: data.commissionRate ?? 6,
       is_verified: true,
       status: 'active',
+    });
+
+    const tenantId = caller.tenant_id || parentBroker.tenant_id || 'vertex-default';
+    await this.persistUserToPostgres(record, tenantId);
+
+    // Resolve master id from broker parent
+    const masterId = parentBroker.parent_id;
+
+    // Enqueue outbox event
+    await transactionalOutboxService.enqueue({
+      eventId: `hrc-sub-${record.id}`,
+      eventType: 'hierarchy.updated',
+      tenantId,
+      payload: {
+        action: 'created',
+        type: 'sub_broker',
+        id: record.id,
+        userId: record.user_id,
+        name: record.full_name,
+        fullName: record.full_name,
+        email: record.email,
+        phone: record.mobile,
+        role: 'SUB_BROKER',
+        parentId: parentBroker.id,
+        masterId,
+        brokerId: parentBroker.id,
+        subBrokerId: record.id,
+        commissionRate: record.commission_rate,
+        tenantId,
+        status: record.status,
+        createdAt: record.created_at,
+      },
+    }).catch(() => {});
+
+    // Broadcast WebSocket event
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'hierarchy.updated', {
+      type: 'sub_broker',
+      action: 'created',
+      node: await this.toNodeView(record),
     });
 
     auditService.log({
@@ -431,6 +601,34 @@ export class HierarchyService {
 
     const oldStatus = target.status;
     const updated = await jsonUserRepository.update(targetId, { status: newStatus });
+    const tenantId = target.tenant_id || caller.tenant_id || 'vertex-default';
+
+    // Update in Postgres
+    await pgDb.query(
+      `UPDATE users SET status = $1, updated_at = NOW() WHERE id = $2 OR LOWER(user_id) = LOWER($3)`,
+      [newStatus, target.id, target.user_id]
+    ).catch(() => {});
+
+    // Enqueue outbox event
+    await transactionalOutboxService.enqueue({
+      eventId: `hrc-stat-${target.id}-${Date.now()}`,
+      eventType: 'hierarchy.updated',
+      tenantId,
+      payload: {
+        action: 'status_updated',
+        type: target.role?.toLowerCase() || 'user',
+        id: target.id,
+        userId: target.user_id,
+        status: newStatus,
+        tenantId,
+      },
+    }).catch(() => {});
+
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'hierarchy.updated', {
+      type: target.role?.toLowerCase(),
+      action: 'status_updated',
+      node: await this.toNodeView(updated!),
+    });
 
     auditService.log({
       actorId: caller.id,
@@ -446,6 +644,252 @@ export class HierarchyService {
     });
 
     return this.toNodeView(updated!);
+  }
+
+  public async assignClientHierarchy(
+    caller: UserRecord,
+    clientId: string,
+    params: { brokerId?: string; subBrokerId?: string }
+  ): Promise<any> {
+    const client = (await jsonUserRepository.findById(clientId)) || (await jsonUserRepository.findByUserId(clientId));
+    if (!client) {
+      const err = new Error('Client not found');
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    let brokerId = params.brokerId;
+    let subBrokerId = params.subBrokerId;
+    let masterId: string | undefined = undefined;
+
+    if (subBrokerId) {
+      const subBroker = (await jsonUserRepository.findById(subBrokerId)) || (await jsonUserRepository.findByUserId(subBrokerId));
+      if (subBroker) {
+        if (!brokerId) brokerId = subBroker.parent_id || undefined;
+      }
+    }
+
+    if (brokerId) {
+      const broker = (await jsonUserRepository.findById(brokerId)) || (await jsonUserRepository.findByUserId(brokerId));
+      if (broker) {
+        masterId = broker.parent_id || undefined;
+      }
+    }
+
+    const parentId = subBrokerId || brokerId || masterId || client.parent_id;
+    let hierarchyPath = `root.${masterId || 'master_alpha'}.${brokerId || 'broker_metro'}`;
+    if (subBrokerId) hierarchyPath += `.${subBrokerId}`;
+    hierarchyPath += `.${client.user_id}`;
+
+    // Update json store
+    await jsonUserRepository.update(client.id, {
+      parent_id: parentId,
+      hierarchy_path: hierarchyPath,
+      broker_id: brokerId,
+    });
+
+    const tenantId = client.tenant_id || caller.tenant_id || 'vertex-default';
+
+    // Update Postgres users
+    await pgDb.query(
+      `UPDATE users SET parent_id = $1, hierarchy_path = $2, broker_id = $3, updated_at = NOW() WHERE id = $4 OR LOWER(user_id) = LOWER($5)`,
+      [parentId, hierarchyPath, brokerId || null, client.id, client.user_id]
+    ).catch(() => {});
+
+    // Update or insert client_mappings
+    await pgDb.query(`
+      INSERT INTO client_mappings (
+        id, tenant_id, client_id, user_id, master_id, broker_id, sub_broker_id, parent_id, hierarchy_path, account_type, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW()
+      )
+      ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+        master_id = EXCLUDED.master_id,
+        broker_id = EXCLUDED.broker_id,
+        sub_broker_id = EXCLUDED.sub_broker_id,
+        parent_id = EXCLUDED.parent_id,
+        hierarchy_path = EXCLUDED.hierarchy_path,
+        updated_at = NOW();
+    `, [
+      `map_${client.id}`,
+      tenantId,
+      client.id,
+      client.user_id,
+      masterId || null,
+      brokerId || null,
+      subBrokerId || null,
+      parentId,
+      hierarchyPath,
+      client.account_type || 'real',
+    ]).catch(() => {});
+
+    const payload = {
+      action: 'updated',
+      type: 'client',
+      id: client.id,
+      userId: client.user_id,
+      clientCode: client.user_id.toUpperCase(),
+      masterId: masterId || null,
+      brokerId: brokerId || null,
+      subBrokerId: subBrokerId || null,
+      parentId,
+      hierarchyPath,
+      tenantId,
+    };
+
+    await transactionalOutboxService.enqueue({
+      eventId: `hrc-clt-assign-${client.id}-${Date.now()}`,
+      eventType: 'client.updated',
+      tenantId,
+      payload,
+    }).catch(() => {});
+
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'client.updated', payload);
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'hierarchy.updated', payload);
+
+    return {
+      success: true,
+      data: {
+        id: client.id,
+        userId: client.user_id,
+        masterId,
+        brokerId,
+        subBrokerId,
+        parentId,
+        hierarchyPath,
+      },
+    };
+  }
+
+  public async syncFromCentralAdmin(payload: any): Promise<any> {
+    const rawType = (payload?.type || payload?.role || 'user').toLowerCase();
+    const action = payload?.action || 'updated';
+    const node = payload?.node || payload || {};
+    const tenantId = payload?.tenantId || node?.tenant_id || node?.tenantId || 'vertex-default';
+
+    const userId = (node.user_id || node.userId || node.code || node.id || '').toLowerCase().trim();
+    if (!userId) {
+      return { success: false, error: 'User identifier missing in node' };
+    }
+
+    const fullName = node.name || node.fullName || node.full_name || userId;
+    const email = node.email || `${userId}@tradematrix.io`;
+    const mobile = (node.phone || node.mobile || '9999999999').replace(/\D/g, '');
+    const commissionRate = Number(node.commissionShare || node.commissionRate || node.commission || 0);
+    const passwordHash = node.password
+      ? await PasswordHashUtil.hashPassword(node.password)
+      : (node.password_hash || '$2a$10$wT8BfZF/Y/wZ84aG9U0t6eYxUo9Jg7v1sYqQ4M4e4K0n0s9N7w5vC');
+    const status = (node.status || 'ACTIVE').toLowerCase();
+
+    let role: UserRole = 'CLIENT';
+    let parentId: string | null = null;
+    let hierarchyPath = `root.${userId}`;
+
+    if (rawType.includes('master')) {
+      role = 'MASTER';
+      parentId = 'super-admin-root-0001';
+      hierarchyPath = `root.${userId}`;
+    } else if (rawType.includes('sub_broker') || rawType.includes('subbroker')) {
+      role = 'SUB_BROKER';
+      parentId = node.broker_id || node.brokerId || node.parentId || 'broker-node-0001';
+      const parentBroker = (await jsonUserRepository.findById(parentId)) || (await jsonUserRepository.findByUserId(parentId));
+      const bPath = parentBroker?.hierarchy_path || 'root.master_alpha.broker_metro';
+      hierarchyPath = `${bPath}.${userId}`;
+    } else if (rawType.includes('broker')) {
+      role = 'BROKER';
+      parentId = node.master_id || node.masterId || node.parentId || 'master-node-0001';
+      const parentMaster = (await jsonUserRepository.findById(parentId)) || (await jsonUserRepository.findByUserId(parentId));
+      const mPath = parentMaster?.hierarchy_path || 'root.master_alpha';
+      hierarchyPath = `${mPath}.${userId}`;
+    } else {
+      role = 'CLIENT';
+      const bId = node.broker_id || node.brokerId;
+      const sbId = node.sub_broker_id || node.subBrokerId;
+      parentId = sbId || bId || 'broker-node-0001';
+      hierarchyPath = `root.master_alpha.${bId || 'broker_metro'}${sbId ? `.${sbId}` : ''}.${userId}`;
+    }
+
+    // Upsert in in-memory repository
+    let existing = (await jsonUserRepository.findByUserId(userId)) || (node.id ? await jsonUserRepository.findById(node.id) : null);
+    if (!existing) {
+      existing = await jsonUserRepository.create({
+        id: node.id || `node-${role.toLowerCase()}-${Date.now()}`,
+        full_name: fullName,
+        user_id: userId,
+        country_code: node.countryCode || '+91',
+        mobile,
+        email,
+        password_hash: passwordHash,
+        role,
+        parent_id: parentId,
+        hierarchy_path: hierarchyPath,
+        company: node.company || null,
+        address: node.address || null,
+        commission_rate: commissionRate,
+        is_verified: true,
+        status: status as any,
+      });
+    } else {
+      existing =
+        (await jsonUserRepository.update(existing.id, {
+          full_name: fullName,
+          email,
+          mobile,
+          role,
+          parent_id: parentId,
+          hierarchy_path: hierarchyPath,
+          commission_rate: commissionRate,
+          status: status as any,
+          company: node.company || existing.company,
+          password_hash: node.password ? passwordHash : existing.password_hash,
+        })) || existing;
+    }
+
+    // Persist to Postgres
+    await this.persistUserToPostgres(existing, tenantId);
+
+    // If client, also update client_mappings
+    if (role === 'CLIENT') {
+      await pgDb.query(`
+        INSERT INTO client_mappings (
+          id, tenant_id, client_id, user_id, master_id, broker_id, sub_broker_id, parent_id, hierarchy_path, account_type, created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW()
+        )
+        ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+          master_id = EXCLUDED.master_id,
+          broker_id = EXCLUDED.broker_id,
+          sub_broker_id = EXCLUDED.sub_broker_id,
+          parent_id = EXCLUDED.parent_id,
+          hierarchy_path = EXCLUDED.hierarchy_path,
+          updated_at = NOW();
+      `, [
+        `map_${existing.id}`,
+        tenantId,
+        existing.id,
+        existing.user_id,
+        node.master_id || node.masterId || 'master-node-0001',
+        node.broker_id || node.brokerId || 'BRK-001',
+        node.sub_broker_id || node.subBrokerId || null,
+        parentId,
+        hierarchyPath,
+        'real',
+      ]).catch(() => {});
+    }
+
+    // Broadcast WebSocket event
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'hierarchy.updated', {
+      type: role.toLowerCase(),
+      action,
+      node: await this.toNodeView(existing),
+    });
+
+    return {
+      success: true,
+      processed: true,
+      action,
+      node: await this.toNodeView(existing),
+    };
   }
 }
 

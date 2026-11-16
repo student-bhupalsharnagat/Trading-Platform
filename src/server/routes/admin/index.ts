@@ -25,9 +25,13 @@ router.use(requireAdmin);
 
 router.use('/dashboard', adminDashboardRoutes);
 router.use('/masters', masterRoutes);
+router.use('/hierarchy/masters', masterRoutes);
 router.use('/brokers', brokerRoutes);
+router.use('/hierarchy/brokers', brokerRoutes);
 router.use('/sub-brokers', subBrokerRoutes);
+router.use('/hierarchy/sub-brokers', subBrokerRoutes);
 router.use('/clients', clientRoutes);
+router.use('/hierarchy/clients', clientRoutes);
 router.use('/audit-logs', auditRoutes);
 router.use('/orders', orderRoutes);
 router.use('/risk', riskRoutes);

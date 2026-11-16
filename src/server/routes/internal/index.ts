@@ -21,6 +21,7 @@ import { executionGateway } from '../../gateways/ExecutionGateway.ts';
 import { operationIdempotencyStore } from '../../events/OperationIdempotencyStore.ts';
 import { postgresTenantConfigRepository } from '../../repositories/trading/PostgresTenantConfigRepository.ts';
 import { authoritativeTradingDataService } from '../../services/authoritativeTradingDataService.ts';
+import { hierarchyService } from '../../services/hierarchyService.ts';
 
 import { s2sRateLimiter } from '../../middleware/rateLimitMiddleware.ts';
 
@@ -2389,6 +2390,92 @@ router.post('/trading/sync', async (req: InternalAuthorizedRequest, res: Respons
       success: false,
       error: err.message || 'Sync failed',
     });
+  }
+});
+
+/**
+ * POST /api/internal/v1/hierarchy/sync
+ * S2S hierarchy synchronization from Central Admin (Masters, Brokers, Sub-Brokers, Clients).
+ */
+router.post('/hierarchy/sync', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    await handleIdempotentOperation(req, res, async () => {
+      const result = await hierarchyService.syncFromCentralAdmin({
+        ...req.body,
+        tenantId: req.body?.tenantId || tenantId,
+      });
+      return { success: true, ...result };
+    });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to sync hierarchy node',
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/hierarchy/sync
+ * GET /api/internal/v1/hierarchy/nodes
+ * GET /api/internal/v1/hierarchy/tree
+ * Returns current hierarchy state for Central Admin synchronization.
+ */
+router.get(['/hierarchy/sync', '/hierarchy/nodes', '/hierarchy/tree'], async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const superAdmin = await hierarchyService.ensureSuperAdmin();
+    const masters = await hierarchyService.getScopedEntities(superAdmin, 'MASTER');
+    const brokers = await hierarchyService.getScopedEntities(superAdmin, 'BROKER');
+    const subBrokers = await hierarchyService.getScopedEntities(superAdmin, 'SUB_BROKER');
+
+    res.json({
+      success: true,
+      tenantId,
+      masters,
+      brokers,
+      subBrokers,
+      counts: {
+        masters: masters.length,
+        brokers: brokers.length,
+        subBrokers: subBrokers.length,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve hierarchy tree',
+    });
+  }
+});
+
+router.get('/hierarchy/masters', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const superAdmin = await hierarchyService.ensureSuperAdmin();
+    const masters = await hierarchyService.getScopedEntities(superAdmin, 'MASTER');
+    res.json({ success: true, masters });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.get('/hierarchy/brokers', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const superAdmin = await hierarchyService.ensureSuperAdmin();
+    const brokers = await hierarchyService.getScopedEntities(superAdmin, 'BROKER');
+    res.json({ success: true, brokers });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.get('/hierarchy/sub-brokers', async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const superAdmin = await hierarchyService.ensureSuperAdmin();
+    const subBrokers = await hierarchyService.getScopedEntities(superAdmin, 'SUB_BROKER');
+    res.json({ success: true, subBrokers });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

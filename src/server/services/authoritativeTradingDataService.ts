@@ -69,6 +69,75 @@ export function getSearchTenants(tenantId?: string | null): string[] {
 
 export class AuthoritativeTradingDataService {
   /**
+   * Resolves authoritative 4-tier hierarchy links (masterId, brokerId, subBrokerId) for any entity.
+   */
+  public resolveHierarchyLinks(entity: any): {
+    masterId: string | null;
+    brokerId: string | null;
+    subBrokerId: string | null;
+  } {
+    if (!entity) return { masterId: null, brokerId: null, subBrokerId: null };
+
+    let masterId: string | null =
+      entity.masterId || entity.master_id || entity.cm_master_id || null;
+    let brokerId: string | null =
+      entity.brokerId || entity.broker_id || entity.cm_broker_id || null;
+    let subBrokerId: string | null =
+      entity.subBrokerId || entity.sub_broker_id || entity.cm_sub_broker_id || null;
+
+    const uid = entity.user_id || entity.userId || entity.trading_user_id || entity.tradingUserId;
+    const user = uid ? (db.findUserByUserId(uid) || db.findUserById(uid)) : null;
+
+    if (user) {
+      if (!brokerId && user.broker_id) brokerId = user.broker_id;
+      if (!subBrokerId && (user as any).sub_broker_id) subBrokerId = (user as any).sub_broker_id;
+      if (!masterId && (user as any).master_id) masterId = (user as any).master_id;
+
+      const path = user.hierarchy_path || entity.hierarchy_path || entity.hierarchyPath || '';
+      if (path && path.startsWith('root.')) {
+        const parts = path.split('.');
+        if (!masterId && parts.length >= 2 && parts[1] !== user.user_id) {
+          masterId = parts[1];
+        }
+        if (!brokerId && parts.length >= 3 && parts[2] !== user.user_id) {
+          brokerId = parts[2];
+        }
+        if (!subBrokerId && parts.length >= 4 && parts[3] !== user.user_id) {
+          subBrokerId = parts[3];
+        }
+      }
+
+      if (user.parent_id && (!masterId || !brokerId)) {
+        const parent = db.findUserById(user.parent_id) || db.findUserByUserId(user.parent_id);
+        if (parent) {
+          if (parent.role === 'SUB_BROKER') {
+            if (!subBrokerId) subBrokerId = parent.id;
+            if (parent.parent_id) {
+              const broker = db.findUserById(parent.parent_id) || db.findUserByUserId(parent.parent_id);
+              if (broker) {
+                if (!brokerId) brokerId = broker.id;
+                if (!masterId && broker.parent_id) masterId = broker.parent_id;
+              }
+            }
+          } else if (parent.role === 'BROKER') {
+            if (!brokerId) brokerId = parent.id;
+            if (!masterId && parent.parent_id) masterId = parent.parent_id;
+          } else if (parent.role === 'MASTER') {
+            if (!masterId) masterId = parent.id;
+          }
+        }
+      }
+    }
+
+    if (!brokerId && !subBrokerId && !masterId) {
+      brokerId = 'BRK-001';
+      masterId = 'master-node-0001';
+    }
+
+    return { masterId, brokerId, subBrokerId };
+  }
+
+  /**
    * Resolves a clientId (could be trading_user_id, external_client_id, or external_client_code)
    * to the canonical trading_user_id across the tenant or default tenant fallbacks.
    */
@@ -210,16 +279,22 @@ export class AuthoritativeTradingDataService {
           u.id AS user_pk_id,
           u.full_name AS client_name,
           u.email AS client_email,
+          u.parent_id,
+          u.broker_id,
+          u.hierarchy_path,
+          COALESCE(cm.master_id, u.parent_id) as cm_master_id,
+          COALESCE(cm.broker_id, u.broker_id) as cm_broker_id,
+          cm.sub_broker_id as cm_sub_broker_id,
           COALESCE(cm.client_id, cim.external_client_id, u.id, o.user_id) AS unified_client_id
         FROM trading_orders o
         LEFT JOIN LATERAL (
-          SELECT id, full_name, email FROM users
+          SELECT id, full_name, email, parent_id, broker_id, hierarchy_path FROM users
           WHERE LOWER(user_id) = LOWER(o.user_id) OR id = o.user_id
           ORDER BY (CASE WHEN tenant_id = o.tenant_id THEN 0 ELSE 1 END), created_at DESC
           LIMIT 1
         ) u ON true
         LEFT JOIN LATERAL (
-          SELECT client_id FROM client_mappings
+          SELECT client_id, master_id, broker_id, sub_broker_id FROM client_mappings
           WHERE LOWER(user_id) = LOWER(o.user_id)
           ORDER BY (CASE WHEN tenant_id = o.tenant_id THEN 0 ELSE 1 END), created_at DESC
           LIMIT 1
@@ -252,6 +327,7 @@ export class AuthoritativeTradingDataService {
         const cId = row.unified_client_id || row.user_pk_id || row.user_id;
         const cName = row.client_name || '';
         const cEmail = row.client_email || '';
+        const hLinks = this.resolveHierarchyLinks(row);
 
         orders.push({
           id: row.id,
@@ -261,6 +337,12 @@ export class AuthoritativeTradingDataService {
           userId: uId,
           clientId: cId,
           client_id: cId,
+          masterId: hLinks.masterId,
+          master_id: hLinks.masterId,
+          brokerId: hLinks.brokerId,
+          broker_id: hLinks.brokerId,
+          subBrokerId: hLinks.subBrokerId,
+          sub_broker_id: hLinks.subBrokerId,
           clientName: cName,
           client_name: cName,
           clientEmail: cEmail,
@@ -296,15 +378,21 @@ export class AuthoritativeTradingDataService {
             u.id AS user_pk_id,
             u.full_name AS client_name,
             u.email AS client_email,
+            u.parent_id,
+            u.broker_id,
+            u.hierarchy_path,
+            COALESCE(cm.master_id, u.parent_id) as cm_master_id,
+            COALESCE(cm.broker_id, u.broker_id) as cm_broker_id,
+            cm.sub_broker_id as cm_sub_broker_id,
             COALESCE(cm.client_id, cim.external_client_id, u.id, o.user_id) AS unified_client_id
           FROM trading_orders o
           LEFT JOIN LATERAL (
-            SELECT id, full_name, email FROM users
+            SELECT id, full_name, email, parent_id, broker_id, hierarchy_path FROM users
             WHERE LOWER(user_id) = LOWER(o.user_id) OR id = o.user_id
             ORDER BY created_at DESC LIMIT 1
           ) u ON true
           LEFT JOIN LATERAL (
-            SELECT client_id FROM client_mappings
+            SELECT client_id, master_id, broker_id, sub_broker_id FROM client_mappings
             WHERE LOWER(user_id) = LOWER(o.user_id)
             ORDER BY created_at DESC LIMIT 1
           ) cm ON true
@@ -327,6 +415,7 @@ export class AuthoritativeTradingDataService {
           const cId = row.unified_client_id || row.user_pk_id || row.user_id;
           const cName = row.client_name || '';
           const cEmail = row.client_email || '';
+          const hLinks = this.resolveHierarchyLinks(row);
 
           orders.push({
             id: row.id,
@@ -336,6 +425,12 @@ export class AuthoritativeTradingDataService {
             userId: uId,
             clientId: cId,
             client_id: cId,
+            masterId: hLinks.masterId,
+            master_id: hLinks.masterId,
+            brokerId: hLinks.brokerId,
+            broker_id: hLinks.brokerId,
+            subBrokerId: hLinks.subBrokerId,
+            sub_broker_id: hLinks.subBrokerId,
             clientName: cName,
             client_name: cName,
             clientEmail: cEmail,
@@ -388,6 +483,7 @@ export class AuthoritativeTradingDataService {
         const cId = memUser?.id || o.userId || resolvedUserId || 'demo-trader';
         const cName = memUser?.full_name || '';
         const cEmail = memUser?.email || '';
+        const hLinks = this.resolveHierarchyLinks(memUser || o);
 
         orders.push({
           id: o.id,
@@ -397,6 +493,12 @@ export class AuthoritativeTradingDataService {
           userId: uId,
           clientId: cId,
           client_id: cId,
+          masterId: hLinks.masterId,
+          master_id: hLinks.masterId,
+          brokerId: hLinks.brokerId,
+          broker_id: hLinks.brokerId,
+          subBrokerId: hLinks.subBrokerId,
+          sub_broker_id: hLinks.subBrokerId,
           clientName: cName,
           client_name: cName,
           clientEmail: cEmail,
@@ -682,16 +784,22 @@ export class AuthoritativeTradingDataService {
           u.id AS user_pk_id,
           u.full_name AS client_name,
           u.email AS client_email,
+          u.parent_id,
+          u.broker_id,
+          u.hierarchy_path,
+          COALESCE(cm.master_id, u.parent_id) as cm_master_id,
+          COALESCE(cm.broker_id, u.broker_id) as cm_broker_id,
+          cm.sub_broker_id as cm_sub_broker_id,
           COALESCE(cm.client_id, cim.external_client_id, u.id, p.user_id) AS unified_client_id
         FROM trading_positions p
         LEFT JOIN LATERAL (
-          SELECT id, full_name, email FROM users
+          SELECT id, full_name, email, parent_id, broker_id, hierarchy_path FROM users
           WHERE LOWER(user_id) = LOWER(p.user_id) OR id = p.user_id
           ORDER BY (CASE WHEN tenant_id = p.tenant_id THEN 0 ELSE 1 END), created_at DESC
           LIMIT 1
         ) u ON true
         LEFT JOIN LATERAL (
-          SELECT client_id FROM client_mappings
+          SELECT client_id, master_id, broker_id, sub_broker_id FROM client_mappings
           WHERE LOWER(user_id) = LOWER(p.user_id)
           ORDER BY (CASE WHEN tenant_id = p.tenant_id THEN 0 ELSE 1 END), created_at DESC
           LIMIT 1
@@ -754,6 +862,7 @@ export class AuthoritativeTradingDataService {
         const totalInvested = avgPrice * absQty;
         const unrealizedPnlPct = totalInvested > 0 ? (unrealizedPnl / totalInvested) * 100 : 0;
 
+        const hLinks = this.resolveHierarchyLinks(p);
         positions.push({
           id: p.id,
           position_id: p.id,
@@ -763,6 +872,12 @@ export class AuthoritativeTradingDataService {
           user_pk_id: uId,
           clientId: cId,
           client_id: cId,
+          masterId: hLinks.masterId,
+          master_id: hLinks.masterId,
+          brokerId: hLinks.brokerId,
+          broker_id: hLinks.brokerId,
+          subBrokerId: hLinks.subBrokerId,
+          sub_broker_id: hLinks.subBrokerId,
           clientName: cName,
           client_name: cName,
           clientEmail: cEmail,
@@ -805,15 +920,21 @@ export class AuthoritativeTradingDataService {
             u.id AS user_pk_id,
             u.full_name AS client_name,
             u.email AS client_email,
+            u.parent_id,
+            u.broker_id,
+            u.hierarchy_path,
+            COALESCE(cm.master_id, u.parent_id) as cm_master_id,
+            COALESCE(cm.broker_id, u.broker_id) as cm_broker_id,
+            cm.sub_broker_id as cm_sub_broker_id,
             COALESCE(cm.client_id, cim.external_client_id, u.id, p.user_id) AS unified_client_id
           FROM trading_positions p
           LEFT JOIN LATERAL (
-            SELECT id, full_name, email FROM users
+            SELECT id, full_name, email, parent_id, broker_id, hierarchy_path FROM users
             WHERE LOWER(user_id) = LOWER(p.user_id) OR id = p.user_id
             ORDER BY created_at DESC LIMIT 1
           ) u ON true
           LEFT JOIN LATERAL (
-            SELECT client_id FROM client_mappings
+            SELECT client_id, master_id, broker_id, sub_broker_id FROM client_mappings
             WHERE LOWER(user_id) = LOWER(p.user_id)
             ORDER BY created_at DESC LIMIT 1
           ) cm ON true
@@ -866,6 +987,7 @@ export class AuthoritativeTradingDataService {
           const totalInvested = avgPrice * absQty;
           const unrealizedPnlPct = totalInvested > 0 ? (unrealizedPnl / totalInvested) * 100 : 0;
 
+          const hLinks = this.resolveHierarchyLinks(p);
           positions.push({
             id: p.id,
             position_id: p.id,
@@ -875,6 +997,12 @@ export class AuthoritativeTradingDataService {
             user_pk_id: uId,
             clientId: cId,
             client_id: cId,
+            masterId: hLinks.masterId,
+            master_id: hLinks.masterId,
+            brokerId: hLinks.brokerId,
+            broker_id: hLinks.brokerId,
+            subBrokerId: hLinks.subBrokerId,
+            sub_broker_id: hLinks.subBrokerId,
             clientName: cName,
             client_name: cName,
             clientEmail: cEmail,
@@ -950,6 +1078,7 @@ export class AuthoritativeTradingDataService {
         const totalInvested = avgPrice * absQty;
         const unrealizedPnlPct = totalInvested > 0 ? (pnl / totalInvested) * 100 : 0;
         const marginUsed = cleanNumeric((p as any).margin_used || (p as any).marginUsed || (p as any).usedMargin || ((inst?.intraday || 30000) * (p.lots || 1)));
+        const hLinks = this.resolveHierarchyLinks(memUser || p);
 
         positions.push({
           id: p.id,
@@ -959,6 +1088,12 @@ export class AuthoritativeTradingDataService {
           userId: uId,
           clientId: cId,
           client_id: cId,
+          masterId: hLinks.masterId,
+          master_id: hLinks.masterId,
+          brokerId: hLinks.brokerId,
+          broker_id: hLinks.brokerId,
+          subBrokerId: hLinks.subBrokerId,
+          sub_broker_id: hLinks.subBrokerId,
           clientName: cName,
           client_name: cName,
           clientEmail: cEmail,
@@ -1939,12 +2074,19 @@ export class AuthoritativeTradingDataService {
           u.tenant_id,
           u.created_at,
           u.demo_balance,
+          u.parent_id,
+          u.broker_id,
+          u.hierarchy_path,
+          COALESCE(cm.master_id, u.parent_id) as cm_master_id,
+          COALESCE(cm.broker_id, u.broker_id) as cm_broker_id,
+          cm.sub_broker_id as cm_sub_broker_id,
           COALESCE(w.available_balance, u.demo_balance, 1000000.00) as available_balance,
           COALESCE(w.blocked_balance, 0) as blocked_balance,
           COALESCE(w.used_margin, 0) as used_margin,
           COALESCE(w.realized_pnl, 0) as realized_pnl,
           COUNT(*) OVER() as total_count
         FROM users u
+        LEFT JOIN client_mappings cm ON (cm.user_id = u.user_id OR cm.client_id = u.id)
         LEFT JOIN trading_wallets w ON (LOWER(w.user_id) = LOWER(u.user_id) AND (w.tenant_id = u.tenant_id OR w.tenant_id = 'TNT-001' OR w.tenant_id = 'vertex-default'))
         WHERE (u.role = 'CLIENT' OR u.role IS NULL OR u.role = 'USER')
           AND (u.tenant_id = ANY($1) OR $2 = true OR u.tenant_id IS NULL)
@@ -1968,11 +2110,20 @@ export class AuthoritativeTradingDataService {
           const blockedBal = Number(row.blocked_balance || 0);
           const usedMargin = Number(row.used_margin || 0);
           const equity = availBal + usedMargin;
+          const hLinks = this.resolveHierarchyLinks(row);
 
           return {
             id: row.id,
             userId: row.user_id,
             clientCode: row.user_id.toUpperCase(),
+            masterId: hLinks.masterId,
+            master_id: hLinks.masterId,
+            brokerId: hLinks.brokerId,
+            broker_id: hLinks.brokerId,
+            subBrokerId: hLinks.subBrokerId,
+            sub_broker_id: hLinks.subBrokerId,
+            parentId: row.parent_id || hLinks.subBrokerId || hLinks.brokerId || hLinks.masterId,
+            hierarchyPath: row.hierarchy_path || `root.${hLinks.masterId || 'master_alpha'}.${hLinks.brokerId || 'broker_metro'}.${row.user_id}`,
             name: row.full_name,
             fullName: row.full_name,
             email: row.email || `${row.user_id}@client.com`,
@@ -2039,11 +2190,20 @@ export class AuthoritativeTradingDataService {
       const blockedBal = 0;
       const usedMargin = 0;
       const equity = availBal;
+      const hLinks = this.resolveHierarchyLinks(c);
 
       return {
         id: c.id,
         userId: c.user_id,
         clientCode: c.user_id.toUpperCase(),
+        masterId: hLinks.masterId,
+        master_id: hLinks.masterId,
+        brokerId: hLinks.brokerId,
+        broker_id: hLinks.brokerId,
+        subBrokerId: hLinks.subBrokerId,
+        sub_broker_id: hLinks.subBrokerId,
+        parentId: c.parent_id || hLinks.subBrokerId || hLinks.brokerId || hLinks.masterId,
+        hierarchyPath: c.hierarchy_path || `root.${hLinks.masterId || 'master_alpha'}.${hLinks.brokerId || 'broker_metro'}.${c.user_id}`,
         name: c.full_name,
         fullName: c.full_name,
         email: c.email || `${c.user_id}@client.com`,
