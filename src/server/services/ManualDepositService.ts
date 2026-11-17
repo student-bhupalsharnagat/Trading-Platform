@@ -10,6 +10,7 @@ import { db } from '../db/database.ts';
 import { auditService } from './auditService.ts';
 import { transactionalOutboxService } from './TransactionalOutboxService.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
+import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
 import { getTenantWallet, getTenantNotifications } from '../trading/tradingStore.ts';
 
 export class ManualDepositService {
@@ -168,24 +169,39 @@ export class ManualDepositService {
 
     // 7. Real-time Notification
     try {
+      const createdPayload = {
+        id: newRequest.id,
+        depositId: newRequest.id,
+        transactionId: newRequest.id,
+        tenantId,
+        userId,
+        clientId: userId,
+        tradingUserId: userId,
+        clientCode: (userId || '').toUpperCase(),
+        userName,
+        amount: numAmount,
+        type: 'DEPOSIT' as const,
+        method: cleanMethod,
+        paymentMethod: cleanMethod,
+        utr: sanitizedUtr,
+        utr_number: sanitizedUtr,
+        payment_method: cleanMethod,
+        proof_image_url: proofImageUrl,
+        status: 'PENDING' as const,
+        createdAt: newRequest.created_at,
+        timestamp: new Date().toISOString(),
+      };
       tradingWebSocketServer.broadcastToTenant(
         tenantId,
         'manual_deposit.created',
-        {
-          id: newRequest.id,
-          depositId: newRequest.id,
-          transactionId: newRequest.id,
-          userId,
-          userName,
-          amount: numAmount,
-          utr: sanitizedUtr,
-          utr_number: sanitizedUtr,
-          payment_method: cleanMethod,
-          proof_image_url: proofImageUrl,
-          status: 'PENDING',
-          createdAt: newRequest.created_at,
-        },
+        createdPayload,
         (client) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(client.role)
+      );
+      internalEventDispatcher.broadcastDashboardEvent(
+        tenantId,
+        'fund.transaction_updated',
+        createdPayload,
+        { targetUserId: userId }
       );
     } catch {}
 
@@ -399,19 +415,30 @@ export class ManualDepositService {
         },
       });
 
-      // Real-time WebSocket broadcasts
+      // Real-time WebSocket & SSE broadcasts
+      const effectiveTenantId = approvedRequest.tenant_id || tenantId;
       const payload = {
+        id: approvedRequest.id,
         depositId: approvedRequest.id,
+        transactionId: approvedRequest.id,
+        tenantId: effectiveTenantId,
         userId: approvedRequest.user_id,
+        clientId: approvedRequest.user_id,
+        tradingUserId: approvedRequest.user_id,
+        clientCode: (approvedRequest.user_id || '').toUpperCase(),
+        type: 'DEPOSIT' as const,
         amount: Number(approvedRequest.amount),
+        method: approvedRequest.payment_method,
+        paymentMethod: approvedRequest.payment_method,
         utr: approvedRequest.utr_number,
-        status: 'APPROVED',
+        status: 'APPROVED' as const,
+        balanceAfter,
         approvedBy: adminId,
         timestamp: new Date().toISOString(),
       };
 
       tradingWebSocketServer.broadcastToTenant(
-        approvedRequest.tenant_id || tenantId,
+        effectiveTenantId,
         'manual_deposit.approved',
         payload,
         (client) =>
@@ -419,8 +446,28 @@ export class ManualDepositService {
           ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(client.role)
       );
 
+      internalEventDispatcher.broadcastDashboardEvent(
+        effectiveTenantId,
+        'fund.transaction_updated',
+        payload,
+        { targetUserId: approvedRequest.user_id }
+      );
+
+      internalEventDispatcher.dispatchLedgerUpdated({
+        tenantId: effectiveTenantId,
+        userId: approvedRequest.user_id,
+        transactionId: approvedRequest.id,
+        type: 'CREDIT',
+        category: 'DEPOSIT',
+        amount: Number(approvedRequest.amount),
+        balanceBefore: Number((balanceAfter - Number(approvedRequest.amount)).toFixed(4)),
+        balanceAfter,
+        reference: `Manual Deposit Approved - UTR: ${approvedRequest.utr_number} (${approvedRequest.payment_method})`,
+        createdBy: adminId,
+      }).catch(() => {});
+
       tradingWebSocketServer.broadcastToTenant(
-        approvedRequest.tenant_id || tenantId,
+        effectiveTenantId,
         'wallet.updated',
         {
           userId: approvedRequest.user_id,
@@ -522,24 +569,41 @@ export class ManualDepositService {
         },
       });
 
+      const effectiveTenantId = rejectedRequest.tenant_id || actualTenant;
       const payload = {
+        id: rejectedRequest.id,
         depositId: rejectedRequest.id,
+        transactionId: rejectedRequest.id,
+        tenantId: effectiveTenantId,
         userId: rejectedRequest.user_id,
+        clientId: rejectedRequest.user_id,
+        tradingUserId: rejectedRequest.user_id,
+        clientCode: (rejectedRequest.user_id || '').toUpperCase(),
+        type: 'DEPOSIT' as const,
         amount: Number(rejectedRequest.amount),
+        method: rejectedRequest.payment_method,
+        paymentMethod: rejectedRequest.payment_method,
         utr: rejectedRequest.utr_number,
-        status: 'REJECTED',
+        status: 'REJECTED' as const,
         reason: rejectedRequest.rejection_reason,
         rejectedBy: adminId,
         timestamp: new Date().toISOString(),
       };
 
       tradingWebSocketServer.broadcastToTenant(
-        rejectedRequest.tenant_id || tenantId,
+        effectiveTenantId,
         'manual_deposit.rejected',
         payload,
         (client) =>
           client.userId === rejectedRequest.user_id ||
           ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(client.role)
+      );
+
+      internalEventDispatcher.broadcastDashboardEvent(
+        effectiveTenantId,
+        'fund.transaction_updated',
+        payload,
+        { targetUserId: rejectedRequest.user_id }
       );
     } catch (notifErr) {
       console.warn('[ManualDeposit] Notice during post-rejection notification:', notifErr);

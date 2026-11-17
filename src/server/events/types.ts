@@ -9,12 +9,15 @@
 export type InternalEventType =
   | 'client.registered'
   | 'client.activated'
+  | 'broker.added'
   | 'kyc.submitted'
   | 'support.ticket_created'
   | 'support.ticket_updated'
   | 'trade.executed'
+  | 'ledger.updated'
   | 'position.updated'
   | 'wallet.updated'
+  | 'fund.transaction_updated'
   | 'deposit.created'
   | 'deposit.updated'
   | 'deposit.approved'
@@ -24,6 +27,7 @@ export type InternalEventType =
   | 'withdrawal.approved'
   | 'withdrawal.rejected'
   | 'risk.margin_breach'
+  | 'risk.alert_triggered'
   | 'execution.failure'
   | 'emergency.control_activated'
   | 'reconciliation.mismatch'
@@ -41,7 +45,13 @@ export interface InternalEvent<T = any> {
   payload: T;
 }
 
-export interface ClientRegisteredPayload {
+export interface HierarchyScopeFields {
+  masterId?: string | null;
+  brokerId?: string | null;
+  subBrokerId?: string | null;
+}
+
+export interface ClientRegisteredPayload extends HierarchyScopeFields {
   tenantId: string;
   tradingUserId: string;
   userId: string;
@@ -56,7 +66,23 @@ export interface ClientRegisteredPayload {
   createdAt: string;
 }
 
-export interface ClientActivatedPayload {
+export interface BrokerAddedPayload extends HierarchyScopeFields {
+  tenantId: string;
+  id: string;
+  userId: string;
+  name: string;
+  fullName?: string;
+  email?: string;
+  phone?: string;
+  role: 'MASTER' | 'BROKER' | 'SUB_BROKER';
+  type: 'master' | 'broker' | 'sub_broker';
+  parentId?: string | null;
+  commissionRate?: number;
+  status?: string;
+  createdAt?: string;
+}
+
+export interface ClientActivatedPayload extends HierarchyScopeFields {
   tenantId: string;
   tradingUserId: string;
   userId: string;
@@ -71,7 +97,7 @@ export interface ClientActivatedPayload {
   createdAt: string;
 }
 
-export interface TradeExecutedPayload {
+export interface TradeExecutedPayload extends HierarchyScopeFields {
   tenantId?: string;
   userId: string;
   clientId?: string;
@@ -94,6 +120,41 @@ export interface TradeExecutedPayload {
   commission?: number;
   realizedPnl?: number;
   executedAt?: string;
+  [key: string]: any;
+}
+
+export interface LedgerUpdatedPayload extends HierarchyScopeFields {
+  tenantId: string;
+  userId: string;
+  transactionId?: string;
+  entryId?: string;
+  type: 'CREDIT' | 'DEBIT';
+  category: string;
+  amount: number;
+  balanceBefore?: number;
+  balanceAfter: number;
+  usedMargin?: number;
+  reference?: string;
+  createdBy?: string;
+  timestamp?: string;
+}
+
+export interface RiskAlertPayload extends HierarchyScopeFields {
+  tenantId: string;
+  userId: string;
+  alertType: 'MARGIN_SHORTFALL' | 'ORDER_BLOCKED' | 'EXECUTION_FAILURE' | 'MARGIN_BREACH';
+  severity?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  code?: string;
+  reason: string;
+  symbol?: string;
+  side?: 'BUY' | 'SELL';
+  orderId?: string;
+  requiredMargin?: number;
+  usedMargin?: number;
+  availableMargin?: number;
+  exposure?: number;
+  threshold?: number;
+  detectedAt?: string;
 }
 
 export interface PositionUpdatedPayload {
@@ -133,7 +194,7 @@ export interface WalletUpdatedPayload {
   updatedAt: string;
 }
 
-export interface FundTransactionPayload {
+export interface FundTransactionPayload extends HierarchyScopeFields {
   id?: string;
   depositId?: string;
   transactionId: string;
@@ -188,7 +249,8 @@ export interface SupportTicketPayload {
   updatedAt: string;
 }
 
-export interface MarginBreachPayload {
+export interface MarginBreachPayload extends HierarchyScopeFields {
+  tenantId?: string;
   userId: string;
   usedMargin: number;
   availableMargin: number;
@@ -197,7 +259,8 @@ export interface MarginBreachPayload {
   detectedAt: string;
 }
 
-export interface ExecutionFailurePayload {
+export interface ExecutionFailurePayload extends HierarchyScopeFields {
+  tenantId?: string;
   orderId: string;
   userId: string;
   symbol: string;

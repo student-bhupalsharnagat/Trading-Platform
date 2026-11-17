@@ -9,6 +9,7 @@ import { CircuitBreaker } from '../events/CircuitBreaker.ts';
 import { InternalEvent } from '../events/types.ts';
 import { auditService } from './auditService.ts';
 import { cleanNumeric } from '../utils/cleanNumeric.ts';
+import { enrichPayloadWithHierarchy } from '../utils/hierarchyContext.ts';
 
 export interface OutboxServiceOptions {
   client?: CentralAdminEventClient;
@@ -54,6 +55,7 @@ export class TransactionalOutboxService {
   ): Promise<OutboxEventRecord> {
     const id = `outbox-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const eventId = event.eventId || `evt-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const enrichedPayload = enrichPayloadWithHierarchy(event.tenantId, event.payload);
 
     return await postgresOutboxRepository.insert(
       {
@@ -61,7 +63,7 @@ export class TransactionalOutboxService {
         event_id: eventId,
         tenant_id: event.tenantId,
         event_type: event.eventType,
-        payload: event.payload,
+        payload: enrichedPayload,
         max_attempts: event.maxAttempts ?? 5,
       },
       client

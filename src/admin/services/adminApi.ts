@@ -30,7 +30,10 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
 export const adminApi = {
   getKPIs: async (): Promise<{ kpis: AdminDashboardKPIs; charts: ChartDataPoint[] }> => {
-    return request<{ kpis: AdminDashboardKPIs; charts: ChartDataPoint[] }>('/dashboard/kpis');
+    return request<{ kpis: AdminDashboardKPIs; charts: ChartDataPoint[] }>('/metrics');
+  },
+  getMetrics: async (): Promise<{ kpis: AdminDashboardKPIs; charts: ChartDataPoint[] }> => {
+    return request<{ kpis: AdminDashboardKPIs; charts: ChartDataPoint[] }>('/metrics');
   },
 
   // Masters

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import {
   AlertTriangle,
   ShieldAlert,
@@ -32,10 +32,16 @@ export const AdminRiskPage: React.FC<AdminRiskPageProps> = ({ onNavigate }) => {
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const fetchRiskData = async () => {
+  const isFetchingRef = useRef(false);
+
+  const fetchRiskData = useCallback(async (silent = false) => {
+    if (silent && isFetchingRef.current) return;
+    isFetchingRef.current = true;
     try {
-      setLoading(true);
-      setError(null);
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
       const [summaryRes, positionsRes] = await Promise.all([
         adminApi.getRiskSummary(),
         adminApi.getRiskPositions(),
@@ -44,15 +50,22 @@ export const AdminRiskPage: React.FC<AdminRiskPageProps> = ({ onNavigate }) => {
       setRiskData((summaryRes as any)?.data || summaryRes || null);
       setPositions((positionsRes as any)?.data || positionsRes || []);
     } catch (err: any) {
-      setError(err.message || 'Failed to load risk metrics');
+      if (!silent) {
+        setError(err.message || 'Failed to load risk metrics');
+      }
     } finally {
-      setLoading(false);
+      isFetchingRef.current = false;
+      if (!silent) setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchRiskData();
-  }, []);
+    fetchRiskData(false);
+    const pollId = setInterval(() => {
+      fetchRiskData(true);
+    }, 2500);
+    return () => clearInterval(pollId);
+  }, [fetchRiskData]);
 
   // Real-time subscriptions for RMS
   useEffect(() => {
@@ -97,7 +110,14 @@ export const AdminRiskPage: React.FC<AdminRiskPageProps> = ({ onNavigate }) => {
 
     const unsubBreach = subscribe('risk.margin_breach', (breachPayload: any) => {
       setError(`RMS ALERT: Margin breach detected for client ${breachPayload.userId}! Margin utilization exceeded 100%.`);
-      fetchRiskData();
+      fetchRiskData(true);
+    });
+
+    const unsubRiskAlert = subscribe('risk.alert_triggered', (alertPayload: any) => {
+      if (alertPayload?.reason) {
+        setError(`RMS ALERT (${alertPayload.alertType || 'RISK'}): ${alertPayload.reason}`);
+      }
+      fetchRiskData(true);
     });
 
     const unsubMtmBatch = subscribe('positions.mtm_batch', (batch: any) => {
@@ -149,10 +169,11 @@ export const AdminRiskPage: React.FC<AdminRiskPageProps> = ({ onNavigate }) => {
       unsubPos();
       unsubTicks();
       unsubBreach();
+      unsubRiskAlert();
       unsubMtmBatch();
       unsubSingleTick();
     };
-  }, [subscribe]);
+  }, [subscribe, fetchRiskData]);
 
   const handleSquareOff = async (userId: string, positionId: string) => {
     try {
@@ -229,7 +250,7 @@ export const AdminRiskPage: React.FC<AdminRiskPageProps> = ({ onNavigate }) => {
         </div>
 
         <button
-          onClick={fetchRiskData}
+          onClick={() => fetchRiskData(false)}
           className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700/60 text-xs font-semibold text-slate-300 flex items-center gap-1.5 self-start sm:self-auto"
         >
           <RefreshCw className={`w-3.5 h-3.5 text-blue-400 ${loading ? 'animate-spin' : ''}`} />

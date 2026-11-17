@@ -38,6 +38,8 @@ import { postgresClientMappingRepository } from './src/server/repositories/Postg
 import { seedAjayAccount } from './src/server/services/seedAjayService.ts';
 import { authoritativeTradingDataService } from './src/server/services/authoritativeTradingDataService.ts';
 import { internalEventDispatcher } from './src/server/events/InternalEventDispatcher.ts';
+import { authService } from './src/server/services/authService.ts';
+import { resolveHierarchyContext } from './src/server/utils/hierarchyContext.ts';
 
 /**
  * Purges all test/dummy users, test client mappings, and seeded records
@@ -433,7 +435,7 @@ async function startServer() {
   // Protected by HMAC-SHA256, Nonce, Timestamp, and Tenant ID validation
   app.use('/api/internal/v1', internalRoutes);
 
-  // Global Real-time SSE Stream Endpoint for market ticks & position MTM deltas
+  // Global Real-time SSE Stream Endpoint for market ticks, position MTM deltas, and dashboard KPI events
   app.get(['/api/stream', '/api/v1/stream'], (req, res) => {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -443,9 +445,56 @@ async function startServer() {
       'Access-Control-Allow-Origin': '*',
     });
     res.write(': keep-alive\n\n');
-    const tenantId = (req as any).tenantId || (req.query.tenantId as string);
-    const userId = (req as any).userId || (req.query.userId as string);
-    const unsubscribe = internalEventDispatcher.registerSseClient(res, { tenantId, userId });
+
+    let tenantId =
+      (req.query.tenantId as string) ||
+      (req as any).tenant?.tenant?.id ||
+      (req as any).tenantId;
+    let userId = (req.query.userId as string) || (req as any).userId;
+    let role = (req.query.role as string) || (req as any).user?.role;
+    let masterId = req.query.masterId as string | undefined;
+    let brokerId = req.query.brokerId as string | undefined;
+    let subBrokerId = req.query.subBrokerId as string | undefined;
+
+    // Optional JWT extraction so authenticated Admin/User SSE streams inherit tenant & hierarchy scope
+    try {
+      const rawToken =
+        (req.query.token as string) ||
+        (req.query.auth_token as string) ||
+        (req.headers.authorization?.replace(/^Bearer\s+/i, '')) ||
+        req.cookies?.vertex_auth_token;
+      if (rawToken && !authService.isTokenRevoked(rawToken)) {
+        const verified = authService.verifyToken(rawToken);
+        if (verified?.id) {
+          const authUser = db.findUserById(verified.id);
+          tenantId = tenantId || authUser?.tenant_id || verified.tenantId;
+          userId = userId || authUser?.user_id || verified.userId || verified.id;
+          role = role || authUser?.role || verified.role;
+          if (authUser && role && role !== 'SUPER_ADMIN') {
+            const hCtx = resolveHierarchyContext(tenantId || 'vertex-default', authUser);
+            if (role === 'MASTER') masterId = masterId || authUser.id;
+            else if (role === 'BROKER') brokerId = brokerId || authUser.id;
+            else if (role === 'SUB_BROKER') subBrokerId = subBrokerId || authUser.id;
+            else {
+              masterId = masterId || hCtx.masterId || undefined;
+              brokerId = brokerId || hCtx.brokerId || undefined;
+              subBrokerId = subBrokerId || hCtx.subBrokerId || undefined;
+            }
+          }
+        }
+      }
+    } catch {
+      // Unauthenticated public SSE subscriptions remain permitted
+    }
+
+    const unsubscribe = internalEventDispatcher.registerSseClient(res, {
+      tenantId,
+      userId,
+      role,
+      masterId,
+      brokerId,
+      subBrokerId,
+    });
     const heartbeat = setInterval(() => {
       try {
         res.write(': ping\n\n');

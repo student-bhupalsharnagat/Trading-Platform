@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import {
   Wallet,
   ArrowDownLeft,
@@ -51,6 +51,8 @@ export const AdminDepositRequestsPage: React.FC<AdminDepositRequestsPageProps> =
   initialTab = 'PENDING',
 }) => {
   const { showToast } = useAuth();
+  const { isConnected, subscribe } = useAdminRealtime();
+  const isFetchingRef = useRef(false);
 
   const [activeTab, setActiveTab] = useState<'PENDING' | 'ALL' | 'APPROVED' | 'REJECTED' | 'SETTINGS'>(initialTab);
   const [requests, setRequests] = useState<ManualDepositItem[]>([]);
@@ -78,10 +80,14 @@ export const AdminDepositRequestsPage: React.FC<AdminDepositRequestsPageProps> =
   });
   const [settingsSaving, setSettingsSaving] = useState(false);
 
-  const fetchRequests = async () => {
+  const fetchRequests = useCallback(async (silent = false) => {
+    if (silent && isFetchingRef.current) return;
+    isFetchingRef.current = true;
     try {
-      setLoading(true);
-      setError(null);
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
       const res = await adminApi.getDepositRequests({
         status: activeTab === 'ALL' || activeTab === 'SETTINGS' ? undefined : activeTab,
         search: searchQuery.trim() || undefined,
@@ -89,11 +95,14 @@ export const AdminDepositRequestsPage: React.FC<AdminDepositRequestsPageProps> =
       });
       setRequests(res.requests || []);
     } catch (err: any) {
-      setError(err.message || 'Failed to load deposit requests');
+      if (!silent) {
+        setError(err.message || 'Failed to load deposit requests');
+      }
     } finally {
-      setLoading(false);
+      isFetchingRef.current = false;
+      if (!silent) setLoading(false);
     }
-  };
+  }, [activeTab, searchQuery]);
 
   const fetchSettings = async () => {
     try {
@@ -116,29 +125,33 @@ export const AdminDepositRequestsPage: React.FC<AdminDepositRequestsPageProps> =
     }
   };
 
-  const { isConnected, subscribe } = useAdminRealtime();
-
   useEffect(() => {
-    fetchRequests();
+    fetchRequests(false);
     fetchSettings();
   }, [activeTab]);
 
   useEffect(() => {
-    const unsub1 = subscribe('manual_deposit.created', () => {
-      fetchRequests();
-    });
-    const unsub2 = subscribe('manual_deposit.approved', () => {
-      fetchRequests();
-    });
-    const unsub3 = subscribe('manual_deposit.rejected', () => {
-      fetchRequests();
-    });
+    const pollId = setInterval(() => {
+      fetchRequests(true);
+    }, 2500);
+    return () => clearInterval(pollId);
+  }, [fetchRequests]);
+
+  useEffect(() => {
+    const refreshSilent = () => {
+      fetchRequests(true);
+    };
+    const unsub1 = subscribe('manual_deposit.created', refreshSilent);
+    const unsub2 = subscribe('manual_deposit.approved', refreshSilent);
+    const unsub3 = subscribe('manual_deposit.rejected', refreshSilent);
+    const unsub4 = subscribe('fund.transaction_updated', refreshSilent);
     return () => {
       unsub1();
       unsub2();
       unsub3();
+      unsub4();
     };
-  }, [subscribe]);
+  }, [subscribe, fetchRequests]);
 
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard?.writeText(text);
@@ -308,7 +321,7 @@ export const AdminDepositRequestsPage: React.FC<AdminDepositRequestsPageProps> =
         <div className="flex items-center gap-2.5">
           <button
             type="button"
-            onClick={fetchRequests}
+            onClick={() => fetchRequests(false)}
             disabled={loading}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-[#0E1726] hover:bg-[#152338] text-slate-300 border border-[#1E2E44] transition-all cursor-pointer"
           >
@@ -655,7 +668,7 @@ export const AdminDepositRequestsPage: React.FC<AdminDepositRequestsPageProps> =
               <p className="text-sm font-bold">{error}</p>
               <button
                 type="button"
-                onClick={fetchRequests}
+                onClick={() => fetchRequests(false)}
                 className="mt-3 px-3 py-1.5 bg-[#142032] text-xs text-white rounded-lg hover:bg-[#1E2E44]"
               >
                 Retry

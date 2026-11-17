@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Crown,
   Briefcase,
@@ -35,55 +35,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchDashboardData = async () => {
+  const isFetchingRef = useRef(false);
+
+  const fetchDashboardData = useCallback(async (silent = false) => {
+    if (silent && isFetchingRef.current) return;
+    isFetchingRef.current = true;
     try {
-      setLoading(true);
-      const res = await adminApi.getKPIs();
+      if (!silent) setLoading(true);
+      const [res, clients] = await Promise.all([
+        adminApi.getMetrics(),
+        adminApi.getClients(),
+      ]);
       setKpis(res.kpis);
       setCharts(res.charts);
-
-      // Also grab scoped clients
-      const clients = await adminApi.getClients();
       setRecentClients(clients.slice(0, 5));
+      setError(null);
     } catch (err: any) {
-      setError(err.message || 'Failed to load dashboard metrics');
+      if (!silent) {
+        setError(err.message || 'Failed to load dashboard metrics');
+      }
     } finally {
-      setLoading(false);
+      isFetchingRef.current = false;
+      if (!silent) setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchDashboardData();
-  }, []);
+    fetchDashboardData(false);
+    const pollId = setInterval(() => {
+      fetchDashboardData(true);
+    }, 2500);
+    return () => clearInterval(pollId);
+  }, [fetchDashboardData]);
 
   // Real-time synchronization
   useEffect(() => {
-    const unsubOrder = subscribe('order.created', () => fetchDashboardData());
-    const unsubTrade = subscribe('trade.executed', () => fetchDashboardData());
-    const unsubWallet = subscribe('wallet.updated', () => fetchDashboardData());
-    const unsubPos = subscribe('position.updated', () => fetchDashboardData());
-    const unsubClient = subscribe('client.created', () => fetchDashboardData());
-    const unsubClientReg = subscribe('client.registered', () => fetchDashboardData());
-    const unsubClientAct = subscribe('client.activated', () => fetchDashboardData());
-    const unsubFund = subscribe('fund.requested', () => fetchDashboardData());
-    const unsubFundCreated = subscribe('fund.created', () => fetchDashboardData());
-    const unsubFundProc = subscribe('fund.processed', () => fetchDashboardData());
-    const unsubFundUpd = subscribe('fund.updated', () => fetchDashboardData());
+    const refreshSilent = () => {
+      fetchDashboardData(true);
+    };
+    const unsubs = [
+      subscribe('order.created', refreshSilent),
+      subscribe('trade.executed', refreshSilent),
+      subscribe('ledger.updated', refreshSilent),
+      subscribe('wallet.updated', refreshSilent),
+      subscribe('position.updated', refreshSilent),
+      subscribe('client.created', refreshSilent),
+      subscribe('client.registered', refreshSilent),
+      subscribe('client.activated', refreshSilent),
+      subscribe('broker.added', refreshSilent),
+      subscribe('hierarchy.updated', refreshSilent),
+      subscribe('fund.requested', refreshSilent),
+      subscribe('fund.created', refreshSilent),
+      subscribe('fund.processed', refreshSilent),
+      subscribe('fund.updated', refreshSilent),
+      subscribe('fund.transaction_updated', refreshSilent),
+      subscribe('risk.alert_triggered', refreshSilent),
+    ];
 
     return () => {
-      unsubOrder();
-      unsubTrade();
-      unsubWallet();
-      unsubPos();
-      unsubClient();
-      unsubClientReg();
-      unsubClientAct();
-      unsubFund();
-      unsubFundCreated();
-      unsubFundProc();
-      unsubFundUpd();
+      unsubs.forEach((u) => u());
     };
-  }, [subscribe]);
+  }, [subscribe, fetchDashboardData]);
 
   const formatCurrency = (val?: number) => {
     if (val === undefined || val === null) return '₹0';
@@ -122,7 +134,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
         {/* Quick Actions */}
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={fetchDashboardData}
+            onClick={() => fetchDashboardData(false)}
             disabled={loading}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold shadow-xs transition-colors cursor-pointer"
             title="Refresh Real-time KPIs"

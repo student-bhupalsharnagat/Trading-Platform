@@ -365,8 +365,19 @@ router.get('/stream', optionalAuth, (req: TenantRequest, res: Response) => {
   const tenantId = getReqTenantId(req);
   const userObj = (req as any).user;
   const userId = userObj?.userId || userObj?.user_id || userObj?.id || (req.query.userId as string);
+  const role = userObj?.role || (req.query.role as string);
+  const masterId = (req.query.masterId as string) || (role === 'MASTER' ? userObj?.id : undefined);
+  const brokerId = (req.query.brokerId as string) || (role === 'BROKER' ? userObj?.id : undefined);
+  const subBrokerId = (req.query.subBrokerId as string) || (role === 'SUB_BROKER' ? userObj?.id : undefined);
 
-  const unsubscribe = internalEventDispatcher.registerSseClient(res, { tenantId, userId });
+  const unsubscribe = internalEventDispatcher.registerSseClient(res, {
+    tenantId,
+    userId,
+    role,
+    masterId,
+    brokerId,
+    subBrokerId,
+  });
 
   const heartbeat = setInterval(() => {
     try {
@@ -413,10 +424,20 @@ router.post(
         if (latestUser) {
           const check = db.isUserOrHierarchyFrozen(latestUser);
           if (check.frozen || Boolean(latestUser.is_frozen)) {
+            const reason = check.reason || 'Your account is currently frozen.';
+            internalEventDispatcher.dispatchRiskAlert({
+              tenantId,
+              userId: latestUser.user_id,
+              alertType: 'ORDER_BLOCKED',
+              severity: 'HIGH',
+              code: 'USER_FROZEN',
+              symbol: req.body?.symbol || req.body?.instrument,
+              reason,
+            }).catch(() => {});
             res.status(403).json({
               success: false,
               code: 'USER_FROZEN',
-              message: check.reason || 'Your account is currently frozen.',
+              message: reason,
             });
             return;
           }
@@ -1049,6 +1070,39 @@ router.post('/funds/deposit', fundsRateLimiter, requireAuth, async (req: TenantR
         reference: `Instant Deposit [${refId}]`,
         created_by: 'INSTANT_PAYMENT',
       }).catch(() => null);
+      internalEventDispatcher.broadcastDashboardEvent(
+        tenantId,
+        'fund.transaction_updated',
+        {
+          id: tx.id,
+          transactionId: tx.id,
+          tenantId,
+          userId,
+          clientId: userId,
+          tradingUserId: userId,
+          amount: numAmount,
+          type: 'DEPOSIT',
+          status: 'APPROVED',
+          method: method || 'UPI Instant',
+          reference: refId,
+          balanceBefore: pgW.available_balance,
+          balanceAfter: newAvail,
+          timestamp: new Date().toISOString(),
+        },
+        { targetUserId: userId }
+      );
+      internalEventDispatcher.dispatchLedgerUpdated({
+        tenantId,
+        userId,
+        transactionId: tx.id,
+        type: 'CREDIT',
+        category: 'DEPOSIT',
+        amount: numAmount,
+        balanceBefore: pgW.available_balance,
+        balanceAfter: newAvail,
+        reference: `Instant Deposit [${refId}]`,
+        createdBy: 'INSTANT_PAYMENT',
+      }).catch(() => {});
     }
 
     // In-memory dual-write for instant margin reflection

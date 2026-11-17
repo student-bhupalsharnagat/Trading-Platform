@@ -7,6 +7,7 @@ import { pgDb } from '../db/postgres.ts';
 import { PasswordHashUtil } from '../utils/passwordHash.ts';
 import { transactionalOutboxService } from './TransactionalOutboxService.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
+import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
 
 export interface HierarchyNodeView {
   id: string;
@@ -355,11 +356,35 @@ export class HierarchyService {
     }).catch(() => {});
 
     // Broadcast WebSocket event
+    const nodeView = await this.toNodeView(record);
     tradingWebSocketServer.broadcastToTenant(tenantId, 'hierarchy.updated', {
       type: 'master',
       action: 'created',
-      node: await this.toNodeView(record),
+      tenantId,
+      masterId: record.id,
+      brokerId: null,
+      subBrokerId: null,
+      node: nodeView,
     });
+
+    internalEventDispatcher.dispatchBrokerAdded({
+      tenantId,
+      id: record.id,
+      userId: record.user_id,
+      name: record.full_name,
+      fullName: record.full_name,
+      email: record.email,
+      phone: record.mobile,
+      role: 'MASTER',
+      type: 'master',
+      parentId: record.parent_id,
+      masterId: record.id,
+      brokerId: null,
+      subBrokerId: null,
+      commissionRate: record.commission_rate,
+      status: record.status,
+      createdAt: record.created_at,
+    }).catch(() => {});
 
     auditService.log({
       actorId: caller.id,
@@ -455,11 +480,35 @@ export class HierarchyService {
     }).catch(() => {});
 
     // Broadcast WebSocket event
+    const nodeView = await this.toNodeView(record);
     tradingWebSocketServer.broadcastToTenant(tenantId, 'hierarchy.updated', {
       type: 'broker',
       action: 'created',
-      node: await this.toNodeView(record),
+      tenantId,
+      masterId: parentMaster.id,
+      brokerId: record.id,
+      subBrokerId: null,
+      node: nodeView,
     });
+
+    internalEventDispatcher.dispatchBrokerAdded({
+      tenantId,
+      id: record.id,
+      userId: record.user_id,
+      name: record.full_name,
+      fullName: record.full_name,
+      email: record.email,
+      phone: record.mobile,
+      role: 'BROKER',
+      type: 'broker',
+      parentId: parentMaster.id,
+      masterId: parentMaster.id,
+      brokerId: record.id,
+      subBrokerId: null,
+      commissionRate: record.commission_rate,
+      status: record.status,
+      createdAt: record.created_at,
+    }).catch(() => {});
 
     auditService.log({
       actorId: caller.id,
@@ -558,11 +607,35 @@ export class HierarchyService {
     }).catch(() => {});
 
     // Broadcast WebSocket event
+    const nodeView = await this.toNodeView(record);
     tradingWebSocketServer.broadcastToTenant(tenantId, 'hierarchy.updated', {
       type: 'sub_broker',
       action: 'created',
-      node: await this.toNodeView(record),
+      tenantId,
+      masterId,
+      brokerId: parentBroker.id,
+      subBrokerId: record.id,
+      node: nodeView,
     });
+
+    internalEventDispatcher.dispatchBrokerAdded({
+      tenantId,
+      id: record.id,
+      userId: record.user_id,
+      name: record.full_name,
+      fullName: record.full_name,
+      email: record.email,
+      phone: record.mobile,
+      role: 'SUB_BROKER',
+      type: 'sub_broker',
+      parentId: parentBroker.id,
+      masterId: masterId || null,
+      brokerId: parentBroker.id,
+      subBrokerId: record.id,
+      commissionRate: record.commission_rate,
+      status: record.status,
+      createdAt: record.created_at,
+    }).catch(() => {});
 
     auditService.log({
       actorId: caller.id,
@@ -811,6 +884,7 @@ export class HierarchyService {
 
     // Upsert in in-memory repository
     let existing = (await jsonUserRepository.findByUserId(userId)) || (node.id ? await jsonUserRepository.findById(node.id) : null);
+    const isNew = !existing;
     if (!existing) {
       existing = await jsonUserRepository.create({
         id: node.id || `node-${role.toLowerCase()}-${Date.now()}`,
@@ -877,12 +951,41 @@ export class HierarchyService {
       ]).catch(() => {});
     }
 
-    // Broadcast WebSocket event
+    // Broadcast WebSocket & SSE events
+    const syncedView = await this.toNodeView(existing);
     tradingWebSocketServer.broadcastToTenant(tenantId, 'hierarchy.updated', {
       type: role.toLowerCase(),
       action,
-      node: await this.toNodeView(existing),
+      node: syncedView,
     });
+
+    if (isNew || action === 'created') {
+      const eventName = role === 'CLIENT' ? 'client.registered' : 'broker.added';
+      internalEventDispatcher.broadcastDashboardEvent(
+        tenantId,
+        eventName,
+        {
+          id: existing.id,
+          userId: existing.user_id,
+          tradingUserId: existing.user_id,
+          clientId: existing.id,
+          clientCode: existing.user_id.toUpperCase(),
+          name: existing.full_name,
+          fullName: existing.full_name,
+          email: existing.email,
+          phone: existing.mobile,
+          role,
+          type: role.toLowerCase(),
+          parentId,
+          masterId: node.master_id || node.masterId || (role === 'MASTER' ? existing.id : undefined),
+          brokerId: node.broker_id || node.brokerId || (role === 'BROKER' ? existing.id : undefined),
+          subBrokerId: node.sub_broker_id || node.subBrokerId || (role === 'SUB_BROKER' ? existing.id : undefined),
+          status: existing.status,
+          createdAt: existing.created_at,
+        },
+        role === 'CLIENT' ? { targetUserId: existing.user_id } : { adminOnly: true }
+      );
+    }
 
     return {
       success: true,
