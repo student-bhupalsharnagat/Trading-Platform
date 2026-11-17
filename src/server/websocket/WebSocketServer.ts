@@ -409,7 +409,15 @@ export class TradingWebSocketServer {
 
     // 1. Deliver to local sockets on this instance
     this.activeSockets.forEach((client: AuthenticatedWebSocket) => {
-      if (client.readyState === WebSocket.OPEN && client.tenantId === tenantId) {
+      const isTenantMatch =
+        tenantId === 'global' ||
+        client.tenantId === 'global' ||
+        client.tenantId === tenantId ||
+        client.role === 'SUPER_ADMIN' ||
+        ((client.tenantId === 'vertex-default' || client.tenantId === 'default') && (tenantId === 'TNT-001' || tenantId === 'vertex-default')) ||
+        (client.tenantId === 'TNT-001' && (tenantId === 'vertex-default' || tenantId === 'default'));
+
+      if (client.readyState === WebSocket.OPEN && isTenantMatch) {
         if (!recipientFilter || recipientFilter(client)) {
           try {
             client.send(message);

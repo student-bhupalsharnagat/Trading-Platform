@@ -9,10 +9,12 @@
 export type InternalEventType =
   | 'client.registered'
   | 'client.activated'
+  | 'broker.added'
   | 'kyc.submitted'
   | 'support.ticket_created'
   | 'support.ticket_updated'
   | 'trade.executed'
+  | 'ledger.updated'
   | 'position.updated'
   | 'wallet.updated'
   | 'deposit.created'
@@ -23,7 +25,9 @@ export type InternalEventType =
   | 'withdrawal.updated'
   | 'withdrawal.approved'
   | 'withdrawal.rejected'
+  | 'fund.transaction_updated'
   | 'risk.margin_breach'
+  | 'risk.alert_triggered'
   | 'execution.failure'
   | 'emergency.control_activated'
   | 'reconciliation.mismatch'
@@ -43,11 +47,18 @@ export interface InternalEvent<T = any> {
 
 export interface ClientRegisteredPayload {
   tenantId: string;
+  masterId?: string | null;
+  brokerId?: string | null;
+  subBrokerId?: string | null;
+  master_id?: string | null;
+  broker_id?: string | null;
+  sub_broker_id?: string | null;
   tradingUserId: string;
   userId: string;
   clientId?: string;
   clientCode: string;
   name: string;
+  fullName?: string;
   email?: string;
   phone: string;
   status: string;
@@ -56,13 +67,41 @@ export interface ClientRegisteredPayload {
   createdAt: string;
 }
 
+export interface BrokerAddedPayload {
+  tenantId: string;
+  masterId?: string | null;
+  brokerId?: string | null;
+  subBrokerId?: string | null;
+  master_id?: string | null;
+  broker_id?: string | null;
+  sub_broker_id?: string | null;
+  userId: string;
+  id: string;
+  name: string;
+  fullName: string;
+  email?: string;
+  phone?: string;
+  role: 'MASTER' | 'BROKER' | 'SUB_BROKER' | string;
+  parentId?: string | null;
+  status: string;
+  commissionRate?: number;
+  createdAt: string;
+}
+
 export interface ClientActivatedPayload {
   tenantId: string;
+  masterId?: string | null;
+  brokerId?: string | null;
+  subBrokerId?: string | null;
+  master_id?: string | null;
+  broker_id?: string | null;
+  sub_broker_id?: string | null;
   tradingUserId: string;
   userId: string;
   clientId: string;
   clientCode: string;
   name: string;
+  fullName?: string;
   email?: string;
   phone: string;
   status: string;
@@ -73,6 +112,12 @@ export interface ClientActivatedPayload {
 
 export interface TradeExecutedPayload {
   tenantId?: string;
+  masterId?: string | null;
+  brokerId?: string | null;
+  subBrokerId?: string | null;
+  master_id?: string | null;
+  broker_id?: string | null;
+  sub_broker_id?: string | null;
   userId: string;
   clientId?: string;
   tradingUserId?: string;
@@ -139,6 +184,12 @@ export interface FundTransactionPayload {
   transactionId: string;
   clientCode?: string;
   tenantId: string;
+  masterId?: string | null;
+  brokerId?: string | null;
+  subBrokerId?: string | null;
+  master_id?: string | null;
+  broker_id?: string | null;
+  sub_broker_id?: string | null;
   userId: string;
   clientId: string;
   tradingUserId: string;
@@ -146,6 +197,7 @@ export interface FundTransactionPayload {
   amount: number;
   type: 'DEPOSIT' | 'WITHDRAWAL';
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  action?: 'REQUESTED' | 'APPROVED' | 'REJECTED' | string;
   method?: string;
   paymentMethod?: string;
   reference?: string;
@@ -153,6 +205,7 @@ export interface FundTransactionPayload {
   balanceBefore?: number;
   balanceAfter?: number;
   approvedBy?: string;
+  rejectedBy?: string;
   reason?: string;
   createdAt?: string;
   timestamp: string;
@@ -160,6 +213,59 @@ export interface FundTransactionPayload {
   utr_number?: string;
   payment_method?: string;
   proof_image_url?: string | null;
+}
+
+export interface LedgerUpdatedPayload {
+  id?: string;
+  ledgerId?: string;
+  tenantId: string;
+  masterId?: string | null;
+  brokerId?: string | null;
+  subBrokerId?: string | null;
+  master_id?: string | null;
+  broker_id?: string | null;
+  sub_broker_id?: string | null;
+  userId: string;
+  clientId?: string;
+  tradingUserId?: string;
+  transactionId?: string;
+  type: 'CREDIT' | 'DEBIT';
+  category: string;
+  amount: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  balance_before?: number;
+  balance_after?: number;
+  reference?: string;
+  createdAt?: string;
+  timestamp?: string;
+}
+
+export interface RiskAlertTriggeredPayload {
+  alertId?: string;
+  tenantId: string;
+  masterId?: string | null;
+  brokerId?: string | null;
+  subBrokerId?: string | null;
+  master_id?: string | null;
+  broker_id?: string | null;
+  sub_broker_id?: string | null;
+  userId: string;
+  clientId?: string;
+  tradingUserId?: string;
+  alertType: 'MARGIN_SHORTFALL' | 'BLOCKED_ORDER' | 'LIMIT_BREACH' | 'ORDER_EXECUTION_FAILURE' | string;
+  type?: string;
+  severity?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  message: string;
+  requiredMargin?: number;
+  availableMargin?: number;
+  shortfall?: number;
+  exposure?: number;
+  usedMargin?: number;
+  orderId?: string;
+  symbol?: string;
+  details?: any;
+  timestamp?: string;
 }
 
 export interface KycSubmittedPayload {

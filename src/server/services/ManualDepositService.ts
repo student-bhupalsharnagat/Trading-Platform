@@ -10,6 +10,7 @@ import { db } from '../db/database.ts';
 import { auditService } from './auditService.ts';
 import { transactionalOutboxService } from './TransactionalOutboxService.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
+import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
 import { getTenantWallet, getTenantNotifications } from '../trading/tradingStore.ts';
 
 export class ManualDepositService {
@@ -191,19 +192,27 @@ export class ManualDepositService {
 
     // 8. Outbound S2S Transactional Outbox Event (deposit.created / manual_deposit.created)
     try {
+      const hLinks = internalEventDispatcher.resolveHierarchy({ userId, tenantId });
       const outboxPayload = {
         id: newRequest.id,
         depositId: newRequest.id,
         transactionId: newRequest.id,
         clientCode: (userId || '').toUpperCase(),
         tenantId,
+        masterId: hLinks.masterId,
+        brokerId: hLinks.brokerId,
+        subBrokerId: hLinks.subBrokerId,
+        master_id: hLinks.masterId,
+        broker_id: hLinks.brokerId,
+        sub_broker_id: hLinks.subBrokerId,
         userId,
         clientId: userId,
         tradingUserId: userId,
         userName,
         amount: numAmount,
-        type: 'DEPOSIT',
-        status: 'PENDING',
+        type: 'DEPOSIT' as const,
+        status: 'PENDING' as const,
+        action: 'REQUESTED' as const,
         method: cleanMethod,
         paymentMethod: cleanMethod,
         reference: sanitizedUtr,
@@ -229,6 +238,9 @@ export class ManualDepositService {
         tenantId,
         payload: outboxPayload,
       }).catch(() => {});
+
+      // Dispatch authoritative fund.transaction_updated & deposit.created events
+      internalEventDispatcher.dispatchFundTransaction('deposit.created', outboxPayload).catch(() => {});
     } catch (outboxErr) {
       console.warn('[ManualDeposit] Outbox enqueue notice:', outboxErr);
     }
@@ -279,6 +291,7 @@ export class ManualDepositService {
     const adminId = actualAdmin?.userId || actualAdmin?.id || (typeof actualAdmin === 'string' ? actualAdmin : 'ADMIN');
     const adminName = actualAdmin?.fullName || actualAdmin?.full_name || 'Administrator';
     const adminRole = actualAdmin?.role || 'SUPER_ADMIN';
+    let balanceBefore = 0;
     let balanceAfter = 0;
 
     // Atomic execution inside database transaction
@@ -304,7 +317,7 @@ export class ManualDepositService {
 
       // 2. Lock the user's trading wallet row FOR UPDATE
       const wallet = await postgresWalletRepository.lockWalletForUpdate(reqTenant, request.user_id, client);
-      const balanceBefore = Number(wallet.available_balance || 0);
+      balanceBefore = Number(wallet.available_balance || 0);
       balanceAfter = Number((balanceBefore + depositAmount).toFixed(4));
 
       // 3. Atomically credit the wallet balance
@@ -431,6 +444,51 @@ export class ManualDepositService {
         },
         (client) => client.userId === approvedRequest.user_id
       );
+
+      // Authoritative real-time fund.transaction_updated and ledger.updated events
+      const hLinks = internalEventDispatcher.resolveHierarchy({ userId: approvedRequest.user_id, tenantId });
+      internalEventDispatcher.dispatchFundTransaction('deposit.approved', {
+        id: approvedRequest.id,
+        transactionId: approvedRequest.id,
+        tenantId: approvedRequest.tenant_id || tenantId,
+        userId: approvedRequest.user_id,
+        clientId: approvedRequest.user_id,
+        tradingUserId: approvedRequest.user_id,
+        amount: Number(approvedRequest.amount),
+        type: 'DEPOSIT',
+        status: 'APPROVED',
+        action: 'APPROVED',
+        balanceBefore,
+        balanceAfter,
+        approvedBy: adminId,
+        utr: approvedRequest.utr_number,
+        utr_number: approvedRequest.utr_number,
+        timestamp: new Date().toISOString(),
+        masterId: hLinks.masterId,
+        brokerId: hLinks.brokerId,
+        subBrokerId: hLinks.subBrokerId,
+      }).catch(() => {});
+
+      internalEventDispatcher.dispatchLedgerUpdated({
+        id: `led-${approvedRequest.id}`,
+        ledgerId: `led-${approvedRequest.id}`,
+        tenantId: approvedRequest.tenant_id || tenantId,
+        userId: approvedRequest.user_id,
+        clientId: approvedRequest.user_id,
+        tradingUserId: approvedRequest.user_id,
+        transactionId: approvedRequest.id,
+        type: 'CREDIT',
+        category: 'DEPOSIT',
+        amount: Number(approvedRequest.amount),
+        balanceBefore,
+        balanceAfter,
+        balance_before: balanceBefore,
+        balance_after: balanceAfter,
+        reference: `Manual Deposit Approved: ${approvedRequest.utr_number}`,
+        masterId: hLinks.masterId,
+        brokerId: hLinks.brokerId,
+        subBrokerId: hLinks.subBrokerId,
+      }).catch(() => {});
     } catch (postSyncErr) {
       console.warn('[ManualDeposit] Notice during post-approval notification:', postSyncErr);
     }
@@ -541,6 +599,29 @@ export class ManualDepositService {
           client.userId === rejectedRequest.user_id ||
           ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(client.role)
       );
+
+      // Authoritative real-time fund.transaction_updated event
+      const hLinks = internalEventDispatcher.resolveHierarchy({ userId: rejectedRequest.user_id, tenantId });
+      internalEventDispatcher.dispatchFundTransaction('deposit.rejected', {
+        id: rejectedRequest.id,
+        transactionId: rejectedRequest.id,
+        tenantId: rejectedRequest.tenant_id || tenantId,
+        userId: rejectedRequest.user_id,
+        clientId: rejectedRequest.user_id,
+        tradingUserId: rejectedRequest.user_id,
+        amount: Number(rejectedRequest.amount),
+        type: 'DEPOSIT',
+        status: 'REJECTED',
+        action: 'REJECTED',
+        reason: rejectedRequest.rejection_reason,
+        rejectedBy: adminId,
+        utr: rejectedRequest.utr_number,
+        utr_number: rejectedRequest.utr_number,
+        timestamp: new Date().toISOString(),
+        masterId: hLinks.masterId,
+        brokerId: hLinks.brokerId,
+        subBrokerId: hLinks.subBrokerId,
+      }).catch(() => {});
     } catch (notifErr) {
       console.warn('[ManualDeposit] Notice during post-rejection notification:', notifErr);
     }

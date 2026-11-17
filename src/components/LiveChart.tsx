@@ -224,7 +224,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
   const latestCandle = candles[candles.length - 1];
   const activeCandle = hoverData.candle || latestCandle;
   const activePrice = latestCandle ? latestCandle.close : instrument.lastPrice;
-  const isPositive = instrument.change >= 0;
+  const isPositive = (instrument?.change ?? 0) >= 0;
 
   // Ask / Bid calculations
   const askPrice = instrument.ask || Number((activePrice + 0.60).toFixed(2));
@@ -744,8 +744,8 @@ export const LiveChart: React.FC<LiveChartProps> = ({
                 }`}
               >
                 {isPositive ? '+' : ''}
-                {instrument.change.toFixed(2)} ({isPositive ? '+' : ''}
-                {instrument.changePercent.toFixed(2)}%)
+                {(instrument?.change ?? 0).toFixed(2)} ({isPositive ? '+' : ''}
+                {(instrument?.changePercent ?? 0).toFixed(2)}%)
               </div>
             </div>
           </div>

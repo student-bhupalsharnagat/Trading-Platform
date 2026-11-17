@@ -10,6 +10,9 @@ import {
 import { DEFAULT_INSTRUMENTS } from '../../data/defaultInstruments.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
 import { cleanNumeric } from '../utils/cleanNumeric.ts';
+import { marketDataGateway } from '../gateways/MarketDataGateway.ts';
+import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
+import { authoritativeTradingDataService } from '../services/authoritativeTradingDataService.ts';
 
 // Helper to generate realistic historical candle data
 export function generateHistoricalCandles(
@@ -490,8 +493,8 @@ export function resetTenantTradingState(tenantId: string): void {
   tenantOrders[normTenant] = JSON.parse(JSON.stringify(initialOrders));
 }
 
-// Background tick simulator - throttled to 3s (configurable) to prevent excessive bandwidth usage
-const TICK_INTERVAL_MS = Math.max(1000, parseInt(process.env.WS_TICK_INTERVAL_MS || '3000', 10));
+// Background tick simulator - 1-second continuous tick engine
+const TICK_INTERVAL_MS = Math.max(500, parseInt(process.env.WS_TICK_INTERVAL_MS || '1000', 10));
 
 const tickTimer = setInterval(() => {
   INSTRUMENTS = INSTRUMENTS.map((inst) => {
@@ -509,6 +512,16 @@ const tickTimer = setInterval(() => {
     const ask = Number((updatedPrice + (spread || 0.0001)).toFixed(decimals));
     const bid = Number((updatedPrice - (spread || 0.0001)).toFixed(decimals));
 
+    marketDataGateway.updatePrice(inst.symbol, {
+      symbol: inst.symbol,
+      ltp: updatedPrice,
+      bid,
+      ask,
+      change,
+      changePercent,
+      timestamp: Date.now(),
+    });
+
     return {
       ...inst,
       lastPrice: updatedPrice,
@@ -521,6 +534,32 @@ const tickTimer = setInterval(() => {
       trend: change >= 0 ? 'up' : 'down',
     };
   });
+
+  // Broadcast lightweight market.tick over WebSocket and SSE
+  for (const inst of INSTRUMENTS) {
+    const tick = {
+      symbol: inst.symbol,
+      ltp: inst.lastPrice,
+      change: inst.change,
+      changePercent: inst.changePercent,
+    };
+    tradingWebSocketServer.broadcastToAll('market.tick', tick);
+    internalEventDispatcher.broadcastSse('market.tick', tick);
+  }
+
+  // Broadcast positions.mtm_batch active position MTM deltas over WebSocket and SSE
+  try {
+    const deltas = authoritativeTradingDataService.computeActivePositionsMtmDeltas();
+    if (deltas.length > 0) {
+      const mtmPayload = {
+        deltas,
+        count: deltas.length,
+        timestamp: new Date().toISOString(),
+      };
+      tradingWebSocketServer.broadcastToAll('positions.mtm_batch', mtmPayload);
+      internalEventDispatcher.broadcastSse('positions.mtm_batch', mtmPayload);
+    }
+  } catch {}
 
   const totalClients = tradingWebSocketServer.getConnectedClientsCount();
 

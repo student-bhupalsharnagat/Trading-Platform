@@ -412,12 +412,12 @@ export const OrderWindow: React.FC<OrderWindowProps> = ({
                   </span>
                   <span
                     className={`font-mono font-bold flex items-center gap-0.5 text-xs ${
-                      activeInstrument.change >= 0 ? 'text-[#10B981]' : 'text-[#EF4444]'
+                      (activeInstrument?.change ?? 0) >= 0 ? 'text-[#10B981]' : 'text-[#EF4444]'
                     }`}
                   >
-                    {activeInstrument.change >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                    <span>{activeInstrument.change >= 0 ? '+' : ''}{activeInstrument.change.toFixed(2)}</span>
-                    <span>({activeInstrument.change >= 0 ? '+' : ''}{activeInstrument.changePercent.toFixed(2)}%)</span>
+                    {(activeInstrument?.change ?? 0) >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+                    <span>{(activeInstrument?.change ?? 0) >= 0 ? '+' : ''}{(activeInstrument?.change ?? 0).toFixed(2)}</span>
+                    <span>({(activeInstrument?.change ?? 0) >= 0 ? '+' : ''}{(activeInstrument?.changePercent ?? 0).toFixed(2)}%)</span>
                   </span>
                 </div>
               </div>

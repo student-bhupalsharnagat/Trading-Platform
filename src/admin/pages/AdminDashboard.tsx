@@ -35,10 +35,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (silent = false) => {
     try {
-      setLoading(true);
-      const res = await adminApi.getKPIs();
+      if (!silent) setLoading(true);
+      const res = await adminApi.getMetrics();
       setKpis(res.kpis);
       setCharts(res.charts);
 
@@ -46,29 +46,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       const clients = await adminApi.getClients();
       setRecentClients(clients.slice(0, 5));
     } catch (err: any) {
-      setError(err.message || 'Failed to load dashboard metrics');
+      if (!silent) setError(err.message || 'Failed to load dashboard metrics');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchDashboardData();
+    fetchDashboardData(false);
+  }, []);
+
+  // Fast silent polling loop (every 2.5s) for real-time KPI metrics
+  useEffect(() => {
+    const pollInterval = setInterval(() => {
+      fetchDashboardData(true);
+    }, 2500);
+
+    return () => clearInterval(pollInterval);
   }, []);
 
   // Real-time synchronization
   useEffect(() => {
-    const unsubOrder = subscribe('order.created', () => fetchDashboardData());
-    const unsubTrade = subscribe('trade.executed', () => fetchDashboardData());
-    const unsubWallet = subscribe('wallet.updated', () => fetchDashboardData());
-    const unsubPos = subscribe('position.updated', () => fetchDashboardData());
-    const unsubClient = subscribe('client.created', () => fetchDashboardData());
-    const unsubClientReg = subscribe('client.registered', () => fetchDashboardData());
-    const unsubClientAct = subscribe('client.activated', () => fetchDashboardData());
-    const unsubFund = subscribe('fund.requested', () => fetchDashboardData());
-    const unsubFundCreated = subscribe('fund.created', () => fetchDashboardData());
-    const unsubFundProc = subscribe('fund.processed', () => fetchDashboardData());
-    const unsubFundUpd = subscribe('fund.updated', () => fetchDashboardData());
+    const refreshSilent = () => fetchDashboardData(true);
+
+    const unsubOrder = subscribe('order.created', refreshSilent);
+    const unsubTrade = subscribe('trade.executed', refreshSilent);
+    const unsubWallet = subscribe('wallet.updated', refreshSilent);
+    const unsubPos = subscribe('position.updated', refreshSilent);
+    const unsubClient = subscribe('client.created', refreshSilent);
+    const unsubClientReg = subscribe('client.registered', refreshSilent);
+    const unsubClientAct = subscribe('client.activated', refreshSilent);
+    const unsubBrokerAdded = subscribe('broker.added', refreshSilent);
+    const unsubFund = subscribe('fund.requested', refreshSilent);
+    const unsubFundCreated = subscribe('fund.created', refreshSilent);
+    const unsubFundProc = subscribe('fund.processed', refreshSilent);
+    const unsubFundUpd = subscribe('fund.updated', refreshSilent);
+    const unsubFundTxUpd = subscribe('fund.transaction_updated', refreshSilent);
+    const unsubLedgerUpd = subscribe('ledger.updated', refreshSilent);
+    const unsubRiskAlert = subscribe('risk.alert_triggered', refreshSilent);
 
     return () => {
       unsubOrder();
@@ -78,10 +93,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       unsubClient();
       unsubClientReg();
       unsubClientAct();
+      unsubBrokerAdded();
       unsubFund();
       unsubFundCreated();
       unsubFundProc();
       unsubFundUpd();
+      unsubFundTxUpd();
+      unsubLedgerUpd();
+      unsubRiskAlert();
     };
   }, [subscribe]);
 
@@ -122,7 +141,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
         {/* Quick Actions */}
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={fetchDashboardData}
+            onClick={() => fetchDashboardData(false)}
             disabled={loading}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold shadow-xs transition-colors cursor-pointer"
             title="Refresh Real-time KPIs"
@@ -171,56 +190,56 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Total Masters"
-          value={loading ? '...' : kpis?.totalMasters ?? 0}
-          change="+1 this month"
+          value={loading ? '...' : (kpis?.totalMasters ?? 0)}
+          change={(kpis as any)?.metrics?.totalMasters?.change ?? (kpis as any)?.stats?.totalMasters?.change ?? '+1 this month'}
           isPositive={true}
           icon={<Crown className="w-5 h-5 text-purple-400" />}
         />
         <StatCard
           title="Total Brokers"
-          value={loading ? '...' : kpis?.totalBrokers ?? 0}
-          change="+3 this month"
+          value={loading ? '...' : (kpis?.totalBrokers ?? 0)}
+          change={(kpis as any)?.metrics?.totalBrokers?.change ?? (kpis as any)?.stats?.totalBrokers?.change ?? '+3 this month'}
           isPositive={true}
           icon={<Briefcase className="w-5 h-5 text-blue-400" />}
         />
         <StatCard
           title="Total Clients"
-          value={loading ? '...' : kpis?.totalClients ?? 0}
+          value={loading ? '...' : (kpis?.totalClients ?? 0)}
           subtitle={`${kpis?.activeClients ?? 0} active now`}
-          change="+12% growth"
+          change={(kpis as any)?.metrics?.totalUsers?.change ?? (kpis as any)?.metrics?.totalClients?.change ?? (kpis as any)?.stats?.change ?? '+12% growth'}
           isPositive={true}
           icon={<Users className="w-5 h-5 text-emerald-400" />}
         />
         <StatCard
           title="Commission Earned"
           value={loading ? '...' : formatCurrency(kpis?.commissionEarned)}
-          change="+8.4% vs last week"
+          change={(kpis as any)?.metrics?.commissionEarned?.change ?? (kpis as any)?.stats?.commission?.change ?? '+8.4% vs last week'}
           isPositive={true}
           icon={<Coins className="w-5 h-5 text-amber-400" />}
         />
         <StatCard
           title="Today's Turnover"
           value={loading ? '...' : formatCurrency(kpis?.todayTurnover)}
-          change="+15.2%"
+          change={(kpis as any)?.metrics?.todayTurnover?.change ?? (kpis as any)?.stats?.turnover?.change ?? '+15.2%'}
           isPositive={true}
           icon={<Activity className="w-5 h-5 text-cyan-400" />}
         />
         <StatCard
           title="Total P&L"
           value={loading ? '...' : formatCurrency(kpis?.totalPnL)}
-          change="Realized net"
+          change={(kpis as any)?.metrics?.totalPnL?.change ?? (kpis as any)?.stats?.pnl?.change ?? 'Realized net'}
           isPositive={true}
           icon={<TrendingUp className="w-5 h-5 text-emerald-400" />}
         />
         <StatCard
           title="Pending KYC"
-          value={loading ? '...' : kpis?.pendingKyc ?? 0}
+          value={loading ? '...' : (kpis?.pendingKyc ?? 0)}
           subtitle="Verification pipeline"
           icon={<ShieldAlert className="w-5 h-5 text-orange-400" />}
         />
         <StatCard
           title="Open Tickets"
-          value={loading ? '...' : kpis?.openTickets ?? 0}
+          value={loading ? '...' : (kpis?.openTickets ?? 0)}
           subtitle="Support desk"
           icon={<Headphones className="w-5 h-5 text-blue-400" />}
         />

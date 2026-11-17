@@ -32,10 +32,12 @@ export const AdminRiskPage: React.FC<AdminRiskPageProps> = ({ onNavigate }) => {
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const fetchRiskData = async () => {
+  const fetchRiskData = async (silent = false) => {
     try {
-      setLoading(true);
-      setError(null);
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
       const [summaryRes, positionsRes] = await Promise.all([
         adminApi.getRiskSummary(),
         adminApi.getRiskPositions(),
@@ -44,14 +46,23 @@ export const AdminRiskPage: React.FC<AdminRiskPageProps> = ({ onNavigate }) => {
       setRiskData((summaryRes as any)?.data || summaryRes || null);
       setPositions((positionsRes as any)?.data || positionsRes || []);
     } catch (err: any) {
-      setError(err.message || 'Failed to load risk metrics');
+      if (!silent) setError(err.message || 'Failed to load risk metrics');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchRiskData();
+    fetchRiskData(false);
+  }, []);
+
+  // 2.5s silent polling loop for live RMS metrics & alerts
+  useEffect(() => {
+    const pollInterval = setInterval(() => {
+      fetchRiskData(true);
+    }, 2500);
+
+    return () => clearInterval(pollInterval);
   }, []);
 
   // Real-time subscriptions for RMS
@@ -97,13 +108,68 @@ export const AdminRiskPage: React.FC<AdminRiskPageProps> = ({ onNavigate }) => {
 
     const unsubBreach = subscribe('risk.margin_breach', (breachPayload: any) => {
       setError(`RMS ALERT: Margin breach detected for client ${breachPayload.userId}! Margin utilization exceeded 100%.`);
-      fetchRiskData();
+      fetchRiskData(true);
+    });
+
+    const unsubAlert = subscribe('risk.alert_triggered', (alertPayload: any) => {
+      if (alertPayload?.reason || alertPayload?.message) {
+        setError(`RMS ALERT: ${alertPayload.reason || alertPayload.message}`);
+      }
+      fetchRiskData(true);
+    });
+
+    const unsubMtmBatch = subscribe('positions.mtm_batch', (batch: any) => {
+      const deltas = Array.isArray(batch) ? batch : (batch?.deltas || batch?.positions || []);
+      if (!deltas || deltas.length === 0) return;
+      const deltaMap = new Map<string, { ltp: number; unrealizedPnL: number }>();
+      deltas.forEach((d: any) => {
+        const id = d.positionId || d.id;
+        if (id) deltaMap.set(id, { ltp: d.ltp, unrealizedPnL: d.unrealizedPnL });
+      });
+
+      setPositions((prev) =>
+        prev.map((pos) => {
+          const delta = deltaMap.get(pos.id);
+          if (delta) {
+            return {
+              ...pos,
+              currentPrice: delta.ltp,
+              unrealizedPnl: delta.unrealizedPnL,
+            };
+          }
+          return pos;
+        })
+      );
+    });
+
+    const unsubSingleTick = subscribe('market.tick', (tick: any) => {
+      if (!tick || !tick.symbol) return;
+      setPositions((prev) =>
+        prev.map((pos) => {
+          if (pos.symbol === tick.symbol) {
+            const ltp = tick.ltp;
+            const avg = Number(pos.averagePrice || (pos as any).avgPrice || 0);
+            const qty = Number(pos.quantity || (pos as any).qty || 0);
+            const isBuy = pos.side === 'BUY';
+            const pnl = isBuy ? (ltp - avg) * qty : (avg - ltp) * qty;
+            return {
+              ...pos,
+              currentPrice: ltp,
+              unrealizedPnl: Number(pnl.toFixed(2)),
+            };
+          }
+          return pos;
+        })
+      );
     });
 
     return () => {
       unsubPos();
       unsubTicks();
       unsubBreach();
+      unsubAlert();
+      unsubMtmBatch();
+      unsubSingleTick();
     };
   }, [subscribe]);
 
@@ -182,7 +248,7 @@ export const AdminRiskPage: React.FC<AdminRiskPageProps> = ({ onNavigate }) => {
         </div>
 
         <button
-          onClick={fetchRiskData}
+          onClick={() => fetchRiskData(false)}
           className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700/60 text-xs font-semibold text-slate-300 flex items-center gap-1.5 self-start sm:self-auto"
         >
           <RefreshCw className={`w-3.5 h-3.5 text-blue-400 ${loading ? 'animate-spin' : ''}`} />

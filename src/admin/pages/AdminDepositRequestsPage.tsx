@@ -78,9 +78,9 @@ export const AdminDepositRequestsPage: React.FC<AdminDepositRequestsPageProps> =
   });
   const [settingsSaving, setSettingsSaving] = useState(false);
 
-  const fetchRequests = async () => {
+  const fetchRequests = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setError(null);
       const res = await adminApi.getDepositRequests({
         status: activeTab === 'ALL' || activeTab === 'SETTINGS' ? undefined : activeTab,
@@ -89,9 +89,9 @@ export const AdminDepositRequestsPage: React.FC<AdminDepositRequestsPageProps> =
       });
       setRequests(res.requests || []);
     } catch (err: any) {
-      setError(err.message || 'Failed to load deposit requests');
+      if (!silent) setError(err.message || 'Failed to load deposit requests');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -119,26 +119,39 @@ export const AdminDepositRequestsPage: React.FC<AdminDepositRequestsPageProps> =
   const { isConnected, subscribe } = useAdminRealtime();
 
   useEffect(() => {
-    fetchRequests();
+    fetchRequests(false);
     fetchSettings();
   }, [activeTab]);
 
+  // Fast 2.5s silent poll
   useEffect(() => {
-    const unsub1 = subscribe('manual_deposit.created', () => {
-      fetchRequests();
-    });
-    const unsub2 = subscribe('manual_deposit.approved', () => {
-      fetchRequests();
-    });
-    const unsub3 = subscribe('manual_deposit.rejected', () => {
-      fetchRequests();
-    });
+    const pollInterval = setInterval(() => {
+      fetchRequests(true);
+    }, 2500);
+
+    return () => clearInterval(pollInterval);
+  }, [activeTab, searchQuery]);
+
+  useEffect(() => {
+    const handleUpdate = () => fetchRequests(true);
+    const unsub1 = subscribe('manual_deposit.created', handleUpdate);
+    const unsub2 = subscribe('manual_deposit.approved', handleUpdate);
+    const unsub3 = subscribe('manual_deposit.rejected', handleUpdate);
+    const unsub4 = subscribe('fund.transaction_updated', handleUpdate);
+    const unsub5 = subscribe('fund.updated', handleUpdate);
+    const unsub6 = subscribe('fund.requested', handleUpdate);
+    const unsub7 = subscribe('fund.processed', handleUpdate);
+
     return () => {
       unsub1();
       unsub2();
       unsub3();
+      unsub4();
+      unsub5();
+      unsub6();
+      unsub7();
     };
-  }, [subscribe]);
+  }, [subscribe, activeTab, searchQuery]);
 
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard?.writeText(text);
@@ -308,7 +321,7 @@ export const AdminDepositRequestsPage: React.FC<AdminDepositRequestsPageProps> =
         <div className="flex items-center gap-2.5">
           <button
             type="button"
-            onClick={fetchRequests}
+            onClick={() => fetchRequests(false)}
             disabled={loading}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-[#0E1726] hover:bg-[#152338] text-slate-300 border border-[#1E2E44] transition-all cursor-pointer"
           >
@@ -655,7 +668,7 @@ export const AdminDepositRequestsPage: React.FC<AdminDepositRequestsPageProps> =
               <p className="text-sm font-bold">{error}</p>
               <button
                 type="button"
-                onClick={fetchRequests}
+                onClick={() => fetchRequests(false)}
                 className="mt-3 px-3 py-1.5 bg-[#142032] text-xs text-white rounded-lg hover:bg-[#1E2E44]"
               >
                 Retry

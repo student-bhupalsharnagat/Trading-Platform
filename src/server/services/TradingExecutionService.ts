@@ -102,6 +102,14 @@ export class TradingExecutionService {
     const emergencyState = emergencyStateCache.get(tenantId);
     const cachedConfig = tenantConfigCache.get(tenantId);
     if (emergencyState.tradingHalted || cachedConfig?.tradingEnabled === false) {
+      internalEventDispatcher.dispatchRiskAlert({
+        tenantId,
+        userId,
+        alertType: 'BLOCKED_ORDER',
+        severity: 'CRITICAL',
+        message: `Order rejected: Trading is temporarily halted by Central Admin emergency control for ${symbol}.`,
+        symbol,
+      }).catch(() => {});
       const err = new Error('Trading is temporarily halted by Central Admin emergency control.');
       (err as any).statusCode = 403;
       (err as any).code = 'TRADING_HALTED';
@@ -211,6 +219,17 @@ export class TradingExecutionService {
       const pendingResult = await pgDb.transaction(async (client: DbClient) => {
         const wallet = await postgresWalletRepository.lockWalletForUpdate(tenantId, userId, client);
         if (wallet.available_balance < requiredMargin) {
+          internalEventDispatcher.dispatchRiskAlert({
+            tenantId,
+            userId,
+            alertType: 'MARGIN_SHORTFALL',
+            severity: 'HIGH',
+            message: `Insufficient margin for pending order on ${symbol}. Required ₹${requiredMargin.toLocaleString('en-IN')}, available ₹${wallet.available_balance.toLocaleString('en-IN')}.`,
+            requiredMargin,
+            availableMargin: wallet.available_balance,
+            shortfall: requiredMargin - wallet.available_balance,
+            symbol,
+          }).catch(() => {});
           const err = new Error(
             `Insufficient margin. Required ₹${requiredMargin.toLocaleString('en-IN')}, available ₹${wallet.available_balance.toLocaleString('en-IN')}.`
           );
@@ -345,6 +364,18 @@ export class TradingExecutionService {
         const excessMargin = excessLots * (requiredMargin / lots);
 
         if (wallet.available_balance + marginReleased + realizedPnL < excessMargin) {
+          const avail = wallet.available_balance + marginReleased + realizedPnL;
+          internalEventDispatcher.dispatchRiskAlert({
+            tenantId,
+            userId,
+            alertType: 'MARGIN_SHORTFALL',
+            severity: 'HIGH',
+            message: `Insufficient margin for reversed position on ${symbol}. Required ₹${excessMargin.toLocaleString('en-IN')}, available ₹${avail.toLocaleString('en-IN')}.`,
+            requiredMargin: excessMargin,
+            availableMargin: avail,
+            shortfall: excessMargin - avail,
+            symbol,
+          }).catch(() => {});
           const err = new Error(`Insufficient margin for reversed position.`);
           (err as any).statusCode = 400;
           (err as any).code = 'INSUFFICIENT_MARGIN';
@@ -589,9 +620,16 @@ export class TradingExecutionService {
       const userRecord = db.findUserByUserId(userId);
       const clientCode = clientMapping?.external_client_code || userRecord?.user_id.toUpperCase() || userId.toUpperCase();
       const clientName = userRecord?.full_name || userId;
+      const hLinks = internalEventDispatcher.resolveHierarchy(userRecord || { userId, tenantId });
 
       const tradePayload = {
         tenantId,
+        masterId: hLinks.masterId,
+        brokerId: hLinks.brokerId,
+        subBrokerId: hLinks.subBrokerId,
+        master_id: hLinks.masterId,
+        broker_id: hLinks.brokerId,
+        sub_broker_id: hLinks.subBrokerId,
         userId,
         clientId: userId,
         tradingUserId: userId,
@@ -776,6 +814,23 @@ export class TradingExecutionService {
         };
         addTenantLedgerEntry(tenantId, ledgerItem);
         jsonLedgerRepository.createEntry(ledgerItem).catch(() => {});
+        internalEventDispatcher.dispatchLedgerUpdated({
+          id: ledgerItem.id,
+          ledgerId: ledgerItem.id,
+          tenantId,
+          userId,
+          clientId: userId,
+          tradingUserId: userId,
+          transactionId: result.newTrade.id,
+          type: pnlNum >= 0 ? 'CREDIT' : 'DEBIT',
+          category: 'TRADE_PNL',
+          amount: Math.abs(pnlNum),
+          balanceBefore: result.updatedWallet.available_balance - pnlNum,
+          balanceAfter: result.updatedWallet.available_balance,
+          balance_before: result.updatedWallet.available_balance - pnlNum,
+          balance_after: result.updatedWallet.available_balance,
+          reference: `Trade PnL for ${inst.symbol}`,
+        }).catch(() => {});
       }
 
       // Synchronize in-memory positions list
@@ -1227,6 +1282,23 @@ export class TradingExecutionService {
         };
         addTenantLedgerEntry(tenantId, ledgerItem);
         jsonLedgerRepository.createEntry(ledgerItem).catch(() => {});
+        internalEventDispatcher.dispatchLedgerUpdated({
+          id: ledgerItem.id,
+          ledgerId: ledgerItem.id,
+          tenantId,
+          userId,
+          clientId: userId,
+          tradingUserId: userId,
+          transactionId: result.closeTrade.id,
+          type: pnlNum >= 0 ? 'CREDIT' : 'DEBIT',
+          category: 'TRADE_PNL',
+          amount: Math.abs(pnlNum),
+          balanceBefore: result.updatedWallet.available_balance - pnlNum,
+          balanceAfter: result.updatedWallet.available_balance,
+          balance_before: result.updatedWallet.available_balance - pnlNum,
+          balance_after: result.updatedWallet.available_balance,
+          reference: `Position square-off ${result.pos.instrument_id} PnL`,
+        }).catch(() => {});
       }
     } catch {}
 
@@ -1255,7 +1327,29 @@ export class TradingExecutionService {
     tradingWebSocketServer.broadcastToTenant(tenantId, 'order.created', result.closeOrder, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
     tradingWebSocketServer.broadcastToTenant(tenantId, 'trade.executed', result.closeTrade, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
 
-    // Dispatch Central Admin events
+    // Dispatch Central Admin & real-time events
+    const userRec = db.findUserByUserId(userId);
+    const closeHL = internalEventDispatcher.resolveHierarchy(userRec || { userId, tenantId });
+    internalEventDispatcher.dispatchTradeExecuted({
+      tenantId,
+      userId,
+      clientId: userId,
+      tradingUserId: userId,
+      orderId: result.closeOrder?.id || `ORD-CLS-${Date.now()}`,
+      tradeId: result.closeTrade.id,
+      symbol: result.pos.instrument_id || (result.pos as any).symbol,
+      side: (result.closeOrder?.side as any) || 'SELL',
+      quantity: Math.abs(Number(result.closeOrder?.quantity || 0)),
+      executionPrice: Number(result.closeTrade.execution_price || 0),
+      executionValue: Number(result.closeTrade.execution_value || 0),
+      turnover: Number(result.closeTrade.execution_value || 0),
+      realizedPnl: Number(result.closeTrade?.realized_pnl || 0),
+      executedAt: result.closeTrade.executed_at,
+      masterId: closeHL.masterId,
+      brokerId: closeHL.brokerId,
+      subBrokerId: closeHL.subBrokerId,
+    }).catch(() => {});
+
     internalEventDispatcher.dispatchPositionUpdated(result.closedPositionPayload).catch((e) =>
       console.error('[Event] position.updated dispatch error on close:', e)
     );

@@ -15,6 +15,7 @@ import { transactionalOutboxService } from './TransactionalOutboxService.ts';
 import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
 import { auditService } from './auditService.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
+import { marketDataGateway } from '../gateways/MarketDataGateway.ts';
 import {
   findInstrument,
   getTenantWallet,
@@ -845,7 +846,8 @@ export class AuthoritativeTradingDataService {
           avgPrice = inst ? cleanNumeric(inst.lastPrice || inst.openPrice) : 1000;
         }
 
-        const ltp = inst ? cleanNumeric(inst.lastPrice) : avgPrice;
+        const liveLtp = marketDataGateway.getLtp(sym);
+        const ltp = liveLtp !== undefined ? cleanNumeric(liveLtp) : (inst ? cleanNumeric(inst.lastPrice) : avgPrice);
         const currentPrice = ltp;
 
         const unrealizedPnl = side === 'BUY'
@@ -903,6 +905,9 @@ export class AuthoritativeTradingDataService {
           margin: Number(usedMargin.toFixed(2)),
           unrealized_pnl: Number(unrealizedPnl.toFixed(2)),
           unrealizedPnl: Number(unrealizedPnl.toFixed(2)),
+          unrealizedPnL: Number(unrealizedPnl.toFixed(2)),
+          mtmPnl: Number(unrealizedPnl.toFixed(2)),
+          mtm_pnl: Number(unrealizedPnl.toFixed(2)),
           pnl: Number(unrealizedPnl.toFixed(2)),
           unrealized_pnl_percentage: Number(unrealizedPnlPct.toFixed(2)),
           realized_pnl: Number(realizedPnl.toFixed(2)),
@@ -970,7 +975,8 @@ export class AuthoritativeTradingDataService {
             avgPrice = inst ? cleanNumeric(inst.lastPrice || inst.openPrice) : 1000;
           }
 
-          const ltp = inst ? cleanNumeric(inst.lastPrice) : avgPrice;
+          const liveLtp = marketDataGateway.getLtp(sym);
+          const ltp = liveLtp !== undefined ? cleanNumeric(liveLtp) : (inst ? cleanNumeric(inst.lastPrice) : avgPrice);
           const currentPrice = ltp;
 
           const unrealizedPnl = side === 'BUY'
@@ -1028,6 +1034,9 @@ export class AuthoritativeTradingDataService {
             margin: Number(usedMargin.toFixed(2)),
             unrealized_pnl: Number(unrealizedPnl.toFixed(2)),
             unrealizedPnl: Number(unrealizedPnl.toFixed(2)),
+            unrealizedPnL: Number(unrealizedPnl.toFixed(2)),
+            mtmPnl: Number(unrealizedPnl.toFixed(2)),
+            mtm_pnl: Number(unrealizedPnl.toFixed(2)),
             pnl: Number(unrealizedPnl.toFixed(2)),
             unrealized_pnl_percentage: Number(unrealizedPnlPct.toFixed(2)),
             realized_pnl: Number(realizedPnl.toFixed(2)),
@@ -1071,10 +1080,11 @@ export class AuthoritativeTradingDataService {
 
         const inst = findInstrument(p.symbol);
         const avgPrice = cleanNumeric(p.avgPrice || (p as any).average_price || (p as any).averagePrice || (inst?.lastPrice || 1000));
-        const ltp = inst ? cleanNumeric(inst.lastPrice) : cleanNumeric(p.ltp || (p as any).current_price || (p as any).currentPrice || avgPrice);
+        const liveLtp = marketDataGateway.getLtp(p.symbol);
+        const ltp = liveLtp !== undefined ? cleanNumeric(liveLtp) : (inst ? cleanNumeric(inst.lastPrice) : cleanNumeric(p.ltp || (p as any).current_price || (p as any).currentPrice || avgPrice));
         const side = (p.type || (qty >= 0 ? 'BUY' : 'SELL')).toUpperCase() as 'BUY' | 'SELL';
         const absQty = Math.abs(qty);
-        const pnl = Number(p.pnl ?? (side === 'BUY' ? (ltp - avgPrice) * absQty : (avgPrice - ltp) * absQty));
+        const pnl = Number(side === 'BUY' ? (ltp - avgPrice) * absQty : (avgPrice - ltp) * absQty);
         const totalInvested = avgPrice * absQty;
         const unrealizedPnlPct = totalInvested > 0 ? (pnl / totalInvested) * 100 : 0;
         const marginUsed = cleanNumeric((p as any).margin_used || (p as any).marginUsed || (p as any).usedMargin || ((inst?.intraday || 30000) * (p.lots || 1)));
@@ -1119,6 +1129,9 @@ export class AuthoritativeTradingDataService {
           margin: Number(marginUsed.toFixed(2)),
           unrealized_pnl: Number(pnl.toFixed(2)),
           unrealizedPnl: Number(pnl.toFixed(2)),
+          unrealizedPnL: Number(pnl.toFixed(2)),
+          mtmPnl: Number(pnl.toFixed(2)),
+          mtm_pnl: Number(pnl.toFixed(2)),
           pnl: Number(pnl.toFixed(2)),
           unrealized_pnl_percentage: Number(unrealizedPnlPct.toFixed(2)),
           realized_pnl: 0,
@@ -1640,11 +1653,18 @@ export class AuthoritativeTradingDataService {
     });
 
     const eventType = type === 'DEPOSIT' ? 'deposit.created' : 'withdrawal.created';
+    const hLinks = this.resolveHierarchyLinks({ userId: resolvedUserId, tenantId });
     const fundPayload = {
       id: txId,
       transactionId: txId,
       clientCode: resolvedUserId.toUpperCase(),
       tenantId,
+      masterId: hLinks.masterId,
+      brokerId: hLinks.brokerId,
+      subBrokerId: hLinks.subBrokerId,
+      master_id: hLinks.masterId,
+      broker_id: hLinks.brokerId,
+      sub_broker_id: hLinks.subBrokerId,
       userId: resolvedUserId,
       clientId: resolvedUserId,
       tradingUserId: resolvedUserId,
@@ -1702,6 +1722,12 @@ export class AuthoritativeTradingDataService {
       tenantId,
       'fund.requested',
       fundPayload,
+      (ws) => ws.userId === resolvedUserId || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
+    );
+    tradingWebSocketServer.broadcastToTenant(
+      tenantId,
+      'fund.transaction_updated',
+      { ...fundPayload, action: 'REQUESTED' },
       (ws) => ws.userId === resolvedUserId || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
     );
 
@@ -1770,17 +1796,25 @@ export class AuthoritativeTradingDataService {
       }
 
       const eventType = tx.transaction_type === 'DEPOSIT' ? 'deposit.rejected' : 'withdrawal.rejected';
+      const hLinks = this.resolveHierarchyLinks({ userId: tx.user_id, tenantId });
       const rejectPayload = {
         id: txId,
         transactionId: txId,
         clientCode: tx.user_id.toUpperCase(),
         tenantId,
+        masterId: hLinks.masterId,
+        brokerId: hLinks.brokerId,
+        subBrokerId: hLinks.subBrokerId,
+        master_id: hLinks.masterId,
+        broker_id: hLinks.brokerId,
+        sub_broker_id: hLinks.subBrokerId,
         userId: tx.user_id,
         clientId: tx.user_id,
         tradingUserId: tx.user_id,
         amount: Number(tx.amount),
         type: tx.transaction_type,
         status: 'REJECTED' as const,
+        action: 'REJECTED' as const,
         method: tx.payment_method || 'BANK_TRANSFER',
         paymentMethod: tx.payment_method || 'BANK_TRANSFER',
         reference: tx.reference_id || txId,
@@ -1822,6 +1856,12 @@ export class AuthoritativeTradingDataService {
       tradingWebSocketServer.broadcastToTenant(
         tenantId,
         'fund.processed',
+        rejectPayload,
+        (ws) => ws.userId === tx.user_id || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
+      );
+      tradingWebSocketServer.broadcastToTenant(
+        tenantId,
+        'fund.transaction_updated',
         rejectPayload,
         (ws) => ws.userId === tx.user_id || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
       );
@@ -1896,17 +1936,25 @@ export class AuthoritativeTradingDataService {
       );
 
       const eventType = tx.transaction_type === 'DEPOSIT' ? 'deposit.approved' : 'withdrawal.approved';
+      const hLinks = this.resolveHierarchyLinks({ userId: tx.user_id, tenantId });
       const approvePayload = {
         id: txId,
         transactionId: txId,
         clientCode: tx.user_id.toUpperCase(),
         tenantId,
+        masterId: hLinks.masterId,
+        brokerId: hLinks.brokerId,
+        subBrokerId: hLinks.subBrokerId,
+        master_id: hLinks.masterId,
+        broker_id: hLinks.brokerId,
+        sub_broker_id: hLinks.subBrokerId,
         userId: tx.user_id,
         clientId: tx.user_id,
         tradingUserId: tx.user_id,
         amount: Number(tx.amount),
         type: tx.transaction_type,
         status: 'APPROVED' as const,
+        action: 'APPROVED' as const,
         method: tx.payment_method || 'BANK_TRANSFER',
         paymentMethod: tx.payment_method || 'BANK_TRANSFER',
         reference: tx.reference_id || txId,
@@ -2016,6 +2064,27 @@ export class AuthoritativeTradingDataService {
       console.warn(`[Event] ${approvalResult.eventType} dispatch warning:`, e)
     );
 
+    internalEventDispatcher.dispatchLedgerUpdated({
+      id: `led-${tx.id}`,
+      ledgerId: `led-${tx.id}`,
+      tenantId,
+      userId: tx.user_id,
+      clientId: tx.user_id,
+      tradingUserId: tx.user_id,
+      transactionId: tx.id,
+      type: tx.transaction_type === 'DEPOSIT' ? 'CREDIT' : 'DEBIT',
+      category: tx.transaction_type,
+      amount: Number(tx.amount),
+      balanceBefore: approvalResult.approvePayload.balanceBefore,
+      balanceAfter: approvalResult.approvePayload.balanceAfter,
+      balance_before: approvalResult.approvePayload.balanceBefore,
+      balance_after: approvalResult.approvePayload.balanceAfter,
+      reference: `Admin Approved ${tx.transaction_type} [${tx.reference_id || tx.id}]`,
+      masterId: approvalResult.approvePayload.masterId,
+      brokerId: approvalResult.approvePayload.brokerId,
+      subBrokerId: approvalResult.approvePayload.subBrokerId,
+    }).catch((e) => console.warn('[Event] ledger.updated dispatch warning:', e));
+
     internalEventDispatcher.dispatchWalletUpdated(approvalResult.walletPayload).catch((e) =>
       console.warn('[Event] wallet.updated dispatch warning:', e)
     );
@@ -2036,6 +2105,12 @@ export class AuthoritativeTradingDataService {
     tradingWebSocketServer.broadcastToTenant(
       tenantId,
       'fund.processed',
+      approvalResult.approvePayload,
+      (ws) => ws.userId === tx.user_id || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
+    );
+    tradingWebSocketServer.broadcastToTenant(
+      tenantId,
+      'fund.transaction_updated',
       approvalResult.approvePayload,
       (ws) => ws.userId === tx.user_id || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
     );
@@ -2105,11 +2180,37 @@ export class AuthoritativeTradingDataService {
 
       if (res.rows && res.rows.length > 0) {
         const total = parseInt(res.rows[0].total_count, 10) || res.rows.length;
+
+        // Compute aggregated live unrealized PnL and used margin per client from open positions
+        const openPositionsRes = await this.getPositions(cleanTenant, { status: 'OPEN', limit: 1000 }).catch(() => ({ positions: [] }));
+        const clientPnlMap = new Map<string, number>();
+        const clientMarginMap = new Map<string, number>();
+
+        for (const pos of (openPositionsRes.positions || [])) {
+          const uId = String(pos.user_id || pos.userId || '').toLowerCase();
+          const cId = String(pos.clientId || pos.client_id || '').toLowerCase();
+          const pnl = Number(pos.unrealizedPnL ?? pos.unrealized_pnl ?? pos.pnl ?? 0);
+          const margin = Number(pos.usedMargin ?? pos.margin_used ?? 0);
+
+          if (uId) {
+            clientPnlMap.set(uId, (clientPnlMap.get(uId) || 0) + pnl);
+            clientMarginMap.set(uId, (clientMarginMap.get(uId) || 0) + margin);
+          }
+          if (cId && cId !== uId) {
+            clientPnlMap.set(cId, (clientPnlMap.get(cId) || 0) + pnl);
+            clientMarginMap.set(cId, (clientMarginMap.get(cId) || 0) + margin);
+          }
+        }
+
         const pagedClients = res.rows.map((row: any) => {
           const availBal = Number(row.available_balance || 0);
           const blockedBal = Number(row.blocked_balance || 0);
-          const usedMargin = Number(row.used_margin || 0);
-          const equity = availBal + usedMargin;
+          const rowUid = String(row.user_id || '').toLowerCase();
+          const rowId = String(row.id || '').toLowerCase();
+          const usedMargin = clientMarginMap.get(rowUid) ?? clientMarginMap.get(rowId) ?? Number(row.used_margin || 0);
+          const unrealizedPnL = Number((clientPnlMap.get(rowUid) ?? clientPnlMap.get(rowId) ?? 0).toFixed(2));
+          const walletBalance = availBal;
+          const totalEquity = Number((walletBalance + unrealizedPnL).toFixed(2));
           const hLinks = this.resolveHierarchyLinks(row);
 
           return {
@@ -2137,12 +2238,18 @@ export class AuthoritativeTradingDataService {
             balance: availBal,
             ledgerBalance: availBal,
             available_balance: availBal,
-            wallet_balance: availBal,
+            walletBalance,
+            wallet_balance: walletBalance,
             blocked_balance: blockedBal,
             used_margin: usedMargin,
             marginUsed: usedMargin,
-            marginAvailable: equity,
-            equity,
+            unrealizedPnL,
+            unrealized_pnl: unrealizedPnL,
+            mtmPnl: unrealizedPnL,
+            totalEquity,
+            total_equity: totalEquity,
+            marginAvailable: totalEquity,
+            equity: totalEquity,
           };
         });
 
@@ -2185,11 +2292,33 @@ export class AuthoritativeTradingDataService {
     }
 
     const total = clients.length;
+    const allMemPos = getAllTenantPositions();
+    const memClientPnlMap = new Map<string, number>();
+    for (const item of allMemPos) {
+      const p = item.position;
+      const uId = String(p.userId || '').toLowerCase();
+      const qty = Math.abs(cleanNumeric(p.qty || (p as any).quantity || 0));
+      if (qty === 0) continue;
+      const livePrice = marketDataGateway.getPrice(p.symbol);
+      const inst = findInstrument(p.symbol);
+      const avgPrice = cleanNumeric(p.avgPrice || (p as any).average_price || 0);
+      const ltp = livePrice?.ltp ?? (inst ? cleanNumeric(inst.lastPrice) : avgPrice);
+      const side = (p.type || (qty >= 0 ? 'BUY' : 'SELL')).toUpperCase();
+      const pnl = side === 'BUY' ? (ltp - avgPrice) * qty : (avgPrice - ltp) * qty;
+      if (uId) {
+        memClientPnlMap.set(uId, (memClientPnlMap.get(uId) || 0) + pnl);
+      }
+    }
+
     const pagedClients = clients.slice(offset, offset + limit).map((c) => {
       const availBal = c.demo_balance !== undefined ? c.demo_balance : 1000000;
       const blockedBal = 0;
       const usedMargin = 0;
-      const equity = availBal;
+      const cUid = String(c.user_id || '').toLowerCase();
+      const cId = String(c.id || '').toLowerCase();
+      const unrealizedPnL = Number((memClientPnlMap.get(cUid) ?? memClientPnlMap.get(cId) ?? 0).toFixed(2));
+      const walletBalance = availBal;
+      const totalEquity = Number((walletBalance + unrealizedPnL).toFixed(2));
       const hLinks = this.resolveHierarchyLinks(c);
 
       return {
@@ -2217,12 +2346,18 @@ export class AuthoritativeTradingDataService {
         balance: availBal,
         ledgerBalance: availBal,
         available_balance: availBal,
-        wallet_balance: availBal,
+        walletBalance,
+        wallet_balance: walletBalance,
         blocked_balance: blockedBal,
         used_margin: usedMargin,
         marginUsed: usedMargin,
-        marginAvailable: equity,
-        equity,
+        unrealizedPnL,
+        unrealized_pnl: unrealizedPnL,
+        mtmPnl: unrealizedPnL,
+        totalEquity,
+        total_equity: totalEquity,
+        marginAvailable: totalEquity,
+        equity: totalEquity,
       };
     });
 
@@ -2844,6 +2979,135 @@ export class AuthoritativeTradingDataService {
     }
   }
 
+  private cachedOpenPositions = new Map<string, any>();
+
+  public async refreshActivePositionsCache(): Promise<void> {
+    try {
+      const res = await pgDb.query(
+        `SELECT id, tenant_id, user_id, symbol, instrument_id, quantity, average_price, side FROM trading_positions WHERE quantity != 0 LIMIT 1000;`
+      );
+      this.cachedOpenPositions.clear();
+      for (const row of res.rows || []) {
+        this.cachedOpenPositions.set(row.id, row);
+      }
+    } catch {}
+  }
+
+  /**
+   * GET /trading/snapshot
+   * Authoritative real-time tick-driven snapshot of active positions, client equity, and live prices.
+   */
+  public async getSnapshot(tenantId: string, options: { userId?: string } = {}) {
+    const cleanTenant = sanitizeTenant(tenantId) || 'TNT-001';
+    const [positionsRes, clientsRes] = await Promise.all([
+      this.getPositions(cleanTenant, { userId: options.userId, status: 'OPEN', limit: 500 }),
+      this.getClientsPaged(cleanTenant, { limit: 100 }),
+    ]);
+
+    let singleClientAccount: any = null;
+    if (options.userId) {
+      try {
+        singleClientAccount = await this.getClientAccount(cleanTenant, options.userId);
+      } catch {}
+    }
+
+    const positions = positionsRes.positions || [];
+    const totalUnrealizedPnL = positions.reduce((sum: number, p: any) => sum + Number(p.unrealizedPnL ?? p.unrealized_pnl ?? 0), 0);
+    const totalUsedMargin = positions.reduce((sum: number, p: any) => sum + Number(p.usedMargin ?? p.margin_used ?? 0), 0);
+    const prices = marketDataGateway.getLivePriceSnapshot();
+
+    return {
+      success: true,
+      tenant_id: cleanTenant,
+      tenantId: cleanTenant,
+      data_state: 'authoritative',
+      timestamp: new Date().toISOString(),
+      prices,
+      positions,
+      clients: singleClientAccount ? [singleClientAccount] : clientsRes.clients,
+      client: singleClientAccount || undefined,
+      metrics: {
+        totalUnrealizedPnL: Number(totalUnrealizedPnL.toFixed(2)),
+        totalEquity: Number((((singleClientAccount?.account?.equity) ?? (clientsRes.clients[0]?.totalEquity ?? 1000000)) + totalUnrealizedPnL).toFixed(2)),
+        totalUsedMargin: Number(totalUsedMargin.toFixed(2)),
+        openPositionsCount: positions.length,
+        timestamp: Date.now(),
+      },
+    };
+  }
+
+  /**
+   * Computes lightweight active position MTM deltas across all tenants
+   * using the in-memory live tick price map without heavy DB queries.
+   */
+  public computeActivePositionsMtmDeltas(): Array<{
+    positionId: string;
+    clientId: string;
+    symbol: string;
+    ltp: number;
+    unrealizedPnL: number;
+  }> {
+    const deltas: Array<{
+      positionId: string;
+      clientId: string;
+      symbol: string;
+      ltp: number;
+      unrealizedPnL: number;
+    }> = [];
+
+    const seenIds = new Set<string>();
+
+    // 1. In-memory store active positions
+    const allMem = getAllTenantPositions();
+    for (const item of allMem) {
+      const p = item.position;
+      const qty = Math.abs(cleanNumeric(p.qty || (p as any).quantity || 0));
+      if (qty === 0 || seenIds.has(p.id)) continue;
+      seenIds.add(p.id);
+
+      const sym = p.symbol;
+      const livePrice = marketDataGateway.getPrice(sym);
+      const inst = findInstrument(sym);
+      const avgPrice = cleanNumeric(p.avgPrice || (p as any).average_price || 0);
+      const ltp = livePrice?.ltp ?? (inst ? cleanNumeric(inst.lastPrice) : avgPrice);
+      const side = (p.type || (qty >= 0 ? 'BUY' : 'SELL')).toUpperCase();
+      const pnl = side === 'BUY' ? (ltp - avgPrice) * qty : (avgPrice - ltp) * qty;
+
+      deltas.push({
+        positionId: p.id,
+        clientId: p.userId || 'demo-trader',
+        symbol: sym,
+        ltp: Number(ltp.toFixed(2)),
+        unrealizedPnL: Number(pnl.toFixed(2)),
+      });
+    }
+
+    // 2. Tracked cached PostgreSQL open positions
+    for (const p of this.cachedOpenPositions.values()) {
+      if (seenIds.has(p.id)) continue;
+      const qty = Math.abs(cleanNumeric(p.quantity || p.qty || 0));
+      if (qty === 0) continue;
+      seenIds.add(p.id);
+
+      const sym = p.symbol || p.instrument_id;
+      const livePrice = marketDataGateway.getPrice(sym);
+      const inst = findInstrument(sym);
+      const avgPrice = cleanNumeric(p.average_price || p.avgPrice || 0);
+      const ltp = livePrice?.ltp ?? (inst ? cleanNumeric(inst.lastPrice) : avgPrice);
+      const side = (p.side || (qty >= 0 ? 'BUY' : 'SELL')).toUpperCase();
+      const pnl = side === 'BUY' ? (ltp - avgPrice) * qty : (avgPrice - ltp) * qty;
+
+      deltas.push({
+        positionId: p.id,
+        clientId: p.user_id || p.userId,
+        symbol: sym,
+        ltp: Number(ltp.toFixed(2)),
+        unrealizedPnL: Number(pnl.toFixed(2)),
+      });
+    }
+
+    return deltas;
+  }
 }
 
 export const authoritativeTradingDataService = new AuthoritativeTradingDataService();

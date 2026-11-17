@@ -328,6 +328,61 @@ router.get('/portfolio', optionalAuth, async (req: TenantRequest, res: Response)
   }
 });
 
+/**
+ * GET /api/trading/snapshot
+ * Live tick-driven MTM and position snapshot for active user/tenant.
+ */
+router.get('/snapshot', optionalAuth, async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getReqTenantId(req);
+    const userObj = (req as any).user;
+    const userId = userObj?.userId || userObj?.user_id || userObj?.id || (req.query.userId as string);
+    const snapshot = await authoritativeTradingDataService.getSnapshot(tenantId, { userId });
+    res.json(snapshot);
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      message: err.message || 'Failed to retrieve trading snapshot',
+    });
+  }
+});
+
+/**
+ * GET /api/trading/stream
+ * Real-time SSE stream for ticks and MTM deltas.
+ */
+router.get('/stream', optionalAuth, (req: TenantRequest, res: Response) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+    'Access-Control-Allow-Origin': '*',
+  });
+
+  res.write(': keep-alive\n\n');
+
+  const tenantId = getReqTenantId(req);
+  const userObj = (req as any).user;
+  const userId = userObj?.userId || userObj?.user_id || userObj?.id || (req.query.userId as string);
+
+  const unsubscribe = internalEventDispatcher.registerSseClient(res, { tenantId, userId });
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': ping\n\n');
+    } catch {
+      clearInterval(heartbeat);
+      unsubscribe();
+    }
+  }, 15000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
+});
+
 // Place new Order (BUY / SELL) - Enforces Tenant trading freeze, active trader, and ACID persistence
 router.post(
   ['/order', '/orders'],

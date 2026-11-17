@@ -36,6 +36,9 @@ import { db } from './src/server/db/database.ts';
 import { clearDummyTradingStoreRecords } from './src/server/trading/tradingStore.ts';
 import { postgresClientMappingRepository } from './src/server/repositories/PostgresClientMappingRepository.ts';
 import { seedAjayAccount } from './src/server/services/seedAjayService.ts';
+import { authoritativeTradingDataService } from './src/server/services/authoritativeTradingDataService.ts';
+import { internalEventDispatcher } from './src/server/events/InternalEventDispatcher.ts';
+import { authService } from './src/server/services/authService.ts';
 
 /**
  * Purges all test/dummy users, test client mappings, and seeded records
@@ -378,6 +381,10 @@ async function startServer() {
 
   // Synchronize authoritative users from PostgreSQL into memory for stateless multi-instance operation
   await db.syncUsersFromPostgres();
+  await authoritativeTradingDataService.refreshActivePositionsCache();
+  setInterval(() => {
+    authoritativeTradingDataService.refreshActivePositionsCache().catch(() => {});
+  }, 15000).unref?.();
 
   // Auto-backfill missing client mappings & wallets for legitimate users
   postgresClientMappingRepository
@@ -426,6 +433,54 @@ async function startServer() {
   // Internal Server-to-Server Routes (Central Admin -> Trading Platform)
   // Protected by HMAC-SHA256, Nonce, Timestamp, and Tenant ID validation
   app.use('/api/internal/v1', internalRoutes);
+
+  // Global Real-time SSE Stream Endpoint for Dashboard KPIs, market ticks & position MTM deltas
+  app.get(['/api/stream', '/api/v1/stream', '/api/admin/stream', '/api/v1/admin/stream'], (req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+      'Access-Control-Allow-Origin': '*',
+    });
+    res.write(': keep-alive\n\n');
+
+    let tenantId = (req as any).tenantId || (req.query.tenantId as string);
+    let userId = (req as any).userId || (req.query.userId as string);
+    let role = (req as any).user?.role as string | undefined;
+
+    // Optional token-based authentication for SSE streams
+    const token = (req.query.token as string) || req.headers.authorization?.replace(/^Bearer\s+/i, '');
+    if (token) {
+      try {
+        const decoded = authService.verifyToken(token);
+        if (decoded) {
+          userId = userId || decoded.userId || decoded.id;
+          tenantId = tenantId || decoded.tenantId;
+          role = role || decoded.role;
+        }
+      } catch {}
+    }
+
+    const unsubscribe = internalEventDispatcher.registerSseClient(res, { tenantId, userId, role });
+
+    // Send initial handshake frame
+    res.write(`event: connection.established\ndata: ${JSON.stringify({ status: 'connected', tenantId: tenantId || 'global', userId, role, timestamp: new Date().toISOString() })}\n\n`);
+
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(': ping\n\n');
+      } catch {
+        clearInterval(heartbeat);
+        unsubscribe();
+      }
+    }, 15000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+    });
+  });
 
   // Browser & Client API Routes with DDoS & spam rate limiting protection
   app.use('/api', generalApiLimiter);

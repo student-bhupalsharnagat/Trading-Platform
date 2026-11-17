@@ -74,7 +74,7 @@ export const AdminRealtimeProvider: React.FC<{ children: ReactNode }> = ({ child
             if (processedEventsRef.current.size > 200) {
               processedEventsRef.current.clear();
             }
-            if (data.event !== 'market.ticks') {
+            if (data.event !== 'market.ticks' && data.event !== 'market.tick' && data.event !== 'positions.mtm_batch') {
               processedEventsRef.current.add(eventKey);
             }
 

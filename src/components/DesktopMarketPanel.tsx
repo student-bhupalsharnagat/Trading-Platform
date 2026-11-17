@@ -27,11 +27,13 @@ export const DesktopMarketPanel: React.FC<DesktopMarketPanelProps> = ({
   onOpenChart,
   onOpenWallet,
 }) => {
-  const isPositive = spotlightInstrument.change >= 0;
-  const high = spotlightInstrument.high || spotlightInstrument.lastPrice * 1.015;
-  const low = spotlightInstrument.low || spotlightInstrument.lastPrice * 0.985;
+  if (!spotlightInstrument) return null;
+  const isPositive = (spotlightInstrument?.change ?? 0) >= 0;
+  const lastPrice = spotlightInstrument?.lastPrice ?? 0;
+  const high = spotlightInstrument?.high || lastPrice * 1.015;
+  const low = spotlightInstrument?.low || lastPrice * 0.985;
   const range = high - low;
-  const currentPosPercent = range > 0 ? Math.min(100, Math.max(0, ((spotlightInstrument.lastPrice - low) / range) * 100)) : 50;
+  const currentPosPercent = range > 0 ? Math.min(100, Math.max(0, ((lastPrice - low) / range) * 100)) : 50;
 
   const available = wallet?.availableBalance ?? 0;
   const used = wallet?.usedMargin ?? 0;
@@ -93,7 +95,7 @@ export const DesktopMarketPanel: React.FC<DesktopMarketPanelProps> = ({
             >
               {isPositive ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
               {isPositive ? '+' : ''}
-              {spotlightInstrument.change.toFixed(2)} ({spotlightInstrument.changePercent.toFixed(2)}%)
+              {(spotlightInstrument?.change ?? 0).toFixed(2)} ({(spotlightInstrument?.changePercent ?? 0).toFixed(2)}%)
             </span>
           </div>
         </div>

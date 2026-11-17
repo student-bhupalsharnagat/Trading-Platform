@@ -923,6 +923,47 @@ router.post(
         },
       });
 
+      // Broadcast authoritative real-time event for Dashboard KPIs
+      const hLinks = internalEventDispatcher.resolveHierarchy(newUser);
+      if (newUser.role === 'CLIENT') {
+        internalEventDispatcher.dispatchClientRegistered({
+          tenantId,
+          tradingUserId: newUser.user_id,
+          userId: newUser.user_id,
+          clientId: newUser.id || newUser.user_id,
+          clientCode: newUser.user_id.toUpperCase(),
+          name: newUser.full_name,
+          fullName: newUser.full_name,
+          email: newUser.email,
+          phone: newUser.mobile,
+          status: newUser.status,
+          accountStatus: newUser.status,
+          kycStatus: newUser.is_verified ? 'VERIFIED' : 'PENDING',
+          createdAt: newUser.created_at,
+          masterId: hLinks.masterId,
+          brokerId: hLinks.brokerId,
+          subBrokerId: hLinks.subBrokerId,
+        }).catch(() => {});
+      } else if (['MASTER', 'BROKER', 'SUB_BROKER'].includes(newUser.role)) {
+        internalEventDispatcher.dispatchBrokerAdded({
+          tenantId,
+          id: newUser.id,
+          userId: newUser.user_id,
+          name: newUser.full_name,
+          fullName: newUser.full_name,
+          email: newUser.email,
+          phone: newUser.mobile,
+          role: newUser.role,
+          parentId: newUser.parent_id,
+          status: newUser.status,
+          commissionRate: newUser.commission_rate,
+          createdAt: newUser.created_at,
+          masterId: hLinks.masterId,
+          brokerId: hLinks.brokerId,
+          subBrokerId: hLinks.subBrokerId,
+        }).catch(() => {});
+      }
+
       const sanitized = { ...newUser };
       delete (sanitized as any).password_hash;
 
@@ -2015,6 +2056,60 @@ router.get('/trading/positions', async (req: InternalAuthorizedRequest, res: Res
       code: err.code,
     });
   }
+});
+
+/**
+ * GET /api/internal/v1/trading/snapshot & GET /api/internal/v1/snapshot
+ * Authoritative real-time tick-driven snapshot of active positions, client equity, and live prices.
+ */
+router.get(['/trading/snapshot', '/snapshot'], async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    const userId = req.query.userId as string;
+    const snapshot = await authoritativeTradingDataService.getSnapshot(tenantId, { userId });
+    res.json(snapshot);
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to retrieve trading snapshot',
+      code: err.code,
+    });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/stream & GET /api/internal/v1/stream
+ * Real-time Server-Sent Events (SSE) stream for live market ticks and MTM deltas.
+ */
+router.get(['/trading/stream', '/stream'], (req: InternalAuthorizedRequest, res: Response) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+    'Access-Control-Allow-Origin': '*',
+  });
+
+  res.write(': keep-alive\n\n');
+
+  const tenantId = getInternalTenantId(req);
+  const userId = req.query.userId as string;
+
+  const unsubscribe = internalEventDispatcher.registerSseClient(res, { tenantId, userId });
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': ping\n\n');
+    } catch {
+      clearInterval(heartbeat);
+      unsubscribe();
+    }
+  }, 15000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
 });
 
 /**

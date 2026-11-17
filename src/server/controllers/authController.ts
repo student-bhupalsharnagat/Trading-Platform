@@ -109,6 +109,23 @@ export class AuthController {
 
       const result = await authService.login(validatedData.userId, validatedData.password, ipAddress);
 
+      // Verify role if login attempt is targeting the Admin Portal
+      const roleUpper = (result.user?.role || '').toUpperCase();
+      const isAdminLogin =
+        req.body?.portal === 'admin' ||
+        req.query?.portal === 'admin' ||
+        req.headers['x-admin-portal'] === 'true' ||
+        req.body?.isAdmin === true;
+
+      if (isAdminLogin && (roleUpper === 'CLIENT' || roleUpper === 'TRADER' || roleUpper === 'TRADER_CLIENT')) {
+        res.status(403).json({
+          success: false,
+          error: 'FORBIDDEN',
+          message: 'Access Denied: Trader Clients cannot access the Admin Portal. Please login via the Trading Platform.',
+        });
+        return;
+      }
+
       // Set secure HttpOnly SameSite cookie
       res.cookie(COOKIE_NAME, result.token, COOKIE_OPTIONS);
 
@@ -134,6 +151,24 @@ export class AuthController {
         tenantId,
         ipAddress,
       });
+
+      // Verify role if demo login targets the Admin Portal
+      const roleUpper = (result.user?.role || '').toUpperCase();
+      const isAdminDemo =
+        req.body?.portal === 'admin' ||
+        req.query?.portal === 'admin' ||
+        req.headers['x-admin-portal'] === 'true' ||
+        req.body?.isAdmin === true;
+
+      if (isAdminDemo && (roleUpper === 'CLIENT' || roleUpper === 'TRADER' || roleUpper === 'TRADER_CLIENT')) {
+        res.status(403).json({
+          success: false,
+          error: 'FORBIDDEN',
+          message: 'Access Denied: Trader Clients cannot access the Admin Portal. Please login via the Trading Platform.',
+        });
+        return;
+      }
+
       res.cookie(COOKIE_NAME, result.token, COOKIE_OPTIONS);
 
       res.status(200).json({

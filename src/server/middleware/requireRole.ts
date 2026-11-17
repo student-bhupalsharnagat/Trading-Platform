@@ -13,12 +13,18 @@ export function requireRole(...allowedRoles: UserRole[]) {
       return;
     }
 
-    const currentRole = user.role || 'CLIENT';
+    const currentRole = (user.role || 'CLIENT').toUpperCase();
 
-    if (!allowedRoles.includes(currentRole as UserRole)) {
+    if (!allowedRoles.map(r => r.toUpperCase()).includes(currentRole as any)) {
+      const message =
+        currentRole === 'CLIENT' || currentRole === 'TRADER' || currentRole === 'TRADER_CLIENT'
+          ? 'Access Denied: Trader Clients cannot access the Admin Portal. Please login via the Trading Platform.'
+          : 'Access denied: insufficient hierarchy role permissions';
+
       res.status(403).json({
         success: false,
-        message: 'Access denied: insufficient hierarchy role permissions',
+        error: 'FORBIDDEN',
+        message,
       });
       return;
     }

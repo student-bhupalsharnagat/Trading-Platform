@@ -5,7 +5,9 @@ interface StatCardProps {
   id?: string;
   title: string;
   value: string | number;
-  change?: string;
+  change?: string | number | null;
+  stats?: { change?: string | number | null; [key: string]: any } | null;
+  metrics?: { [key: string]: any } | null;
   isPositive?: boolean;
   subtitle?: string;
   icon?: React.ReactNode;
@@ -16,10 +18,15 @@ export const StatCard: React.FC<StatCardProps> = ({
   title,
   value,
   change,
+  stats,
+  metrics,
   isPositive,
   subtitle,
   icon,
 }) => {
+  const effectiveChange = change ?? stats?.change ?? metrics?.change ?? null;
+  const displayChange = effectiveChange != null ? String(effectiveChange) : null;
+
   return (
     <div
       id={id}
@@ -33,16 +40,16 @@ export const StatCard: React.FC<StatCardProps> = ({
         {icon && <div className="p-2.5 rounded-lg bg-slate-800/60 text-blue-400 border border-slate-700/40">{icon}</div>}
       </div>
 
-      {(change || subtitle) && (
+      {(displayChange || subtitle) && (
         <div className="mt-4 flex items-center gap-2 text-xs">
-          {change && (
+          {displayChange && (
             <span
               className={`inline-flex items-center gap-0.5 font-semibold ${
                 isPositive ? 'text-emerald-400' : 'text-rose-400'
               }`}
             >
               {isPositive ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-              {change}
+              {displayChange}
             </span>
           )}
           {subtitle && <span className="text-slate-500">{subtitle}</span>}

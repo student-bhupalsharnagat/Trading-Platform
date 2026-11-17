@@ -341,7 +341,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
             // Deduplicate non-tick incoming events
             const eventKey = `${data.event}:${data.timestamp || ''}:${JSON.stringify(data.payload?.id || data.payload?.orderId || '')}`;
-            if (data.event !== 'market.ticks' && data.event !== 'portfolio.mtm') {
+            if (data.event !== 'market.ticks' && data.event !== 'market.tick' && data.event !== 'positions.mtm_batch' && data.event !== 'portfolio.mtm') {
               if (processedEventsRef.current.has(eventKey)) return;
               if (processedEventsRef.current.size > 200) {
                 processedEventsRef.current.clear();
@@ -362,6 +362,64 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                   (i: Instrument) => i.id === orderWindowInstrumentRef.current?.id
                 );
                 if (updatedOrder) setOrderWindowInstrument(updatedOrder);
+              }
+            } else if (data.event === 'market.tick' && data.payload?.symbol) {
+              const tick = data.payload;
+              setInstruments((prev) =>
+                prev.map((inst) => (inst.symbol === tick.symbol ? { ...inst, lastPrice: tick.ltp, change: tick.change, changePercent: tick.changePercent } : inst))
+              );
+              if (selectedChartInstrumentRef.current?.symbol === tick.symbol) {
+                setSelectedChartInstrument((prev) => (prev ? { ...prev, lastPrice: tick.ltp, change: tick.change, changePercent: tick.changePercent } : prev));
+              }
+              if (orderWindowInstrumentRef.current?.symbol === tick.symbol) {
+                setOrderWindowInstrument((prev) => (prev ? { ...prev, lastPrice: tick.ltp, change: tick.change, changePercent: tick.changePercent } : prev));
+              }
+            } else if (data.event === 'positions.mtm_batch' && data.payload) {
+              const deltas = Array.isArray(data.payload) ? data.payload : (data.payload?.deltas || data.payload?.positions || []);
+              if (Array.isArray(deltas) && deltas.length > 0) {
+                const deltaMap = new Map<string, { ltp: number; unrealizedPnL: number }>();
+                deltas.forEach((d: any) => {
+                  const id = d.positionId || d.id;
+                  if (id) deltaMap.set(id, { ltp: d.ltp, unrealizedPnL: d.unrealizedPnL });
+                });
+
+                setPortfolio((prev) => {
+                  if (!prev || !prev.positions) return prev;
+                  let totalLiveUnrealized = 0;
+                  let updatedAny = false;
+                  const updatedPositions = prev.positions.map((pos: any) => {
+                    const delta = deltaMap.get(pos.id);
+                    if (delta) {
+                      updatedAny = true;
+                      totalLiveUnrealized += delta.unrealizedPnL;
+                      return {
+                        ...pos,
+                        ltp: delta.ltp,
+                        currentPrice: delta.ltp,
+                        current_price: delta.ltp,
+                        pnl: delta.unrealizedPnL,
+                        unrealizedPnl: delta.unrealizedPnL,
+                        unrealized_pnl: delta.unrealizedPnL,
+                        mtmPnl: delta.unrealizedPnL,
+                      };
+                    }
+                    totalLiveUnrealized += (pos.pnl || pos.unrealizedPnl || 0);
+                    return pos;
+                  });
+
+                  if (!updatedAny) return prev;
+
+                  const realizedPnL = prev.wallet?.realizedPnL ?? prev.wallet?.todayPnL ?? 0;
+                  return {
+                    ...prev,
+                    positions: updatedPositions,
+                    wallet: {
+                      ...prev.wallet,
+                      unrealizedPnL: Number(totalLiveUnrealized.toFixed(2)),
+                      totalPnL: Number((realizedPnL + totalLiveUnrealized).toFixed(2)),
+                    },
+                  };
+                });
               }
             } else if (data.event === 'portfolio.mtm' && data.payload) {
               // Direct state push: only update demo state or matching user to prevent clobbering real positions
@@ -1507,7 +1565,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 {/* Instrument Cards List matching Screenshot 1 (Responsive grid on tablets/desktops) */}
                 <div id="tour-target-watchlist" className="space-y-4">
                   {filteredInstruments.map((inst, index) => {
-                    const isPositive = inst.change >= 0;
+                    if (!inst) return null;
+                    const instChange = inst?.change ?? 0;
+                    const isPositive = instChange >= 0;
+                    const instPrice = inst?.lastPrice ?? 0;
+                    const instChangePercent = inst?.changePercent ?? 0;
                     const isFav = favorites[inst.id] || false;
                     const isSpotlight = spotlightInstrumentId === inst.id;
 
@@ -1621,11 +1683,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                                   <span>{isPositive ? '↗' : '↘'}</span>
                                   <span>
                                     {isPositive ? '+' : '-'}
-                                    {Math.abs(inst.change).toFixed(
-                                      inst.lastPrice < 10 ? 4 : 2
+                                    {Math.abs(instChange).toFixed(
+                                      instPrice < 10 ? 4 : 2
                                     )}{' '}
                                     ({isPositive ? '+' : ''}
-                                    {inst.changePercent.toFixed(2)}%)
+                                    {instChangePercent.toFixed(2)}%)
                                   </span>
                                 </div>
                               </div>
