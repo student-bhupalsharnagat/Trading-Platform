@@ -234,21 +234,12 @@ export class AuthService {
     });
 
     // Publish Central Admin client.registered, client.activated, and kyc.submitted events
-    const hLinks = internalEventDispatcher.resolveHierarchy(user);
     const clientPayload: ClientRegisteredPayload = {
       tenantId: user.tenant_id || 'vertex-default',
-      masterId: hLinks.masterId,
-      brokerId: hLinks.brokerId || user.broker_id || 'BRK-001',
-      subBrokerId: hLinks.subBrokerId || (user as any).sub_broker_id || null,
-      master_id: hLinks.masterId,
-      broker_id: hLinks.brokerId || user.broker_id || 'BRK-001',
-      sub_broker_id: hLinks.subBrokerId || (user as any).sub_broker_id || null,
       tradingUserId: user.user_id,
       userId: user.user_id,
-      clientId: user.id || user.user_id,
       clientCode: user.user_id.toUpperCase(),
       name: user.full_name,
-      fullName: user.full_name,
       email: user.email || '',
       phone: user.phone_e164 || user.mobile || '',
       status: 'ACTIVE',

@@ -41,8 +41,6 @@ export class TransactionalOutboxService {
   /**
    * Enqueues an event within an active PostgreSQL ACID transaction.
    * This guarantees that the event is committed if and only if the trade commits.
-   * If client is not passed (immediate commit) and skipBroadcast is false,
-   * broadcasts real-time event over WebSocket and SSE.
    */
   public async enqueue(
     event: {
@@ -51,14 +49,13 @@ export class TransactionalOutboxService {
       eventType: string;
       payload: any;
       maxAttempts?: number;
-      skipBroadcast?: boolean;
     },
     client?: DbClient
   ): Promise<OutboxEventRecord> {
     const id = `outbox-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const eventId = event.eventId || `evt-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
 
-    const record = await postgresOutboxRepository.insert(
+    return await postgresOutboxRepository.insert(
       {
         id,
         event_id: eventId,
@@ -69,17 +66,6 @@ export class TransactionalOutboxService {
       },
       client
     );
-
-    // If immediate commit (no client) and broadcast not skipped, deliver real-time over WS & SSE
-    if (!client && !event.skipBroadcast) {
-      import('../events/InternalEventDispatcher.ts')
-        .then(({ internalEventDispatcher }) => {
-          internalEventDispatcher.broadcastRealtimeEvent(event.eventType, event.payload, event.tenantId);
-        })
-        .catch(() => {});
-    }
-
-    return record;
   }
 
   /**
@@ -183,7 +169,6 @@ export class TransactionalOutboxService {
             eventType: 'client.registered',
             tenantId: tId,
             payload: clientPayload,
-            skipBroadcast: true,
           }).catch(() => {});
 
           await this.enqueue({
@@ -191,7 +176,6 @@ export class TransactionalOutboxService {
             eventType: 'client.activated',
             tenantId: tId,
             payload: { ...clientPayload, clientId: u.id || u.user_id },
-            skipBroadcast: true,
           }).catch(() => {});
         }
       }
@@ -207,7 +191,6 @@ export class TransactionalOutboxService {
           eventId: `sync-ord-${o.id}`,
           eventType: 'order.created',
           tenantId: targetTenantId,
-          skipBroadcast: true,
           payload: {
             tenantId: targetTenantId,
             orderId: o.id,
@@ -250,7 +233,6 @@ export class TransactionalOutboxService {
           eventId: `sync-pos-${p.id}`,
           eventType: 'position.updated',
           tenantId: targetTenantId,
-          skipBroadcast: true,
           payload: {
             tenantId: targetTenantId,
             positionId: p.id,
@@ -296,7 +278,6 @@ export class TransactionalOutboxService {
           eventId: `sync-fund-${f.id}`,
           eventType: evType as any,
           tenantId: targetTenantId,
-          skipBroadcast: true,
           payload: {
             id: f.id,
             transactionId: f.id,

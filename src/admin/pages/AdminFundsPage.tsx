@@ -37,30 +37,21 @@ export const AdminFundsPage: React.FC<AdminFundsPageProps> = ({ onNavigate }) =>
   const [manualAmount, setManualAmount] = useState('');
   const [manualNote, setManualNote] = useState('');
 
-  const fetchFunds = async (silent = false) => {
+  const fetchFunds = async () => {
     try {
-      if (!silent) setLoading(true);
+      setLoading(true);
       setError(null);
       const data: any = await adminApi.getFunds();
       setTransactions(data?.data || data || []);
     } catch (err: any) {
-      if (!silent) setError(err.message || 'Failed to load fund transactions');
+      setError(err.message || 'Failed to load fund transactions');
     } finally {
-      if (!silent) setLoading(false);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchFunds(false);
-  }, []);
-
-  // 2.5s silent poll for dynamic funds recalculation
-  useEffect(() => {
-    const pollInterval = setInterval(() => {
-      fetchFunds(true);
-    }, 2500);
-
-    return () => clearInterval(pollInterval);
+    fetchFunds();
   }, []);
 
   // Real-time subscriptions for funds
@@ -76,28 +67,16 @@ export const AdminFundsPage: React.FC<AdminFundsPageProps> = ({ onNavigate }) =>
       );
     };
 
-    const handleFundTxUpdated = () => {
-      fetchFunds(true);
-    };
-
     const unsubReq = subscribe('fund.requested', handleNewFund);
     const unsubCreated = subscribe('fund.created', handleNewFund);
     const unsubProc = subscribe('fund.processed', handleProcessedFund);
     const unsubUpd = subscribe('fund.updated', handleProcessedFund);
-    const unsubTxUpd = subscribe('fund.transaction_updated', handleFundTxUpdated);
-    const unsubManualCreated = subscribe('manual_deposit.created', handleFundTxUpdated);
-    const unsubManualApproved = subscribe('manual_deposit.approved', handleFundTxUpdated);
-    const unsubManualRejected = subscribe('manual_deposit.rejected', handleFundTxUpdated);
 
     return () => {
       unsubReq();
       unsubCreated();
       unsubProc();
       unsubUpd();
-      unsubTxUpd();
-      unsubManualCreated();
-      unsubManualApproved();
-      unsubManualRejected();
     };
   }, [subscribe]);
 
@@ -213,7 +192,7 @@ export const AdminFundsPage: React.FC<AdminFundsPageProps> = ({ onNavigate }) =>
             <span>Manual Adjustment</span>
           </button>
           <button
-            onClick={() => fetchFunds(false)}
+            onClick={fetchFunds}
             className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700/60 text-xs font-semibold text-slate-300 flex items-center gap-1.5"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-blue-400 ${loading ? 'animate-spin' : ''}`} />

@@ -1653,18 +1653,11 @@ export class AuthoritativeTradingDataService {
     });
 
     const eventType = type === 'DEPOSIT' ? 'deposit.created' : 'withdrawal.created';
-    const hLinks = this.resolveHierarchyLinks({ userId: resolvedUserId, tenantId });
     const fundPayload = {
       id: txId,
       transactionId: txId,
       clientCode: resolvedUserId.toUpperCase(),
       tenantId,
-      masterId: hLinks.masterId,
-      brokerId: hLinks.brokerId,
-      subBrokerId: hLinks.subBrokerId,
-      master_id: hLinks.masterId,
-      broker_id: hLinks.brokerId,
-      sub_broker_id: hLinks.subBrokerId,
       userId: resolvedUserId,
       clientId: resolvedUserId,
       tradingUserId: resolvedUserId,
@@ -1722,12 +1715,6 @@ export class AuthoritativeTradingDataService {
       tenantId,
       'fund.requested',
       fundPayload,
-      (ws) => ws.userId === resolvedUserId || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
-    );
-    tradingWebSocketServer.broadcastToTenant(
-      tenantId,
-      'fund.transaction_updated',
-      { ...fundPayload, action: 'REQUESTED' },
       (ws) => ws.userId === resolvedUserId || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
     );
 
@@ -1796,25 +1783,17 @@ export class AuthoritativeTradingDataService {
       }
 
       const eventType = tx.transaction_type === 'DEPOSIT' ? 'deposit.rejected' : 'withdrawal.rejected';
-      const hLinks = this.resolveHierarchyLinks({ userId: tx.user_id, tenantId });
       const rejectPayload = {
         id: txId,
         transactionId: txId,
         clientCode: tx.user_id.toUpperCase(),
         tenantId,
-        masterId: hLinks.masterId,
-        brokerId: hLinks.brokerId,
-        subBrokerId: hLinks.subBrokerId,
-        master_id: hLinks.masterId,
-        broker_id: hLinks.brokerId,
-        sub_broker_id: hLinks.subBrokerId,
         userId: tx.user_id,
         clientId: tx.user_id,
         tradingUserId: tx.user_id,
         amount: Number(tx.amount),
         type: tx.transaction_type,
         status: 'REJECTED' as const,
-        action: 'REJECTED' as const,
         method: tx.payment_method || 'BANK_TRANSFER',
         paymentMethod: tx.payment_method || 'BANK_TRANSFER',
         reference: tx.reference_id || txId,
@@ -1856,12 +1835,6 @@ export class AuthoritativeTradingDataService {
       tradingWebSocketServer.broadcastToTenant(
         tenantId,
         'fund.processed',
-        rejectPayload,
-        (ws) => ws.userId === tx.user_id || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
-      );
-      tradingWebSocketServer.broadcastToTenant(
-        tenantId,
-        'fund.transaction_updated',
         rejectPayload,
         (ws) => ws.userId === tx.user_id || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
       );
@@ -1936,25 +1909,17 @@ export class AuthoritativeTradingDataService {
       );
 
       const eventType = tx.transaction_type === 'DEPOSIT' ? 'deposit.approved' : 'withdrawal.approved';
-      const hLinks = this.resolveHierarchyLinks({ userId: tx.user_id, tenantId });
       const approvePayload = {
         id: txId,
         transactionId: txId,
         clientCode: tx.user_id.toUpperCase(),
         tenantId,
-        masterId: hLinks.masterId,
-        brokerId: hLinks.brokerId,
-        subBrokerId: hLinks.subBrokerId,
-        master_id: hLinks.masterId,
-        broker_id: hLinks.brokerId,
-        sub_broker_id: hLinks.subBrokerId,
         userId: tx.user_id,
         clientId: tx.user_id,
         tradingUserId: tx.user_id,
         amount: Number(tx.amount),
         type: tx.transaction_type,
         status: 'APPROVED' as const,
-        action: 'APPROVED' as const,
         method: tx.payment_method || 'BANK_TRANSFER',
         paymentMethod: tx.payment_method || 'BANK_TRANSFER',
         reference: tx.reference_id || txId,
@@ -2064,27 +2029,6 @@ export class AuthoritativeTradingDataService {
       console.warn(`[Event] ${approvalResult.eventType} dispatch warning:`, e)
     );
 
-    internalEventDispatcher.dispatchLedgerUpdated({
-      id: `led-${tx.id}`,
-      ledgerId: `led-${tx.id}`,
-      tenantId,
-      userId: tx.user_id,
-      clientId: tx.user_id,
-      tradingUserId: tx.user_id,
-      transactionId: tx.id,
-      type: tx.transaction_type === 'DEPOSIT' ? 'CREDIT' : 'DEBIT',
-      category: tx.transaction_type,
-      amount: Number(tx.amount),
-      balanceBefore: approvalResult.approvePayload.balanceBefore,
-      balanceAfter: approvalResult.approvePayload.balanceAfter,
-      balance_before: approvalResult.approvePayload.balanceBefore,
-      balance_after: approvalResult.approvePayload.balanceAfter,
-      reference: `Admin Approved ${tx.transaction_type} [${tx.reference_id || tx.id}]`,
-      masterId: approvalResult.approvePayload.masterId,
-      brokerId: approvalResult.approvePayload.brokerId,
-      subBrokerId: approvalResult.approvePayload.subBrokerId,
-    }).catch((e) => console.warn('[Event] ledger.updated dispatch warning:', e));
-
     internalEventDispatcher.dispatchWalletUpdated(approvalResult.walletPayload).catch((e) =>
       console.warn('[Event] wallet.updated dispatch warning:', e)
     );
@@ -2105,12 +2049,6 @@ export class AuthoritativeTradingDataService {
     tradingWebSocketServer.broadcastToTenant(
       tenantId,
       'fund.processed',
-      approvalResult.approvePayload,
-      (ws) => ws.userId === tx.user_id || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
-    );
-    tradingWebSocketServer.broadcastToTenant(
-      tenantId,
-      'fund.transaction_updated',
       approvalResult.approvePayload,
       (ws) => ws.userId === tx.user_id || ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(ws.role)
     );

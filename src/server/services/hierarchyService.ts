@@ -7,7 +7,6 @@ import { pgDb } from '../db/postgres.ts';
 import { PasswordHashUtil } from '../utils/passwordHash.ts';
 import { transactionalOutboxService } from './TransactionalOutboxService.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
-import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
 
 export interface HierarchyNodeView {
   id: string;
@@ -362,28 +361,6 @@ export class HierarchyService {
       node: await this.toNodeView(record),
     });
 
-    // Authoritative broker.added event for dashboard metric updates
-    await internalEventDispatcher.dispatchBrokerAdded({
-      tenantId,
-      masterId: record.id,
-      brokerId: null,
-      subBrokerId: null,
-      master_id: record.id,
-      broker_id: null,
-      sub_broker_id: null,
-      userId: record.user_id,
-      id: record.id,
-      name: record.full_name,
-      fullName: record.full_name,
-      email: record.email,
-      phone: record.mobile,
-      role: 'MASTER',
-      parentId: record.parent_id,
-      status: record.status,
-      commissionRate: record.commission_rate,
-      createdAt: record.created_at,
-    }).catch(() => {});
-
     auditService.log({
       actorId: caller.id,
       actorName: caller.full_name,
@@ -483,28 +460,6 @@ export class HierarchyService {
       action: 'created',
       node: await this.toNodeView(record),
     });
-
-    // Authoritative broker.added event for dashboard metric updates
-    await internalEventDispatcher.dispatchBrokerAdded({
-      tenantId,
-      masterId: parentMaster.id,
-      brokerId: record.id,
-      subBrokerId: null,
-      master_id: parentMaster.id,
-      broker_id: record.id,
-      sub_broker_id: null,
-      userId: record.user_id,
-      id: record.id,
-      name: record.full_name,
-      fullName: record.full_name,
-      email: record.email,
-      phone: record.mobile,
-      role: 'BROKER',
-      parentId: parentMaster.id,
-      status: record.status,
-      commissionRate: record.commission_rate,
-      createdAt: record.created_at,
-    }).catch(() => {});
 
     auditService.log({
       actorId: caller.id,
@@ -608,28 +563,6 @@ export class HierarchyService {
       action: 'created',
       node: await this.toNodeView(record),
     });
-
-    // Authoritative broker.added event for dashboard metric updates
-    await internalEventDispatcher.dispatchBrokerAdded({
-      tenantId,
-      masterId,
-      brokerId: parentBroker.id,
-      subBrokerId: record.id,
-      master_id: masterId,
-      broker_id: parentBroker.id,
-      sub_broker_id: record.id,
-      userId: record.user_id,
-      id: record.id,
-      name: record.full_name,
-      fullName: record.full_name,
-      email: record.email,
-      phone: record.mobile,
-      role: 'SUB_BROKER',
-      parentId: parentBroker.id,
-      status: record.status,
-      commissionRate: record.commission_rate,
-      createdAt: record.created_at,
-    }).catch(() => {});
 
     auditService.log({
       actorId: caller.id,

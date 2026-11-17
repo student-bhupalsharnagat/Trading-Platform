@@ -24,7 +24,6 @@ router.use(requireAuth);
 router.use(requireAdmin);
 
 router.use('/dashboard', adminDashboardRoutes);
-router.use('/metrics', adminDashboardRoutes);
 router.use('/masters', masterRoutes);
 router.use('/hierarchy/masters', masterRoutes);
 router.use('/brokers', brokerRoutes);

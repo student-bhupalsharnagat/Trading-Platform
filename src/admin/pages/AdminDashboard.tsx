@@ -35,10 +35,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchDashboardData = async (silent = false) => {
+  const fetchDashboardData = async () => {
     try {
-      if (!silent) setLoading(true);
-      const res = await adminApi.getMetrics();
+      setLoading(true);
+      const res = await adminApi.getKPIs();
       setKpis(res.kpis);
       setCharts(res.charts);
 
@@ -46,44 +46,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       const clients = await adminApi.getClients();
       setRecentClients(clients.slice(0, 5));
     } catch (err: any) {
-      if (!silent) setError(err.message || 'Failed to load dashboard metrics');
+      setError(err.message || 'Failed to load dashboard metrics');
     } finally {
-      if (!silent) setLoading(false);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchDashboardData(false);
-  }, []);
-
-  // Fast silent polling loop (every 2.5s) for real-time KPI metrics
-  useEffect(() => {
-    const pollInterval = setInterval(() => {
-      fetchDashboardData(true);
-    }, 2500);
-
-    return () => clearInterval(pollInterval);
+    fetchDashboardData();
   }, []);
 
   // Real-time synchronization
   useEffect(() => {
-    const refreshSilent = () => fetchDashboardData(true);
-
-    const unsubOrder = subscribe('order.created', refreshSilent);
-    const unsubTrade = subscribe('trade.executed', refreshSilent);
-    const unsubWallet = subscribe('wallet.updated', refreshSilent);
-    const unsubPos = subscribe('position.updated', refreshSilent);
-    const unsubClient = subscribe('client.created', refreshSilent);
-    const unsubClientReg = subscribe('client.registered', refreshSilent);
-    const unsubClientAct = subscribe('client.activated', refreshSilent);
-    const unsubBrokerAdded = subscribe('broker.added', refreshSilent);
-    const unsubFund = subscribe('fund.requested', refreshSilent);
-    const unsubFundCreated = subscribe('fund.created', refreshSilent);
-    const unsubFundProc = subscribe('fund.processed', refreshSilent);
-    const unsubFundUpd = subscribe('fund.updated', refreshSilent);
-    const unsubFundTxUpd = subscribe('fund.transaction_updated', refreshSilent);
-    const unsubLedgerUpd = subscribe('ledger.updated', refreshSilent);
-    const unsubRiskAlert = subscribe('risk.alert_triggered', refreshSilent);
+    const unsubOrder = subscribe('order.created', () => fetchDashboardData());
+    const unsubTrade = subscribe('trade.executed', () => fetchDashboardData());
+    const unsubWallet = subscribe('wallet.updated', () => fetchDashboardData());
+    const unsubPos = subscribe('position.updated', () => fetchDashboardData());
+    const unsubClient = subscribe('client.created', () => fetchDashboardData());
+    const unsubClientReg = subscribe('client.registered', () => fetchDashboardData());
+    const unsubClientAct = subscribe('client.activated', () => fetchDashboardData());
+    const unsubFund = subscribe('fund.requested', () => fetchDashboardData());
+    const unsubFundCreated = subscribe('fund.created', () => fetchDashboardData());
+    const unsubFundProc = subscribe('fund.processed', () => fetchDashboardData());
+    const unsubFundUpd = subscribe('fund.updated', () => fetchDashboardData());
 
     return () => {
       unsubOrder();
@@ -93,14 +78,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       unsubClient();
       unsubClientReg();
       unsubClientAct();
-      unsubBrokerAdded();
       unsubFund();
       unsubFundCreated();
       unsubFundProc();
       unsubFundUpd();
-      unsubFundTxUpd();
-      unsubLedgerUpd();
-      unsubRiskAlert();
     };
   }, [subscribe]);
 
@@ -141,7 +122,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
         {/* Quick Actions */}
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => fetchDashboardData(false)}
+            onClick={fetchDashboardData}
             disabled={loading}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold shadow-xs transition-colors cursor-pointer"
             title="Refresh Real-time KPIs"
