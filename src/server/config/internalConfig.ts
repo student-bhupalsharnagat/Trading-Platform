@@ -37,10 +37,7 @@ export interface InternalAuthConfig {
 export function resolveInternalRenderUrl(rawUrl?: string, defaultPort = 10000): string {
   if (!rawUrl) return '';
   const trimmed = rawUrl.trim();
-  if (
-    process.env.ENABLE_RENDER_INTERNAL_NETWORKING === 'true' ||
-    (process.env.RENDER === 'true' && process.env.AUTO_RENDER_INTERNAL_NETWORKING !== 'false')
-  ) {
+  if (process.env.ENABLE_RENDER_INTERNAL_NETWORKING === 'true') {
     try {
       const parsed = new URL(trimmed);
       if (parsed.hostname.endsWith('.onrender.com')) {

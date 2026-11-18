@@ -82,7 +82,7 @@ export class CentralAdminEventClient {
       this.fallbackUrl = cleanBaseAdminUrl(publicAdminUrl || this.baseUrl);
     }
     this.secret = options.secret || options.hmacSecret || config.internalCommunicationSecret;
-    this.timeoutMs = options.timeoutMs ?? (process.env.INTERNAL_REQUEST_TIMEOUT_MS ? parseInt(process.env.INTERNAL_REQUEST_TIMEOUT_MS, 10) : 3000);
+    this.timeoutMs = options.timeoutMs ?? (process.env.INTERNAL_REQUEST_TIMEOUT_MS ? parseInt(process.env.INTERNAL_REQUEST_TIMEOUT_MS, 10) : 8000);
     this.maxRetries = options.maxRetries ?? 2;
     this.baseRetryDelayMs = options.baseRetryDelayMs ?? 100;
   }
@@ -208,8 +208,8 @@ export class CentralAdminEventClient {
       clearTimeout(timeoutId);
       const isTimeout = err.name === 'AbortError';
 
-      // If internal URL failed with connection/network error, seamlessly fallback to public admin URL
-      if (this.baseUrl !== this.fallbackUrl && (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.message?.includes('fetch failed'))) {
+      // If internal URL failed with timeout or connection/network error, seamlessly fallback to public admin URL
+      if (this.baseUrl !== this.fallbackUrl && (isTimeout || err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.message?.includes('fetch failed'))) {
         try {
           const fallbackClean = cleanBaseAdminUrl(this.fallbackUrl);
           const fallbackFullUrl = `${fallbackClean}${path.startsWith('/') ? path : '/' + path}`;
