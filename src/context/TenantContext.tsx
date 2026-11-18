@@ -221,32 +221,61 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setLoading(true);
       setError(null);
 
-      const savedTenantId = localStorage.getItem('vtx_active_tenant_id');
-      const url = savedTenantId
-        ? `/api/tenant/current?tenant_id=${encodeURIComponent(savedTenantId)}`
-        : '/api/tenant/current';
+      // Check URL search parameters for explicit tenant or partner branding
+      let queryTenantId = '';
+      if (typeof window !== 'undefined') {
+        const sp = new URLSearchParams(window.location.search);
+        queryTenantId = sp.get('tenant') || sp.get('tenantId') || sp.get('tenant_id') || '';
+      }
+
+      const savedTenantId = queryTenantId || localStorage.getItem('vtx_active_tenant_id');
+      if (queryTenantId) {
+        try {
+          localStorage.setItem('vtx_active_tenant_id', queryTenantId);
+        } catch {}
+      }
+
+      const domain = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+      const qParams = new URLSearchParams({ domain });
+      if (savedTenantId) {
+        qParams.set('tenant_id', savedTenantId);
+        qParams.set('tenantId', savedTenantId);
+      }
+
+      const url = `/api/tenant/current?${qParams.toString()}`;
       const headers: Record<string, string> = {};
       if (savedTenantId) {
         headers['x-dev-tenant-id'] = savedTenantId;
         headers['x-tenant-id'] = savedTenantId;
       }
 
-      const res = await fetch(url, { headers });
+      let res = await fetch(url, { headers });
+      if (!res.ok) {
+        // Fallback to public whitelabel config endpoint
+        res = await fetch(`/api/whitelabel/config?${qParams.toString()}`);
+      }
       if (!res.ok) {
         throw new Error(`Failed to resolve tenant: HTTP ${res.status}`);
       }
 
       const json = await res.json();
-      if (json.success && json.data) {
-        const d = json.data;
+      const d = json.data || json;
+      if (json.success && d) {
         if (d.tenant) setTenant(d.tenant);
-        if (d.branding) {
-          setBranding(d.branding);
-          applyBrandingToDocument(d.branding);
+        const resolvedBranding = d.branding || {
+          ...DEFAULT_BRANDING,
+          brandName: d.brandName || DEFAULT_BRANDING.brandName,
+          logoUrl: d.logoUrl || '',
+          supportEmail: d.supportEmail || DEFAULT_BRANDING.supportEmail,
+          supportPhone: d.supportPhone || DEFAULT_BRANDING.supportPhone,
+        };
+        if (resolvedBranding) {
+          setBranding(resolvedBranding);
+          applyBrandingToDocument(resolvedBranding);
         }
-        if (d.tenant && d.branding) {
+        if (d.tenant && resolvedBranding) {
           try {
-            localStorage.setItem('vtx_active_tenant_data', JSON.stringify({ tenant: d.tenant, branding: d.branding }));
+            localStorage.setItem('vtx_active_tenant_data', JSON.stringify({ tenant: d.tenant, branding: resolvedBranding }));
           } catch {}
         }
         if (d.config) setConfig(d.config);

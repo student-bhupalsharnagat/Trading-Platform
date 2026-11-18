@@ -22,9 +22,10 @@ router.post('/resend-otp', otpLimiter, authController.resendOtp);
 router.post('/login', loginLimiter, authController.login);
 router.post('/demo', demoLimiter, authController.demoLogin);
 
-// Forgot & Reset Password
+// Forgot, Reset & Change Password
 router.post('/forgot-password', otpLimiter, authController.forgotPassword);
 router.post('/reset-password', otpLimiter, authController.resetPassword);
+router.post('/change-password', requireAuth, authController.changePassword);
 
 // Session & User Info
 router.get('/me', requireAuth, authController.getMe);

@@ -52,11 +52,36 @@ export class MockCentralApiProvider implements ICentralApiService {
       }
     }
 
-    // 2. Resolve by domain/hostname
+    // 2. Resolve by domain/hostname (local repository + PostgreSQL custom domain_config)
     if (!tenant && cleanDomain) {
       tenant = await tenantRepository.findByDomain(cleanDomain);
       if (tenant) {
         matchedBy = 'domain';
+      } else {
+        try {
+          const allPgConfigs = await postgresTenantConfigRepository.getAllConfigs();
+          const domainMatch = allPgConfigs.find((cfg) => {
+            const dc = cfg.domain_config || {};
+            const custom = String(dc.customDomain || dc.domain || '').toLowerCase();
+            const list: string[] = Array.isArray(dc.domains) ? dc.domains.map((d: any) => String(d).toLowerCase()) : [];
+            return custom === cleanDomain || list.includes(cleanDomain);
+          });
+          if (domainMatch) {
+            tenant = (await tenantRepository.findById(domainMatch.tenant_id)) || {
+              id: domainMatch.tenant_id,
+              name: domainMatch.brand_name || domainMatch.tenant_id,
+              slug: domainMatch.tenant_id.toLowerCase(),
+              customDomain: cleanDomain,
+              domains: [cleanDomain],
+              status: 'active',
+              createdAt: new Date().toISOString(),
+              updatedAt: domainMatch.updated_at || new Date().toISOString(),
+            };
+            matchedBy = 'domain';
+          }
+        } catch {
+          // Non-fatal if DB initializing
+        }
       }
     }
 
@@ -73,14 +98,24 @@ export class MockCentralApiProvider implements ICentralApiService {
       matchedBy = 'dev_fallback';
     }
 
-    const branding = (await tenantRepository.getBranding(tenant.id))!;
-    const config = (await tenantRepository.getPlatformConfig(tenant.id))!;
-    const status = (await tenantRepository.getStatus(tenant.id))!;
+    const baseBranding = (await tenantRepository.getBranding(tenant.id)) || (await tenantRepository.getBranding('vertex-default'))!;
+    const branding: TenantBranding = { ...baseBranding };
+    const config = { ...((await tenantRepository.getPlatformConfig(tenant.id)) || (await tenantRepository.getPlatformConfig('vertex-default'))!) };
+    const status = { ...((await tenantRepository.getStatus(tenant.id)) || (await tenantRepository.getStatus('vertex-default'))!) };
 
-    // Incorporate PostgreSQL authoritative overrides if available
+    // Incorporate PostgreSQL authoritative overrides (branding + platform config + emergency status)
     try {
       const pgConf = await postgresTenantConfigRepository.getConfig(tenant.id);
       if (pgConf) {
+        if (pgConf.brand_name) branding.brandName = pgConf.brand_name;
+        if (pgConf.short_name) branding.shortName = pgConf.short_name;
+        if (pgConf.logo_url) branding.logoUrl = pgConf.logo_url;
+        if (pgConf.favicon_url) branding.faviconUrl = pgConf.favicon_url;
+        if (pgConf.primary_color) branding.primaryColor = pgConf.primary_color;
+        if (pgConf.secondary_color) branding.secondaryColor = pgConf.secondary_color;
+        if (pgConf.accent_color) branding.accentColor = pgConf.accent_color;
+        if (pgConf.support_email) branding.supportEmail = pgConf.support_email;
+        if (pgConf.support_phone) branding.supportPhone = pgConf.support_phone;
         if (pgConf.trading_enabled !== undefined) config.trading_enabled = pgConf.trading_enabled;
         if (pgConf.registration_enabled !== undefined) config.registration_enabled = pgConf.registration_enabled;
         if (pgConf.api_enabled !== undefined) config.api_enabled = pgConf.api_enabled;
@@ -112,7 +147,24 @@ export class MockCentralApiProvider implements ICentralApiService {
   }
 
   public async getTenantBranding(tenantId: string): Promise<TenantBranding | null> {
-    return tenantRepository.getBranding(tenantId);
+    const base = await tenantRepository.getBranding(tenantId);
+    if (!base) return null;
+    const branding: TenantBranding = { ...base };
+    try {
+      const pgConf = await postgresTenantConfigRepository.getConfig(tenantId);
+      if (pgConf) {
+        if (pgConf.brand_name) branding.brandName = pgConf.brand_name;
+        if (pgConf.short_name) branding.shortName = pgConf.short_name;
+        if (pgConf.logo_url) branding.logoUrl = pgConf.logo_url;
+        if (pgConf.favicon_url) branding.faviconUrl = pgConf.favicon_url;
+        if (pgConf.primary_color) branding.primaryColor = pgConf.primary_color;
+        if (pgConf.secondary_color) branding.secondaryColor = pgConf.secondary_color;
+        if (pgConf.accent_color) branding.accentColor = pgConf.accent_color;
+        if (pgConf.support_email) branding.supportEmail = pgConf.support_email;
+        if (pgConf.support_phone) branding.supportPhone = pgConf.support_phone;
+      }
+    } catch {}
+    return branding;
   }
 
   public async getTenantConfig(

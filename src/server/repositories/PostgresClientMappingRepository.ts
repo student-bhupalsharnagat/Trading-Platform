@@ -272,7 +272,11 @@ export class PostgresClientMappingRepository {
       password_hash?: string;
       passwordHash?: string;
       client_code?: string;
-      broker_id?: string;
+      master_id?: string | null;
+      broker_id?: string | null;
+      sub_broker_id?: string | null;
+      referral_code?: string;
+      referred_by?: string;
       role?: string;
       parent_id?: string | null;
       hierarchy_path?: string;
@@ -290,8 +294,16 @@ export class PostgresClientMappingRepository {
     const normUserId = userData.user_id.toLowerCase().trim();
     const id = userData.id || `usr-${normUserId}`;
     const role = (userData.role || 'CLIENT').toUpperCase();
-    const parentId = userData.parent_id || 'master-node-0001';
-    const hierarchyPath = userData.hierarchy_path || `root.master_alpha.${normUserId}`;
+    const hasExplicitHierarchy =
+      userData.master_id !== undefined ||
+      userData.broker_id !== undefined ||
+      userData.sub_broker_id !== undefined ||
+      userData.parent_id !== undefined;
+    const masterId = hasExplicitHierarchy ? (userData.master_id ?? null) : 'master-node-0001';
+    const brokerId = hasExplicitHierarchy ? (userData.broker_id ?? null) : 'BRK-001';
+    const subBrokerId = userData.sub_broker_id ?? null;
+    const parentId = userData.parent_id !== undefined ? userData.parent_id : (subBrokerId || brokerId || masterId || 'super-admin-root-0001');
+    const hierarchyPath = userData.hierarchy_path || `root.${normUserId}`;
     const accountType = userData.account_type || (normUserId.includes('demo') ? 'demo' : 'real');
     const balance = userData.demo_balance !== undefined ? Number(userData.demo_balance) : 1000000.0;
 
@@ -304,18 +316,26 @@ export class PostgresClientMappingRepository {
           `INSERT INTO users (
             id, tenant_id, full_name, user_id, country_code, mobile, email,
             password_hash, role, parent_id, hierarchy_path, is_verified, status,
-            account_type, demo_balance, client_code, broker_id, created_at, updated_at
+            account_type, demo_balance, client_code, master_id, broker_id, sub_broker_id,
+            referral_code, referred_by, created_at, updated_at
           ) VALUES (
             $1, $2, $3, $4, $5, $6, $7,
             $8, $9, $10, $11, $12, $13,
-            $14, $15, $16, $17, NOW(), NOW()
+            $14, $15, $16, $17, $18, $19,
+            $20, $21, NOW(), NOW()
           )
           ON CONFLICT (tenant_id, user_id) DO UPDATE SET
             full_name = EXCLUDED.full_name,
             email = COALESCE(EXCLUDED.email, users.email),
             password_hash = CASE WHEN EXCLUDED.password_hash != '' THEN EXCLUDED.password_hash ELSE users.password_hash END,
             client_code = COALESCE(EXCLUDED.client_code, users.client_code),
-            broker_id = COALESCE(EXCLUDED.broker_id, users.broker_id),
+            parent_id = EXCLUDED.parent_id,
+            hierarchy_path = EXCLUDED.hierarchy_path,
+            master_id = EXCLUDED.master_id,
+            broker_id = EXCLUDED.broker_id,
+            sub_broker_id = EXCLUDED.sub_broker_id,
+            referral_code = COALESCE(EXCLUDED.referral_code, users.referral_code),
+            referred_by = COALESCE(EXCLUDED.referred_by, users.referred_by),
             status = EXCLUDED.status,
             is_verified = EXCLUDED.is_verified,
             updated_at = NOW();`,
@@ -336,7 +356,11 @@ export class PostgresClientMappingRepository {
             accountType,
             balance,
             userData.client_code || normUserId,
-            userData.broker_id || 'BRK-001',
+            masterId,
+            brokerId,
+            subBrokerId,
+            userData.referral_code || null,
+            userData.referred_by || null,
           ]
         );
 
@@ -354,7 +378,7 @@ export class PostgresClientMappingRepository {
             phone = COALESCE(EXCLUDED.phone, trading_platform_accounts.phone),
             password_hash = CASE WHEN EXCLUDED.password_hash != '' THEN EXCLUDED.password_hash ELSE trading_platform_accounts.password_hash END,
             client_code = COALESCE(EXCLUDED.client_code, trading_platform_accounts.client_code),
-            broker_id = COALESCE(EXCLUDED.broker_id, trading_platform_accounts.broker_id),
+            broker_id = EXCLUDED.broker_id,
             status = EXCLUDED.status,
             updated_at = NOW();`,
           [
@@ -367,25 +391,44 @@ export class PostgresClientMappingRepository {
             userData.mobile || '9876543210',
             hashToSave,
             role,
-            userData.broker_id || 'BRK-001',
+            brokerId,
             userData.status || 'ACTIVE',
           ]
         ).catch(() => {});
 
         await pgDb.query(
           `INSERT INTO client_mappings (
-            id, tenant_id, client_id, user_id, master_id,
-            parent_id, hierarchy_path, account_type, created_at, updated_at
+            id, tenant_id, client_id, user_id, master_id, broker_id, sub_broker_id,
+            parent_id, hierarchy_path, account_type, referral_code, referred_by, created_at, updated_at
           ) VALUES (
-            $1, $2, $3, $4, $5,
-            $6, $7, $8, NOW(), NOW()
+            $1, $2, $3, $4, $5, $6, $7,
+            $8, $9, $10, $11, $12, NOW(), NOW()
           )
           ON CONFLICT (tenant_id, user_id) DO UPDATE SET
             client_id = EXCLUDED.client_id,
             master_id = EXCLUDED.master_id,
+            broker_id = EXCLUDED.broker_id,
+            sub_broker_id = EXCLUDED.sub_broker_id,
+            parent_id = EXCLUDED.parent_id,
+            hierarchy_path = EXCLUDED.hierarchy_path,
             account_type = EXCLUDED.account_type,
+            referral_code = COALESCE(EXCLUDED.referral_code, client_mappings.referral_code),
+            referred_by = COALESCE(EXCLUDED.referred_by, client_mappings.referred_by),
             updated_at = NOW();`,
-          [`map_${tenant}_${normUserId}`, tenant, id, normUserId, parentId, parentId, hierarchyPath, accountType]
+          [
+            `map_${tenant}_${normUserId}`,
+            tenant,
+            id,
+            normUserId,
+            masterId,
+            brokerId,
+            subBrokerId,
+            parentId,
+            hierarchyPath,
+            accountType,
+            userData.referral_code || null,
+            userData.referred_by || null,
+          ]
         );
 
         await pgDb.query(

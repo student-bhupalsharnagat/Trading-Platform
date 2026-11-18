@@ -161,6 +161,42 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
     return saved !== null ? saved === 'true' : true;
   });
 
+  // Password change state (top-level hooks)
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPasswordFields, setShowPasswordFields] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      showToast({ type: 'error', title: 'Password Error', description: 'Please fill in all password fields.' });
+      return;
+    }
+    if (newPassword.length < 8) {
+      showToast({ type: 'error', title: 'Password Error', description: 'New password must contain at least 8 characters.' });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showToast({ type: 'error', title: 'Password Error', description: 'New passwords do not match.' });
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const res = await authApi.changePassword({ currentPassword, newPassword, confirmPassword });
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      showToast({ type: 'success', title: 'Password Updated', description: res.message || 'Password changed successfully.' });
+    } catch (err: any) {
+      showToast({ type: 'error', title: 'Password Change Failed', description: err.message || 'Could not update password.' });
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
   const toggleSoundEffects = () => {
     const next = !soundEffects;
     setSoundEffects(next);
@@ -443,7 +479,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
             </div>
             <div>
               <div className="text-sm font-bold text-white">Settings</div>
-              <div className="text-xs text-slate-400">Security, preferences</div>
+              <div className="text-xs text-slate-400">Password, security &amp; preferences</div>
             </div>
           </div>
           <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-white transition-colors" />
@@ -675,6 +711,73 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
             </div>
 
             <div className="space-y-3 text-xs">
+              {/* Self-Service Password Change Card */}
+              <form onSubmit={handlePasswordChange} className="p-3 bg-[#060B13] border border-[#141E2E] rounded-xl space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="font-bold text-white flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-amber-400" /> Change Account Password
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswordFields((prev) => !prev)}
+                    className="text-[10px] text-amber-400 hover:underline cursor-pointer"
+                  >
+                    {showPasswordFields ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-0.5">Current Password</label>
+                    <input
+                      type={showPasswordFields ? 'text' : 'password'}
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      placeholder="Enter current password"
+                      required
+                      className="w-full px-2.5 py-1.5 bg-[#0B111C] border border-[#1E2E44] rounded-lg text-xs text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-0.5">New Password</label>
+                      <input
+                        type={showPasswordFields ? 'text' : 'password'}
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="Min. 8 chars"
+                        minLength={8}
+                        required
+                        className="w-full px-2.5 py-1.5 bg-[#0B111C] border border-[#1E2E44] rounded-lg text-xs text-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-0.5">Confirm Password</label>
+                      <input
+                        type={showPasswordFields ? 'text' : 'password'}
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Re-enter password"
+                        minLength={8}
+                        required
+                        className="w-full px-2.5 py-1.5 bg-[#0B111C] border border-[#1E2E44] rounded-lg text-xs text-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="submit"
+                    disabled={isChangingPassword}
+                    className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <Lock className="w-3 h-3" />
+                    <span>{isChangingPassword ? 'Updating...' : 'Update Password'}</span>
+                  </button>
+                </div>
+              </form>
+
               <div className="flex items-center justify-between p-3 bg-[#060B13] border border-[#141E2E] rounded-xl">
                 <div>
                   <div className="font-bold text-white">Order Confirmation Prompt</div>

@@ -145,18 +145,20 @@ router.get('/status', async (req: TenantRequest, res: Response) => {
 router.get('/current', async (req: TenantRequest, res: Response) => {
   try {
     const isProd = process.env.NODE_ENV === 'production';
+    const domain =
+      (req.query.domain as string) ||
+      (req.headers['x-forwarded-host'] as string) ||
+      req.hostname ||
+      'localhost';
     const requestedTenantId =
-      !isProd
-        ? (req.query.tenant_id as string) ||
-          (req.query.tenantId as string) ||
-          (req.headers['x-dev-tenant-id'] as string) ||
-          (req.headers['x-tenant-id'] as string) ||
-          req.cookies?.vtx_dev_tenant ||
-          undefined
-        : undefined;
+      (req.query.tenant_id as string) ||
+      (req.query.tenantId as string) ||
+      (req.headers['x-tenant-id'] as string) ||
+      (!isProd ? ((req.headers['x-dev-tenant-id'] as string) || req.cookies?.vtx_dev_tenant) : undefined) ||
+      undefined;
 
-    if (requestedTenantId) {
-      const data = await centralApiService.resolveTenant('localhost', requestedTenantId);
+    if (requestedTenantId || req.query.domain) {
+      const data = await centralApiService.resolveTenant(domain, requestedTenantId);
       res.json({
         success: true,
         data,
@@ -181,8 +183,8 @@ router.get('/current', async (req: TenantRequest, res: Response) => {
     }
 
     // If middleware didn't attach for some reason, resolve directly
-    const domain = (req.headers['x-forwarded-host'] as string) || req.hostname || 'localhost';
-    const data = await centralApiService.resolveTenant(domain);
+    const fallbackDomain = domain || (req.headers['x-forwarded-host'] as string) || req.hostname || 'localhost';
+    const data = await centralApiService.resolveTenant(fallbackDomain);
     res.json({
       success: true,
       data,

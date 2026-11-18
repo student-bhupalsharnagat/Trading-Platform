@@ -15,13 +15,30 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
   const { register, loginDemo, showToast } = useAuth();
   const { branding, isRegistrationEnabled, status } = useTenant();
 
-  const [formData, setFormData] = useState({
-    fullName: '',
-    userId: '',
-    password: '',
-    confirmPassword: '',
-    referralCode: '',
+  const [formData, setFormData] = useState(() => {
+    let initialRef = '';
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      initialRef = (sp.get('ref') || sp.get('referral') || sp.get('code') || '').trim().toUpperCase();
+    }
+    return {
+      fullName: '',
+      userId: '',
+      password: '',
+      confirmPassword: '',
+      referralCode: initialRef,
+    };
   });
+
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      const urlRef = (sp.get('ref') || sp.get('referral') || sp.get('code') || '').trim().toUpperCase();
+      if (urlRef) {
+        setFormData((prev) => (prev.referralCode ? prev : { ...prev, referralCode: urlRef }));
+      }
+    }
+  }, []);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
@@ -229,11 +246,11 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
           autoComplete="new-password"
         />
 
-        {/* 6. Referral Code (optional) */}
+        {/* 6. Partner / Referral Code (optional) */}
         <AuthInput
           id="register-referral"
-          label="Referral Code (optional)"
-          placeholder="Enter referral code"
+          label="Partner / Referral Code (optional)"
+          placeholder="e.g. BRK-XXXX, SUB-XXXX, MST-XXXX"
           value={formData.referralCode}
           onChange={(e) => {
             setFormData({ ...formData, referralCode: e.target.value.toUpperCase() });
@@ -241,7 +258,7 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
           }}
           error={errors.referralCode}
           disabled={loading || demoLoading}
-          helperText="Optional promo code (e.g. VERTEXPRO, ALPHA2026)"
+          helperText="Optional partner code for automatic broker downline assignment"
         />
 
         {/* Submit Button */}

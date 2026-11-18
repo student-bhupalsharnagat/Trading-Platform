@@ -123,10 +123,33 @@ export const resetPasswordSchema = z
     path: ['confirmPassword'],
   });
 
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, { message: 'Current password is required.' }),
+    newPassword: z
+      .string()
+      .min(8, { message: 'Password must contain at least 8 characters.' })
+      .max(72, { message: 'Password cannot exceed 72 characters.' })
+      .regex(/[A-Z]/, { message: 'Password must contain at least one uppercase letter.' })
+      .regex(/[a-z]/, { message: 'Password must contain at least one lowercase letter.' })
+      .regex(/[0-9]/, { message: 'Password must contain at least one number.' })
+      .regex(/[^A-Za-z0-9]/, { message: 'Password must contain at least one special character.' }),
+    confirmPassword: z.string().min(1, { message: 'Please confirm your new password.' }).optional(),
+  })
+  .refine((data) => !data.confirmPassword || data.newPassword === data.confirmPassword, {
+    message: 'Passwords do not match.',
+    path: ['confirmPassword'],
+  })
+  .refine((data) => data.currentPassword !== data.newPassword, {
+    message: 'New password must be different from your current password.',
+    path: ['newPassword'],
+  });
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type VerifyOtpInput = z.infer<typeof verifyOtpSchema>;
 export type ResendOtpInput = z.infer<typeof resendOtpSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 

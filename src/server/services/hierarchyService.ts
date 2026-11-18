@@ -229,12 +229,12 @@ export class HierarchyService {
         INSERT INTO users (
           id, tenant_id, full_name, user_id, country_code, mobile, email,
           password_hash, role, parent_id, hierarchy_path, company, address,
-          commission_rate, is_verified, status, account_type, demo_balance,
+          commission_rate, referral_code, is_verified, status, account_type, demo_balance,
           created_at, updated_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7,
           $8, $9, $10, $11, $12, $13,
-          $14, $15, $16, $17, $18,
+          $14, $15, $16, $17, $18, $19,
           NOW(), NOW()
         )
         ON CONFLICT (tenant_id, user_id) DO UPDATE SET
@@ -248,6 +248,7 @@ export class HierarchyService {
           company = EXCLUDED.company,
           address = EXCLUDED.address,
           commission_rate = EXCLUDED.commission_rate,
+          referral_code = COALESCE(NULLIF(EXCLUDED.referral_code, ''), users.referral_code),
           status = EXCLUDED.status,
           updated_at = NOW();
       `, [
@@ -265,6 +266,7 @@ export class HierarchyService {
         user.company || null,
         user.address || null,
         user.commission_rate ?? 0,
+        user.referral_code || null,
         user.is_verified ?? true,
         user.status || 'active',
         user.account_type || 'real',
@@ -276,13 +278,14 @@ export class HierarchyService {
         UPDATE users SET
           full_name = $1, mobile = $2, email = $3, role = $4,
           parent_id = $5, hierarchy_path = $6, company = $7,
-          address = $8, commission_rate = $9, status = $10, updated_at = NOW()
-        WHERE id = $11 OR (tenant_id = $12 AND LOWER(user_id) = LOWER($13))
+          address = $8, commission_rate = $9, referral_code = COALESCE(NULLIF($10, ''), referral_code),
+          status = $11, updated_at = NOW()
+        WHERE id = $12 OR (tenant_id = $13 AND LOWER(user_id) = LOWER($14))
       `, [
         user.full_name, user.mobile, user.email, user.role,
         user.parent_id, user.hierarchy_path, user.company,
-        user.address, user.commission_rate, user.status,
-        user.id, tenantId, user.user_id
+        user.address, user.commission_rate, user.referral_code || '',
+        user.status, user.id, tenantId, user.user_id
       ]).catch(() => {});
     }
   }
@@ -846,9 +849,11 @@ export class HierarchyService {
     const email = node.email || `${userId}@tradematrix.io`;
     const mobile = (node.phone || node.mobile || '9999999999').replace(/\D/g, '');
     const commissionRate = Number(node.commissionShare || node.commissionRate || node.commission || 0);
+    const referralCode = node.referralCode || node.referral_code || undefined;
+    const incomingHash = node.passwordHash || node.password_hash || payload?.passwordHash || payload?.password_hash || '';
     const passwordHash = node.password
       ? await PasswordHashUtil.hashPassword(node.password)
-      : (node.password_hash || '$2a$10$wT8BfZF/Y/wZ84aG9U0t6eYxUo9Jg7v1sYqQ4M4e4K0n0s9N7w5vC');
+      : (incomingHash || '$2a$10$wT8BfZF/Y/wZ84aG9U0t6eYxUo9Jg7v1sYqQ4M4e4K0n0s9N7w5vC');
     const status = (node.status || 'ACTIVE').toLowerCase();
 
     let role: UserRole = 'CLIENT';
@@ -896,6 +901,8 @@ export class HierarchyService {
         company: node.company || null,
         address: node.address || null,
         commission_rate: commissionRate,
+        referral_code: referralCode,
+        tenant_id: tenantId,
         is_verified: true,
         status: status as any,
       });
@@ -909,9 +916,11 @@ export class HierarchyService {
           parent_id: parentId,
           hierarchy_path: hierarchyPath,
           commission_rate: commissionRate,
+          referral_code: referralCode || existing.referral_code,
+          tenant_id: tenantId || existing.tenant_id,
           status: status as any,
           company: node.company || existing.company,
-          password_hash: node.password ? passwordHash : existing.password_hash,
+          password_hash: (node.password || incomingHash) ? passwordHash : existing.password_hash,
         })) || existing;
     }
 
@@ -1006,6 +1015,147 @@ export class HierarchyService {
       processed: true,
       action,
       node: syncedView,
+    };
+  }
+
+  /**
+   * Looks up a partner (Master, Broker, Sub-Broker) by referralCode / userId / id
+   */
+  public async findPartnerByReferralCode(rawCode?: string): Promise<{
+    partner: UserRecord;
+    role: 'MASTER' | 'BROKER' | 'SUB_BROKER' | 'SUPER_ADMIN';
+    tenantId: string;
+    masterId: string | null;
+    brokerId: string | null;
+    subBrokerId: string | null;
+  } | null> {
+    if (!rawCode || !rawCode.trim()) return null;
+    const cleanCode = rawCode.trim().toUpperCase();
+
+    // 1. Search in memory
+    const allUsers = await jsonUserRepository.findAll();
+    let partner = allUsers.find((u) => {
+      const r = (u.role || '').toUpperCase();
+      if (!['MASTER', 'BROKER', 'SUB_BROKER', 'SUPER_ADMIN'].includes(r)) return false;
+      const ref = (u.referral_code || (u as any).referralCode || '').toUpperCase();
+      const uid = (u.user_id || '').toUpperCase();
+      const id = (u.id || '').toUpperCase();
+      const clientCode = ((u as any).client_code || '').toUpperCase();
+      return (ref && ref === cleanCode) || uid === cleanCode || id === cleanCode || clientCode === cleanCode;
+    });
+
+    // 2. Search in PostgreSQL users
+    if (!partner) {
+      try {
+        const pgRes = await pgDb.query(`
+          SELECT * FROM users
+          WHERE UPPER(role) IN ('MASTER', 'BROKER', 'SUB_BROKER', 'SUPER_ADMIN')
+            AND (
+              (referral_code IS NOT NULL AND UPPER(referral_code) = $1)
+              OR UPPER(user_id) = $1
+              OR UPPER(id) = $1
+              OR (client_code IS NOT NULL AND UPPER(client_code) = $1)
+            )
+          LIMIT 1;
+        `, [cleanCode]);
+        if (pgRes.rows && pgRes.rows.length > 0) {
+          const r = pgRes.rows[0];
+          partner = {
+            id: r.id,
+            full_name: r.full_name,
+            user_id: r.user_id,
+            country_code: r.country_code || '+91',
+            mobile: r.mobile,
+            email: r.email,
+            password_hash: r.password_hash || '',
+            role: r.role,
+            parent_id: r.parent_id,
+            hierarchy_path: r.hierarchy_path,
+            company: r.company,
+            tenant_id: r.tenant_id,
+            referral_code: r.referral_code,
+            is_verified: true,
+            status: r.status,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+          };
+        }
+      } catch {}
+    }
+
+    // 3. Search in trading_platform_accounts
+    if (!partner) {
+      try {
+        const tpaRes = await pgDb.query(`
+          SELECT * FROM trading_platform_accounts
+          WHERE UPPER(role) IN ('MASTER', 'BROKER', 'SUB_BROKER', 'SUPER_ADMIN')
+            AND (
+              UPPER(user_id) = $1
+              OR UPPER(id) = $1
+              OR (client_code IS NOT NULL AND UPPER(client_code) = $1)
+            )
+          LIMIT 1;
+        `, [cleanCode]);
+        if (tpaRes.rows && tpaRes.rows.length > 0) {
+          const r = tpaRes.rows[0];
+          partner = {
+            id: r.id,
+            full_name: r.name,
+            user_id: r.user_id,
+            country_code: '+91',
+            mobile: r.phone || '',
+            email: r.email,
+            password_hash: r.password_hash || '',
+            role: r.role as any,
+            parent_id: null,
+            tenant_id: r.tenant_id,
+            is_verified: true,
+            status: r.status,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+          };
+        }
+      } catch {}
+    }
+
+    if (!partner) return null;
+
+    const partnerRole = (partner.role || 'BROKER').toUpperCase() as 'MASTER' | 'BROKER' | 'SUB_BROKER' | 'SUPER_ADMIN';
+    const tenantId = partner.tenant_id && partner.tenant_id !== 'default' ? partner.tenant_id : 'TNT-001';
+    let masterId: string | null = null;
+    let brokerId: string | null = null;
+    let subBrokerId: string | null = null;
+
+    if (partnerRole === 'SUB_BROKER') {
+      subBrokerId = partner.id || partner.user_id;
+      brokerId = partner.parent_id || null;
+      if (brokerId) {
+        const parentBroker = (await jsonUserRepository.findById(brokerId)) || (await jsonUserRepository.findByUserId(brokerId));
+        masterId = parentBroker?.parent_id || null;
+      }
+    } else if (partnerRole === 'BROKER') {
+      brokerId = partner.id || partner.user_id;
+      masterId = partner.parent_id || null;
+    } else if (partnerRole === 'MASTER') {
+      masterId = partner.id || partner.user_id;
+      brokerId = null;
+    }
+
+    // Fallback parsing from hierarchy_path
+    if (partner.hierarchy_path && partner.hierarchy_path.startsWith('root.')) {
+      const parts = partner.hierarchy_path.split('.');
+      if (parts.length >= 2 && !masterId) masterId = parts[1];
+      if (parts.length >= 3 && !brokerId) brokerId = parts[2];
+      if (parts.length >= 4 && !subBrokerId) subBrokerId = parts[3];
+    }
+
+    return {
+      partner,
+      role: partnerRole,
+      tenantId,
+      masterId,
+      brokerId,
+      subBrokerId,
     };
   }
 }

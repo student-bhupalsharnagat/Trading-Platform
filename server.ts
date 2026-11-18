@@ -38,6 +38,7 @@ import { postgresClientMappingRepository } from './src/server/repositories/Postg
 import { seedAjayAccount } from './src/server/services/seedAjayService.ts';
 import { authoritativeTradingDataService } from './src/server/services/authoritativeTradingDataService.ts';
 import { internalEventDispatcher } from './src/server/events/InternalEventDispatcher.ts';
+import { centralApiService } from './src/server/services/centralApiService.ts';
 
 /**
  * Purges all test/dummy users, test client mappings, and seeded records
@@ -480,6 +481,36 @@ async function startServer() {
 
   // Browser & Client API Routes with DDoS & spam rate limiting protection
   app.use('/api', generalApiLimiter);
+  app.get('/api/whitelabel/config', async (req, res) => {
+    try {
+      const domain =
+        (req.query.domain as string) ||
+        (req.headers['x-forwarded-host'] as string) ||
+        req.hostname ||
+        'localhost';
+      const tenantId =
+        (req.query.tenantId as string) ||
+        (req.query.tenant_id as string) ||
+        (req.headers['x-tenant-id'] as string) ||
+        undefined;
+      const data = await centralApiService.resolveTenant(domain, tenantId);
+      res.json({
+        success: true,
+        tenantId: data.tenant.id,
+        brandName: data.branding.brandName,
+        logoUrl: data.branding.logoUrl || '',
+        supportEmail: data.branding.supportEmail || '',
+        supportPhone: data.branding.supportPhone || '',
+        branding: data.branding,
+        config: data.config,
+        tenant: data.tenant,
+        status: data.status,
+        data,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message || 'Error resolving white-label config' });
+    }
+  });
   app.use('/api/tenant', tenantRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/trading', tradingRoutes);

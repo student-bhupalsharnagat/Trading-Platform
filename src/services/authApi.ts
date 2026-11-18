@@ -119,6 +119,17 @@ export const authApi = {
     });
   },
 
+  async changePassword(body: {
+    currentPassword: string;
+    newPassword: string;
+    confirmPassword: string;
+  }): Promise<{ success: boolean; message: string }> {
+    return fetchJson('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
   async getDevOtp(userId: string, purpose = 'registration'): Promise<{ success: boolean; otp?: string }> {
     try {
       return await fetchJson(`/api/auth/dev-otp/${encodeURIComponent(userId)}?purpose=${purpose}`, {

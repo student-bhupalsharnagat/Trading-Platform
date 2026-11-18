@@ -6,6 +6,7 @@ import {
   loginSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
+  changePasswordSchema,
 } from '../schemas/authSchemas.ts';
 import { authService } from '../services/authService.ts';
 import { db } from '../db/database.ts';
@@ -235,6 +236,27 @@ export class AuthController {
         success: true,
         message: result.message,
       });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  public async changePassword(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const validatedData = changePasswordSchema.parse(req.body);
+      const userId = req.user?.userId || req.user?.id;
+      if (!userId) {
+        res.status(401).json({ success: false, message: 'Authentication required.' });
+        return;
+      }
+      const ipAddress = getClientIp(req);
+      const result = await authService.changePassword(
+        userId,
+        validatedData.currentPassword,
+        validatedData.newPassword,
+        ipAddress
+      );
+      res.status(200).json(result);
     } catch (err) {
       next(err);
     }

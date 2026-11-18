@@ -67,6 +67,7 @@ export class JsonUserRepository implements IUserRepository {
       commission_rate: user.commission_rate ?? 0,
       is_verified: user.is_verified ?? true,
       status: user.status || 'active',
+      tenant_id: user.tenant_id || 'vertex-default',
       referral_code: user.referral_code,
       referred_by: user.referred_by,
       created_at: now,

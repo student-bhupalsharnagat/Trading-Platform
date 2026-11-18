@@ -285,6 +285,8 @@ router.post(
     '/branding/sync',
     '/branding/publish',
     '/white-label/publish',
+    '/white-label/sync',
+    '/whitelabel/sync',
   ],
   async (req: InternalAuthorizedRequest, res: Response) => {
     try {
@@ -333,6 +335,12 @@ router.post(
           const effectiveShortName = brandingUpdates.shortName || rawBranding.shortName;
           const effectiveLogoUrl = brandingUpdates.logoUrl || rawBranding.logoUrl;
           const effectivePrimaryColor = brandingUpdates.primaryColor || rawBranding.primaryColor;
+          const effectiveSecondaryColor = brandingUpdates.secondaryColor || rawBranding.secondaryColor;
+          const effectiveAccentColor = brandingUpdates.accentColor || rawBranding.accentColor;
+          const effectiveSupportEmail = brandingUpdates.supportEmail || rawBranding.supportEmail;
+          const effectiveSupportPhone = brandingUpdates.supportPhone || rawBranding.supportPhone;
+          const effectiveDomain = rawBranding.domain || rawBranding.customDomain || rawBranding.custom_domain || req.body?.domain;
+          const domainConfig = effectiveDomain ? { customDomain: String(effectiveDomain).toLowerCase(), domains: [String(effectiveDomain).toLowerCase()] } : undefined;
 
           await postgresTenantConfigRepository.upsertConfig({
             tenant_id: tenantId,
@@ -340,6 +348,11 @@ router.post(
             short_name: effectiveShortName,
             logo_url: effectiveLogoUrl,
             primary_color: effectivePrimaryColor,
+            secondary_color: effectiveSecondaryColor,
+            accent_color: effectiveAccentColor,
+            support_email: effectiveSupportEmail,
+            support_phone: effectiveSupportPhone,
+            ...(domainConfig ? { domain_config: domainConfig } : {}),
           });
           if (tenantId !== 'vertex-default') {
             await postgresTenantConfigRepository.upsertConfig({
@@ -348,6 +361,11 @@ router.post(
               short_name: effectiveShortName,
               logo_url: effectiveLogoUrl,
               primary_color: effectivePrimaryColor,
+              secondary_color: effectiveSecondaryColor,
+              accent_color: effectiveAccentColor,
+              support_email: effectiveSupportEmail,
+              support_phone: effectiveSupportPhone,
+              ...(domainConfig ? { domain_config: domainConfig } : {}),
             });
           }
         } catch {}

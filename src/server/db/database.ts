@@ -30,7 +30,9 @@ export interface UserRecord {
   password_hash: string;
   role?: UserRole;
   client_code?: string;
-  broker_id?: string;
+  master_id?: string | null;
+  broker_id?: string | null;
+  sub_broker_id?: string | null;
   parent_id?: string | null;
   hierarchy_path?: string;
   company?: string;
@@ -204,7 +206,11 @@ class DatabaseService {
               demo_balance: Number(row.demo_balance || 0),
               password_hash: row.password_hash || '',
               client_code: row.client_code || row.user_id,
-              broker_id: row.broker_id || 'BRK-001',
+              master_id: row.master_id ?? null,
+              broker_id: row.broker_id ?? null,
+              sub_broker_id: row.sub_broker_id ?? null,
+              referral_code: row.referral_code || undefined,
+              referred_by: row.referred_by || undefined,
             });
           } else {
             if (row.password_hash && (!existing.password_hash || existing.password_hash === '')) {
@@ -215,6 +221,15 @@ class DatabaseService {
             }
             if (row.email && !existing.email) {
               existing.email = row.email;
+            }
+            if (row.referral_code && !existing.referral_code) {
+              existing.referral_code = row.referral_code;
+            }
+            if (row.master_id && !existing.master_id) {
+              existing.master_id = row.master_id;
+            }
+            if (row.sub_broker_id && !existing.sub_broker_id) {
+              existing.sub_broker_id = row.sub_broker_id;
             }
           }
         }
@@ -325,6 +340,9 @@ class DatabaseService {
     role?: UserRole;
     parentId?: string | null;
     hierarchyPath?: string;
+    masterId?: string | null;
+    brokerId?: string | null;
+    subBrokerId?: string | null;
     company?: string;
     address?: string;
     commissionRate?: number;
@@ -387,6 +405,9 @@ class DatabaseService {
       role: userData.role || 'CLIENT',
       parent_id: userData.parentId !== undefined ? userData.parentId : null,
       hierarchy_path: userData.hierarchyPath || `root.${normalizedUserId}`,
+      master_id: userData.masterId !== undefined ? userData.masterId : null,
+      broker_id: userData.brokerId !== undefined ? userData.brokerId : null,
+      sub_broker_id: userData.subBrokerId !== undefined ? userData.subBrokerId : null,
       company: userData.company,
       address: userData.address,
       commission_rate: userData.commissionRate,

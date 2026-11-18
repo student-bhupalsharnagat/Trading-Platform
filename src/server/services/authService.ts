@@ -12,6 +12,7 @@ import type { RegisterInput, ResetPasswordInput } from '../schemas/authSchemas.t
 import { postgresClientMappingRepository } from '../repositories/PostgresClientMappingRepository.ts';
 import { postgresClientMappingRepository as tradingClientMappingRepo } from '../repositories/trading/PostgresClientMappingRepository.ts';
 import { pgDb } from '../db/postgres.ts';
+import { hierarchyService } from './hierarchyService.ts';
 
 if (process.env.NODE_ENV === 'production') {
   const secret = process.env.JWT_SECRET;
@@ -154,22 +155,41 @@ export class AuthService {
       };
     }
 
-    // Validate referral code if provided
+    // Resolve Partner Referral Code across Masters, Brokers, and Sub-Brokers
     let referredBy: string | undefined = undefined;
+    let resolvedTenantId = tenantId || 'vertex-default';
+    let resolvedMasterId: string | null = null;
+    let resolvedBrokerId: string | null = null;
+    let resolvedSubBrokerId: string | null = null;
+    let resolvedParentId: string | null = 'super-admin-root-0001';
+    let resolvedHierarchyPath = `root.${normalizedUserId}`;
+
     if (input.referralCode && input.referralCode.trim().length > 0) {
-      const isValidReferral = db.validateReferralCode(input.referralCode);
-      if (!isValidReferral) {
+      const cleanCode = input.referralCode.trim().toUpperCase();
+      const partnerMatch = await hierarchyService.findPartnerByReferralCode(cleanCode);
+      if (partnerMatch) {
+        referredBy = cleanCode;
+        resolvedTenantId = partnerMatch.tenantId || resolvedTenantId;
+        resolvedMasterId = partnerMatch.masterId;
+        resolvedBrokerId = partnerMatch.brokerId;
+        resolvedSubBrokerId = partnerMatch.subBrokerId;
+        resolvedParentId = partnerMatch.subBrokerId || partnerMatch.brokerId || partnerMatch.masterId || 'super-admin-root-0001';
+        resolvedHierarchyPath = partnerMatch.partner.hierarchy_path
+          ? `${partnerMatch.partner.hierarchy_path}.${normalizedUserId}`
+          : `root.${resolvedMasterId || 'superadmin'}.${normalizedUserId}`;
+      } else if (db.validateReferralCode(cleanCode)) {
+        // Promo / legacy referral code — assign to default house tenant (Super Admin pool)
+        referredBy = cleanCode;
+      } else {
         const err = new Error('Invalid or expired referral code.');
         (err as any).statusCode = 400;
         (err as any).field = 'referralCode';
         throw err;
       }
-      referredBy = input.referralCode.trim().toUpperCase();
     }
 
     // Hash password with Argon2id (never store plaintext)
     const passwordHash = await PasswordHashUtil.hashPassword(input.password);
-    const nowIso = new Date().toISOString();
 
     // Save active user directly to database (status: ACTIVE)
     const user = db.createUser({
@@ -182,9 +202,14 @@ export class AuthService {
       passwordHash,
       referralCode: `VTX${Math.floor(1000 + Math.random() * 9000)}`,
       referredBy,
+      parentId: resolvedParentId,
+      hierarchyPath: resolvedHierarchyPath,
+      masterId: resolvedMasterId,
+      brokerId: resolvedBrokerId,
+      subBrokerId: resolvedSubBrokerId,
       isVerified: true,
       status: 'ACTIVE',
-      tenantId: tenantId || 'vertex-default',
+      tenantId: resolvedTenantId,
     });
 
     // Immediately create client_mappings, client_identity_mappings, and trading_wallets in PostgreSQL
@@ -194,7 +219,13 @@ export class AuthService {
         password_hash: passwordHash,
         passwordHash,
         client_code: normalizedUserId,
-        broker_id: 'BRK-001',
+        master_id: resolvedMasterId,
+        broker_id: resolvedBrokerId,
+        sub_broker_id: resolvedSubBrokerId,
+        parent_id: resolvedParentId,
+        hierarchy_path: resolvedHierarchyPath,
+        referral_code: user.referral_code,
+        referred_by: referredBy,
       }, user.tenant_id);
     } catch (createErr: any) {
       console.warn('[Signup] Notice: Immediate client mapping & wallet creation notice:', createErr.message);
@@ -217,6 +248,10 @@ export class AuthService {
         userId: user.user_id,
         status: 'ACTIVE',
         tenantId: user.tenant_id,
+        masterId: resolvedMasterId,
+        brokerId: resolvedBrokerId,
+        subBrokerId: resolvedSubBrokerId,
+        referredBy,
       },
     });
 
@@ -233,11 +268,7 @@ export class AuthService {
       },
     });
 
-    // Publish Central Admin client.registered, client.activated, and kyc.submitted events
-    const hierarchy = internalEventDispatcher.resolveHierarchyContext({
-      ...user,
-      brokerId: user.broker_id || 'BRK-001',
-    });
+    // Publish Central Admin & User Panel client.registered, client.activated, and kyc.submitted events
     const clientPayload: ClientRegisteredPayload = {
       tenantId: user.tenant_id || 'vertex-default',
       tradingUserId: user.user_id,
@@ -250,11 +281,33 @@ export class AuthService {
       status: 'ACTIVE',
       accountStatus: user.status || 'ACTIVE',
       kycStatus: user.is_verified ? 'VERIFIED' : 'PENDING',
-      masterId: hierarchy.masterId,
-      brokerId: hierarchy.brokerId,
-      subBrokerId: hierarchy.subBrokerId,
+      masterId: resolvedMasterId,
+      brokerId: resolvedBrokerId,
+      subBrokerId: resolvedSubBrokerId,
       createdAt: user.created_at,
     };
+
+    this.dispatchS2SHierarchySync({
+      action: 'created',
+      nodeType: 'CLIENT',
+      role: 'CLIENT',
+      id: user.id || user.user_id,
+      userId: user.user_id,
+      clientCode: user.user_id.toUpperCase(),
+      name: user.full_name,
+      fullName: user.full_name,
+      email: user.email || '',
+      phone: user.phone_e164 || user.mobile || '',
+      passwordHash,
+      tenantId: user.tenant_id || 'vertex-default',
+      masterId: resolvedMasterId,
+      brokerId: resolvedBrokerId,
+      subBrokerId: resolvedSubBrokerId,
+      referralCode: user.referral_code,
+      referredBy,
+      status: 'ACTIVE',
+      createdAt: user.created_at,
+    }).catch(() => {});
 
     transactionalOutboxService.enqueue({
       eventId: `evt-reg-${user.user_id}-${Date.now()}`,
@@ -1017,6 +1070,160 @@ export class AuthService {
       success: true,
       message: 'Password updated successfully. All existing sessions have been terminated. Please login with your new credentials.',
     };
+  }
+
+  /**
+   * Self-service password change for authenticated trader clients / partners
+   */
+  public async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+    ipAddress?: string
+  ): Promise<{ success: boolean; message: string }> {
+    const cleanUserId = userId.trim().toLowerCase();
+    let user = db.findUserByUserId(cleanUserId) || db.findUserById(cleanUserId);
+
+    if (!user) {
+      try {
+        const pgRes = await pgDb.query(
+          `SELECT * FROM users WHERE LOWER(user_id) = LOWER($1) OR id = $1 LIMIT 1;`,
+          [cleanUserId]
+        );
+        if (pgRes.rows && pgRes.rows.length > 0) {
+          const r = pgRes.rows[0];
+          user = {
+            id: r.id,
+            user_id: r.user_id,
+            full_name: r.full_name,
+            email: r.email,
+            mobile: r.mobile,
+            password_hash: r.password_hash || '',
+            role: r.role,
+            tenant_id: r.tenant_id,
+            master_id: r.master_id ?? null,
+            broker_id: r.broker_id ?? null,
+            sub_broker_id: r.sub_broker_id ?? null,
+            is_verified: true,
+            status: r.status,
+            country_code: r.country_code || '+91',
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+          } as any;
+        }
+      } catch {}
+    }
+
+    if (!user) {
+      const err = new Error('Account not found.');
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    const isSeedAccount = ['vtx_demo', 'vtx123', 'arrav', 'aarav', 'demo', 'ajay12', 'ajay'].includes(cleanUserId);
+    let isCurrentValid = false;
+    if (user.password_hash) {
+      const verifyRes = await PasswordHashUtil.verifyPassword(currentPassword, user.password_hash);
+      isCurrentValid = verifyRes.valid;
+    }
+    if (!isCurrentValid && isSeedAccount && (!user.password_hash || user.password_hash.includes('DEMO_ACCOUNT')) && (currentPassword === 'Password@123' || currentPassword === 'Ajay@123')) {
+      isCurrentValid = true;
+    }
+
+    if (!isCurrentValid) {
+      const err = new Error('Current password is incorrect.');
+      (err as any).statusCode = 400;
+      (err as any).field = 'currentPassword';
+      throw err;
+    }
+
+    const newPasswordHash = await PasswordHashUtil.hashPassword(newPassword);
+    db.updateUserPassword(user.user_id, newPasswordHash);
+
+    try {
+      await pgDb.query(
+        `UPDATE users SET password_hash = $1, updated_at = NOW() WHERE LOWER(user_id) = LOWER($2) OR id = $3;`,
+        [newPasswordHash, user.user_id, user.id]
+      );
+      await pgDb.query(
+        `UPDATE trading_platform_accounts SET password_hash = $1, updated_at = NOW() WHERE LOWER(user_id) = LOWER($2);`,
+        [newPasswordHash, user.user_id]
+      ).catch(() => {});
+    } catch (pgErr: any) {
+      console.warn('[ChangePassword] PostgreSQL update notice:', pgErr.message);
+    }
+
+    auditService.log({
+      actorId: user.user_id,
+      actorName: user.full_name,
+      actorRole: user.role || 'CLIENT',
+      action: 'PASSWORD_CHANGED',
+      module: 'AUTH',
+      targetId: user.user_id,
+      ipAddress,
+      newValue: { updatedAt: new Date().toISOString() },
+    });
+
+    this.dispatchS2SHierarchySync({
+      action: 'PASSWORD_UPDATED',
+      nodeType: user.role || 'CLIENT',
+      role: user.role || 'CLIENT',
+      id: user.id,
+      userId: user.user_id,
+      name: user.full_name,
+      email: user.email || '',
+      phone: user.mobile || '',
+      passwordHash: newPasswordHash,
+      tenantId: user.tenant_id || 'vertex-default',
+      masterId: user.master_id ?? null,
+      brokerId: user.broker_id ?? null,
+      subBrokerId: user.sub_broker_id ?? null,
+    }).catch(() => {});
+
+    return {
+      success: true,
+      message: 'Password updated successfully.',
+    };
+  }
+
+  private async dispatchS2SHierarchySync(payload: Record<string, any>): Promise<void> {
+    if (process.env.DISABLE_OUTBOUND_S2S === 'true') return;
+    const adminUrl = (process.env.CENTRAL_ADMIN_URL || process.env.CENTRAL_ADMIN_BASE_URL || 'https://admin-dashbord-wxcq.onrender.com').replace(/\/+$/, '');
+    const userPanelUrl = (process.env.USER_PANEL_URL || process.env.USER_PANEL_BASE_URL || 'https://user-panel-dashbord-ofrt.onrender.com').replace(/\/+$/, '');
+    const secret = process.env.INTERNAL_API_SECRET || process.env.INTERNAL_COMMUNICATION_SECRET || 'nextrade-internal-hmac-secret-2026';
+    const path = '/api/internal/v1/hierarchy/sync';
+    const envelope = { ...payload, node: payload, timestamp: new Date().toISOString() };
+    const bodyStr = JSON.stringify(envelope);
+    const targets = Array.from(new Set([adminUrl, userPanelUrl])).filter(Boolean);
+
+    await Promise.allSettled(
+      targets.map(async (baseUrl) => {
+        const timestamp = Date.now().toString();
+        const canonical = `${timestamp}.POST.${path}.${bodyStr}`;
+        const signature = crypto.createHmac('sha256', secret).update(canonical).digest('hex');
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+          await fetch(`${baseUrl}${path}`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-internal-signature': signature,
+              'x-signature-sha256': signature,
+              'x-internal-timestamp': timestamp,
+              'x-timestamp': timestamp,
+              'x-tenant-id': String(payload.tenantId || 'TNT-001'),
+            },
+            body: bodyStr,
+            signal: controller.signal,
+          });
+        } catch (err: any) {
+          console.warn(`[S2S Sync] Non-blocking dispatch notice for ${baseUrl}${path}:`, err?.message || err);
+        } finally {
+          clearTimeout(timer);
+        }
+      })
+    );
   }
 
   /**
