@@ -5,7 +5,6 @@ import { centralApiService } from '../services/centralApiService.ts';
 import { db } from '../db/database.ts';
 import { emergencyStateCache } from '../cache/EmergencyStateCache.ts';
 import { tenantConfigCache } from '../cache/TenantConfigCache.ts';
-import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
 
 export interface TenantRequest extends AuthenticatedRequest {
   tenant?: TenantContextData;
@@ -86,9 +85,6 @@ export function requireTradingEnabled(
   const emergencyState = emergencyStateCache.get(tenantId);
   const cachedConfig = tenantConfigCache.get(tenantId);
 
-  const reqUserId = req.user?.userId || req.user?.id || 'unknown';
-  const reqSymbol = req.body?.symbol || req.body?.instrument;
-
   // 1. Tenant Level Freeze
   if (
     emergencyState.tenantFrozen ||
@@ -96,23 +92,13 @@ export function requireTradingEnabled(
     tenant.tenant.status === 'frozen' ||
     cachedConfig?.tenantStatus === 'frozen'
   ) {
-    const reason =
-      emergencyState.reason ||
-      tenant.status.reason ||
-      'All platform trading operations are currently frozen by administration.';
-    internalEventDispatcher.dispatchRiskAlert({
-      tenantId,
-      userId: reqUserId,
-      alertType: 'ORDER_BLOCKED',
-      severity: 'HIGH',
-      code: 'TENANT_FROZEN',
-      symbol: reqSymbol,
-      reason,
-    }).catch(() => {});
     res.status(403).json({
       success: false,
       code: 'TENANT_FROZEN',
-      message: reason,
+      message:
+        emergencyState.reason ||
+        tenant.status.reason ||
+        'All platform trading operations are currently frozen by administration.',
     });
     return;
   }
@@ -124,23 +110,13 @@ export function requireTradingEnabled(
     cachedConfig?.tradingEnabled === false ||
     !tenant.config.trading_enabled
   ) {
-    const reason =
-      emergencyState.reason ||
-      tenant.status.reason ||
-      'Trading is currently suspended for this platform. New orders cannot be placed.';
-    internalEventDispatcher.dispatchRiskAlert({
-      tenantId,
-      userId: reqUserId,
-      alertType: 'ORDER_BLOCKED',
-      severity: 'HIGH',
-      code: 'TRADING_DISABLED',
-      symbol: reqSymbol,
-      reason,
-    }).catch(() => {});
     res.status(403).json({
       success: false,
       code: 'TRADING_DISABLED',
-      message: reason,
+      message:
+        emergencyState.reason ||
+        tenant.status.reason ||
+        'Trading is currently suspended for this platform. New orders cannot be placed.',
     });
     return;
   }
@@ -152,22 +128,12 @@ export function requireTradingEnabled(
     tenant.config.maintenance_mode ||
     tenant.status.maintenance_active
   ) {
-    const reason =
-      tenant.config.maintenance_message ||
-      'Platform maintenance in progress. Orders are temporarily suspended.';
-    internalEventDispatcher.dispatchRiskAlert({
-      tenantId,
-      userId: reqUserId,
-      alertType: 'ORDER_BLOCKED',
-      severity: 'MEDIUM',
-      code: 'MAINTENANCE_MODE',
-      symbol: reqSymbol,
-      reason,
-    }).catch(() => {});
     res.status(503).json({
       success: false,
       code: 'MAINTENANCE_MODE',
-      message: reason,
+      message:
+        tenant.config.maintenance_message ||
+        'Platform maintenance in progress. Orders are temporarily suspended.',
     });
     return;
   }
@@ -270,22 +236,12 @@ export function requireActiveTrader(
 
     const freezeCheck = db.isUserOrHierarchyFrozen(userRecord);
     if (freezeCheck.frozen || userRecord.is_frozen || userRecord.status === 'suspended' || userRecord.status === 'SUSPENDED') {
-      const reason =
-        freezeCheck.reason ||
-        'Your account is currently frozen. Please contact customer support.';
-      internalEventDispatcher.dispatchRiskAlert({
-        tenantId: req.tenant?.tenant?.id || userRecord.tenant_id || 'vertex-default',
-        userId: userRecord.user_id,
-        alertType: 'ORDER_BLOCKED',
-        severity: 'HIGH',
-        code: 'USER_FROZEN',
-        symbol: req.body?.symbol || req.body?.instrument,
-        reason,
-      }).catch(() => {});
       res.status(403).json({
         success: false,
         code: 'USER_FROZEN',
-        message: reason,
+        message:
+          freezeCheck.reason ||
+          'Your account is currently frozen. Please contact customer support.',
       });
       return;
     }

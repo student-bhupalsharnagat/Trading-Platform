@@ -1653,7 +1653,6 @@ export class AuthoritativeTradingDataService {
     });
 
     const eventType = type === 'DEPOSIT' ? 'deposit.created' : 'withdrawal.created';
-    const hLinks = this.resolveHierarchyLinks({ user_id: resolvedUserId });
     const fundPayload = {
       id: txId,
       transactionId: txId,
@@ -1662,9 +1661,6 @@ export class AuthoritativeTradingDataService {
       userId: resolvedUserId,
       clientId: resolvedUserId,
       tradingUserId: resolvedUserId,
-      masterId: hLinks.masterId,
-      brokerId: hLinks.brokerId,
-      subBrokerId: hLinks.subBrokerId,
       amount: Number(amount),
       type,
       status: 'PENDING' as const,
@@ -1787,7 +1783,6 @@ export class AuthoritativeTradingDataService {
       }
 
       const eventType = tx.transaction_type === 'DEPOSIT' ? 'deposit.rejected' : 'withdrawal.rejected';
-      const hLinks = this.resolveHierarchyLinks({ user_id: tx.user_id });
       const rejectPayload = {
         id: txId,
         transactionId: txId,
@@ -1796,9 +1791,6 @@ export class AuthoritativeTradingDataService {
         userId: tx.user_id,
         clientId: tx.user_id,
         tradingUserId: tx.user_id,
-        masterId: hLinks.masterId,
-        brokerId: hLinks.brokerId,
-        subBrokerId: hLinks.subBrokerId,
         amount: Number(tx.amount),
         type: tx.transaction_type,
         status: 'REJECTED' as const,
@@ -1917,7 +1909,6 @@ export class AuthoritativeTradingDataService {
       );
 
       const eventType = tx.transaction_type === 'DEPOSIT' ? 'deposit.approved' : 'withdrawal.approved';
-      const hLinks = this.resolveHierarchyLinks({ user_id: tx.user_id });
       const approvePayload = {
         id: txId,
         transactionId: txId,
@@ -1926,9 +1917,6 @@ export class AuthoritativeTradingDataService {
         userId: tx.user_id,
         clientId: tx.user_id,
         tradingUserId: tx.user_id,
-        masterId: hLinks.masterId,
-        brokerId: hLinks.brokerId,
-        subBrokerId: hLinks.subBrokerId,
         amount: Number(tx.amount),
         type: tx.transaction_type,
         status: 'APPROVED' as const,
@@ -2044,23 +2032,6 @@ export class AuthoritativeTradingDataService {
     internalEventDispatcher.dispatchWalletUpdated(approvalResult.walletPayload).catch((e) =>
       console.warn('[Event] wallet.updated dispatch warning:', e)
     );
-
-    internalEventDispatcher.dispatchLedgerUpdated({
-      tenantId,
-      userId: tx.user_id,
-      transactionId: tx.id,
-      type: tx.transaction_type === 'DEPOSIT' ? 'CREDIT' : 'DEBIT',
-      category: tx.transaction_type,
-      amount: Number(tx.amount),
-      balanceBefore: approvalResult.approvePayload.balanceBefore,
-      balanceAfter: approvalResult.approvePayload.balanceAfter,
-      usedMargin: approvalResult.walletPayload.usedMargin,
-      reference: `Admin Approved ${tx.transaction_type} [${tx.reference_id || tx.id}]`,
-      createdBy: adminId,
-      masterId: approvalResult.approvePayload.masterId,
-      brokerId: approvalResult.approvePayload.brokerId,
-      subBrokerId: approvalResult.approvePayload.subBrokerId,
-    }).catch((e) => console.warn('[Event] ledger.updated dispatch warning:', e));
 
     // Real-time WebSocket delivery to client and broker panel
     tradingWebSocketServer.broadcastToTenant(

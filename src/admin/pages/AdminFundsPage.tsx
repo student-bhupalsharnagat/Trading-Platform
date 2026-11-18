@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   Wallet,
   ArrowDownLeft,
@@ -37,78 +37,48 @@ export const AdminFundsPage: React.FC<AdminFundsPageProps> = ({ onNavigate }) =>
   const [manualAmount, setManualAmount] = useState('');
   const [manualNote, setManualNote] = useState('');
 
-  const isFetchingRef = useRef(false);
-
-  const fetchFunds = useCallback(async (silent = false) => {
-    if (silent && isFetchingRef.current) return;
-    isFetchingRef.current = true;
+  const fetchFunds = async () => {
     try {
-      if (!silent) {
-        setLoading(true);
-        setError(null);
-      }
+      setLoading(true);
+      setError(null);
       const data: any = await adminApi.getFunds();
       setTransactions(data?.data || data || []);
     } catch (err: any) {
-      if (!silent) {
-        setError(err.message || 'Failed to load fund transactions');
-      }
+      setError(err.message || 'Failed to load fund transactions');
     } finally {
-      isFetchingRef.current = false;
-      if (!silent) setLoading(false);
+      setLoading(false);
     }
-  }, []);
+  };
 
   useEffect(() => {
-    fetchFunds(false);
-    const pollId = setInterval(() => {
-      fetchFunds(true);
-    }, 2500);
-    return () => clearInterval(pollId);
-  }, [fetchFunds]);
+    fetchFunds();
+  }, []);
 
   // Real-time subscriptions for funds
   useEffect(() => {
     const handleNewFund = (tx: any) => {
-      const txId = tx.id || tx.transactionId;
-      if (txId) {
-        setTransactions((prev) => [
-          { ...tx, id: txId, transaction_type: tx.transaction_type || tx.type },
-          ...prev.filter((t) => t.id !== txId),
-        ]);
-      }
+      setTransactions((prev) => [tx, ...prev.filter((t) => t.id !== tx.id)]);
       setSuccessMsg(`New ${tx.type || tx.transaction_type} request received for ${tx.userId || tx.user_id}!`);
-      fetchFunds(true);
     };
 
     const handleProcessedFund = (tx: any) => {
-      const txId = tx.id || tx.transactionId;
-      if (txId) {
-        setTransactions((prev) => {
-          const exists = prev.some((t) => t.id === txId);
-          if (exists) {
-            return prev.map((t) => (t.id === txId ? { ...t, ...tx, id: txId, status: tx.status } : t));
-          }
-          return [{ ...tx, id: txId, transaction_type: tx.transaction_type || tx.type }, ...prev];
-        });
-      }
-      fetchFunds(true);
+      setTransactions((prev) =>
+        prev.map((t) => (t.id === tx.id ? { ...t, ...tx, status: tx.status } : t))
+      );
     };
 
     const unsubReq = subscribe('fund.requested', handleNewFund);
     const unsubCreated = subscribe('fund.created', handleNewFund);
     const unsubProc = subscribe('fund.processed', handleProcessedFund);
     const unsubUpd = subscribe('fund.updated', handleProcessedFund);
-    const unsubTxUpdated = subscribe('fund.transaction_updated', handleProcessedFund);
 
     return () => {
       unsubReq();
       unsubCreated();
       unsubProc();
       unsubUpd();
-      unsubTxUpdated();
     };
-  }, [subscribe, fetchFunds]);
+  }, [subscribe]);
 
   const handleProcess = async (txId: string, action: 'APPROVE' | 'REJECT') => {
     try {
@@ -222,7 +192,7 @@ export const AdminFundsPage: React.FC<AdminFundsPageProps> = ({ onNavigate }) =>
             <span>Manual Adjustment</span>
           </button>
           <button
-            onClick={() => fetchFunds(false)}
+            onClick={fetchFunds}
             className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700/60 text-xs font-semibold text-slate-300 flex items-center gap-1.5"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-blue-400 ${loading ? 'animate-spin' : ''}`} />

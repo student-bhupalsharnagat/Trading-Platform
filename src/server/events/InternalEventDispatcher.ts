@@ -17,9 +17,6 @@ import {
   TradeExecutedPayload,
   ClientRegisteredPayload,
   ClientActivatedPayload,
-  BrokerAddedPayload,
-  LedgerUpdatedPayload,
-  RiskAlertPayload,
   PositionUpdatedPayload,
   WalletUpdatedPayload,
   FundTransactionPayload,
@@ -39,18 +36,6 @@ import {
 import { auditService } from '../services/auditService.ts';
 import { transactionalOutboxService } from '../services/TransactionalOutboxService.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
-import { enrichPayloadWithHierarchy } from '../utils/hierarchyContext.ts';
-
-export interface SseClientFilter {
-  tenantId?: string;
-  userId?: string;
-  masterId?: string;
-  brokerId?: string;
-  subBrokerId?: string;
-  role?: string;
-}
-
-const PRIVILEGED_ROLES = new Set(['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER']);
 
 export interface DispatcherHealthMetrics {
   queueSize: number;
@@ -107,25 +92,13 @@ export class InternalEventDispatcher {
     res: any;
     tenantId?: string;
     userId?: string;
-    masterId?: string;
-    brokerId?: string;
-    subBrokerId?: string;
-    role?: string;
   }>();
 
   public registerSseClient(
     res: any,
-    filter?: SseClientFilter
+    filter?: { tenantId?: string; userId?: string }
   ): () => void {
-    const client = {
-      res,
-      tenantId: filter?.tenantId,
-      userId: filter?.userId,
-      masterId: filter?.masterId,
-      brokerId: filter?.brokerId,
-      subBrokerId: filter?.subBrokerId,
-      role: filter?.role,
-    };
+    const client = { res, tenantId: filter?.tenantId, userId: filter?.userId };
     this.sseClients.add(client);
     return () => {
       this.sseClients.delete(client);
@@ -139,95 +112,24 @@ export class InternalEventDispatcher {
   public broadcastSse(
     event: string,
     payload: any,
-    filter?: SseClientFilter
+    filter?: { tenantId?: string; userId?: string }
   ): void {
     const data = JSON.stringify(payload);
     const message = `event: ${event}\ndata: ${data}\n\n`;
-
-    const payloadMasterId = filter?.masterId ?? payload?.masterId ?? undefined;
-    const payloadBrokerId = filter?.brokerId ?? payload?.brokerId ?? undefined;
-    const payloadSubBrokerId = filter?.subBrokerId ?? payload?.subBrokerId ?? undefined;
 
     this.sseClients.forEach((client) => {
       if (filter?.tenantId && client.tenantId && client.tenantId !== filter.tenantId && client.tenantId !== 'global') {
         return;
       }
-
-      const isPrivileged = Boolean(client.role && PRIVILEGED_ROLES.has(client.role.toUpperCase()));
-
-      if (filter?.role === 'ADMIN_ONLY' && client.role && !isPrivileged) {
+      if (filter?.userId && client.userId && client.userId !== filter.userId) {
         return;
       }
-
-      // Enforce hierarchy scope when the subscriber declared a hierarchy node filter
-      if (client.masterId && payloadMasterId && client.masterId !== payloadMasterId) {
-        return;
-      }
-      if (client.brokerId && payloadBrokerId && client.brokerId !== payloadBrokerId) {
-        return;
-      }
-      if (client.subBrokerId && payloadSubBrokerId && client.subBrokerId !== payloadSubBrokerId) {
-        return;
-      }
-
-      if (filter?.userId && client.userId && client.userId !== filter.userId && !isPrivileged) {
-        return;
-      }
-
       try {
         client.res.write(message);
       } catch {
         this.sseClients.delete(client);
       }
     });
-  }
-
-  /**
-   * Broadcasts an authoritative real-time KPI/metric event simultaneously over
-   * WebSocket (/ws) and SSE (/api/stream, /api/v1/stream, /api/trading/stream, /api/internal/v1/stream)
-   * enriched with tenantId, masterId, brokerId, and subBrokerId.
-   */
-  public broadcastDashboardEvent<T extends Record<string, any>>(
-    tenantId: string,
-    event: string,
-    payload: T,
-    options?: { targetUserId?: string; adminOnly?: boolean }
-  ): T & { tenantId: string; masterId: string | null; brokerId: string | null; subBrokerId: string | null } {
-    const enriched = enrichPayloadWithHierarchy(tenantId, payload);
-    const targetUserId = options?.targetUserId;
-    const adminOnly = Boolean(options?.adminOnly);
-
-    const recipientFilter = adminOnly
-      ? (ws: any) => PRIVILEGED_ROLES.has(String(ws.role || '').toUpperCase())
-      : targetUserId
-        ? (ws: any) => ws.userId === targetUserId || PRIVILEGED_ROLES.has(String(ws.role || '').toUpperCase())
-        : undefined;
-
-    const targetFilter = targetUserId && !adminOnly ? { targetUserId } : undefined;
-
-    try {
-      tradingWebSocketServer.broadcastToTenant(
-        enriched.tenantId,
-        event,
-        enriched,
-        recipientFilter,
-        false,
-        targetFilter
-      );
-    } catch (wsErr: any) {
-      console.warn(`[InternalEventDispatcher] WS broadcast warning for ${event}:`, wsErr?.message || wsErr);
-    }
-
-    this.broadcastSse(event, enriched, {
-      tenantId: enriched.tenantId,
-      userId: adminOnly ? undefined : targetUserId,
-      masterId: enriched.masterId ?? undefined,
-      brokerId: enriched.brokerId ?? undefined,
-      subBrokerId: enriched.subBrokerId ?? undefined,
-      role: adminOnly ? 'ADMIN_ONLY' : undefined,
-    });
-
-    return enriched;
   }
 
   public broadcastRealtimeTick(tick: {
@@ -263,21 +165,16 @@ export class InternalEventDispatcher {
    * Enqueues immediately and attempts delivery without blocking caller or failing caller.
    */
   public async dispatch<T = any>(event: InternalEvent<T>): Promise<void> {
-    const enrichedEvent: InternalEvent<T> = {
-      ...event,
-      payload: enrichPayloadWithHierarchy(event.tenantId, event.payload),
-    };
-
     // 1. Enqueue locally first
-    this.queue.enqueue(enrichedEvent);
+    this.queue.enqueue(event);
 
     // 2. Persist to transactional outbox (PostgreSQL) asynchronously
     transactionalOutboxService
       .enqueue({
-        eventId: enrichedEvent.eventId,
-        tenantId: enrichedEvent.tenantId,
-        eventType: enrichedEvent.eventType,
-        payload: enrichedEvent.payload,
+        eventId: event.eventId,
+        tenantId: event.tenantId,
+        eventType: event.eventType,
+        payload: event.payload,
       })
       .catch((err) => {
         console.warn('[InternalEventDispatcher] Outbox persistence warning:', err);
@@ -286,7 +183,7 @@ export class InternalEventDispatcher {
     // 3. Attempt delivery asynchronously (non-blocking)
     // Run attempt in next tick so caller function returns immediately
     setImmediate(() => {
-      this.attemptDelivery(enrichedEvent.eventId).catch((err) => {
+      this.attemptDelivery(event.eventId).catch((err) => {
         console.error('[InternalEventDispatcher] Unhandled delivery error:', err);
       });
     });
@@ -400,8 +297,7 @@ export class InternalEventDispatcher {
     const price = Number(params.executionPrice);
     const val = Number(params.executionValue ?? params.totalValue ?? (qty * price));
 
-    const payload: TradeExecutedPayload = enrichPayloadWithHierarchy(params.tenantId, {
-      ...params,
+    const payload: TradeExecutedPayload = {
       tenantId: params.tenantId,
       userId: params.userId,
       clientId: params.clientId || params.tradingUserId || params.userId,
@@ -424,7 +320,7 @@ export class InternalEventDispatcher {
       commission: Number(params.commission ?? 0),
       realizedPnl: Number(params.realizedPnl ?? 0),
       executedAt: params.executedAt || new Date().toISOString(),
-    });
+    };
 
     const event: InternalEvent<TradeExecutedPayload> = {
       eventId: `evt-trade-${tradeId}`,
@@ -434,10 +330,6 @@ export class InternalEventDispatcher {
       version: 1,
       payload,
     };
-
-    this.broadcastDashboardEvent(params.tenantId, 'trade.executed', payload, {
-      targetUserId: params.userId,
-    });
 
     await this.dispatch(event);
     return event;
@@ -483,70 +375,21 @@ export class InternalEventDispatcher {
       reportedAt: now,
     });
 
-    const detectedAt = params.detectedAt || new Date().toISOString();
-    const enrichedPayload = enrichPayloadWithHierarchy(params.tenantId, {
-      tenantId: params.tenantId,
-      userId: params.userId,
-      usedMargin: params.usedMargin,
-      availableMargin: params.availableMargin,
-      exposure: params.exposure,
-      threshold: params.threshold ?? 0.8,
-      detectedAt,
-    });
-
     const event: InternalEvent<MarginBreachPayload> = {
       eventId: `evt-risk-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
       eventType: 'risk.margin_breach',
       tenantId: params.tenantId,
       timestamp: new Date().toISOString(),
       version: 1,
-      payload: enrichedPayload,
-    };
-
-    this.broadcastDashboardEvent(params.tenantId, 'risk.margin_breach', enrichedPayload, {
-      targetUserId: params.userId,
-    });
-    this.broadcastDashboardEvent(
-      params.tenantId,
-      'risk.alert_triggered',
-      {
-        ...enrichedPayload,
-        alertType: 'MARGIN_SHORTFALL' as const,
-        severity: 'CRITICAL' as const,
-        code: 'MARGIN_BREACH',
-        reason: `Margin shortfall detected for ${params.userId} (available: ${params.availableMargin}, exposure: ${params.exposure})`,
+      payload: {
+        userId: params.userId,
+        usedMargin: params.usedMargin,
+        availableMargin: params.availableMargin,
+        exposure: params.exposure,
+        threshold: params.threshold ?? 0.8,
+        detectedAt: params.detectedAt || new Date().toISOString(),
       },
-      { targetUserId: params.userId }
-    );
-
-    await this.dispatch(event);
-    return event;
-  }
-
-  /**
-   * Publishes a real-time risk.alert_triggered event for margin shortfalls or blocked orders.
-   */
-  public async dispatchRiskAlert(
-    payload: RiskAlertPayload
-  ): Promise<InternalEvent<RiskAlertPayload>> {
-    const enriched = enrichPayloadWithHierarchy(payload.tenantId, {
-      ...payload,
-      severity: payload.severity || 'HIGH',
-      detectedAt: payload.detectedAt || new Date().toISOString(),
-    });
-
-    const event: InternalEvent<RiskAlertPayload> = {
-      eventId: `evt-risk-alert-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
-      eventType: 'risk.alert_triggered',
-      tenantId: enriched.tenantId,
-      timestamp: new Date().toISOString(),
-      version: 1,
-      payload: enriched,
     };
-
-    this.broadcastDashboardEvent(enriched.tenantId, 'risk.alert_triggered', enriched, {
-      targetUserId: enriched.userId,
-    });
 
     await this.dispatch(event);
     return event;
@@ -565,39 +408,22 @@ export class InternalEventDispatcher {
     reason: string;
     failedAt?: string;
   }): Promise<InternalEvent<ExecutionFailurePayload>> {
-    const failedAt = params.failedAt || new Date().toISOString();
-    const enriched = enrichPayloadWithHierarchy(params.tenantId, {
-      tenantId: params.tenantId,
-      orderId: params.orderId,
-      userId: params.userId,
-      symbol: params.symbol,
-      side: params.side,
-      quantity: params.quantity,
-      reason: params.reason,
-      failedAt,
-    });
-
     const event: InternalEvent<ExecutionFailurePayload> = {
       eventId: `evt-fail-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
       eventType: 'execution.failure',
       tenantId: params.tenantId,
       timestamp: new Date().toISOString(),
       version: 1,
-      payload: enriched,
-    };
-
-    this.broadcastDashboardEvent(
-      params.tenantId,
-      'risk.alert_triggered',
-      {
-        ...enriched,
-        alertType: 'EXECUTION_FAILURE' as const,
-        severity: 'HIGH' as const,
-        code: 'EXECUTION_FAILURE',
-        detectedAt: failedAt,
+      payload: {
+        orderId: params.orderId,
+        userId: params.userId,
+        symbol: params.symbol,
+        side: params.side,
+        quantity: params.quantity,
+        reason: params.reason,
+        failedAt: params.failedAt || new Date().toISOString(),
       },
-      { targetUserId: params.userId }
-    );
+    };
 
     await this.dispatch(event);
     return event;
@@ -666,43 +492,14 @@ export class InternalEventDispatcher {
   public async dispatchClientRegistered(
     payload: ClientRegisteredPayload
   ): Promise<InternalEvent<ClientRegisteredPayload>> {
-    const enriched = enrichPayloadWithHierarchy(payload.tenantId, payload);
     const event: InternalEvent<ClientRegisteredPayload> = {
       eventId: `evt-client-${payload.userId}-${Date.now()}`,
       eventType: 'client.registered',
-      tenantId: enriched.tenantId,
+      tenantId: payload.tenantId,
       timestamp: new Date().toISOString(),
       version: 1,
-      payload: enriched,
+      payload,
     };
-
-    this.broadcastDashboardEvent(enriched.tenantId, 'client.registered', enriched, {
-      targetUserId: enriched.userId,
-    });
-
-    await this.dispatch(event);
-    return event;
-  }
-
-  /**
-   * Publishes a broker.added event whenever a Master, Broker, or Sub-Broker is created.
-   */
-  public async dispatchBrokerAdded(
-    payload: BrokerAddedPayload
-  ): Promise<InternalEvent<BrokerAddedPayload>> {
-    const enriched = enrichPayloadWithHierarchy(payload.tenantId, payload);
-    const event: InternalEvent<BrokerAddedPayload> = {
-      eventId: `evt-broker-${payload.id || payload.userId}-${Date.now()}`,
-      eventType: 'broker.added',
-      tenantId: enriched.tenantId,
-      timestamp: new Date().toISOString(),
-      version: 1,
-      payload: enriched,
-    };
-
-    this.broadcastDashboardEvent(enriched.tenantId, 'broker.added', enriched, {
-      adminOnly: true,
-    });
 
     await this.dispatch(event);
     return event;
@@ -785,56 +582,22 @@ export class InternalEventDispatcher {
     eventType: InternalEventType,
     payload: FundTransactionPayload
   ): Promise<InternalEvent<FundTransactionPayload>> {
-    const enrichedPayload: FundTransactionPayload = enrichPayloadWithHierarchy(payload.tenantId, {
+    const enrichedPayload: FundTransactionPayload = {
       ...payload,
       id: payload.id || payload.transactionId,
       clientCode: payload.clientCode || payload.userId?.toUpperCase(),
       method: payload.method || payload.paymentMethod || 'BANK_TRANSFER',
       reference: payload.reference || payload.referenceId || payload.transactionId,
       createdAt: payload.createdAt || payload.timestamp,
-    });
+    };
     const event: InternalEvent<FundTransactionPayload> = {
       eventId: `evt-fund-${payload.transactionId}-${Date.now()}`,
       eventType,
-      tenantId: enrichedPayload.tenantId,
+      tenantId: payload.tenantId,
       timestamp: new Date().toISOString(),
       version: 1,
       payload: enrichedPayload,
     };
-
-    this.broadcastDashboardEvent(
-      enrichedPayload.tenantId,
-      'fund.transaction_updated',
-      enrichedPayload,
-      { targetUserId: enrichedPayload.userId }
-    );
-
-    await this.dispatch(event);
-    return event;
-  }
-
-  /**
-   * Publishes a ledger.updated event whenever an immutable ledger entry or balance update commits.
-   */
-  public async dispatchLedgerUpdated(
-    payload: LedgerUpdatedPayload
-  ): Promise<InternalEvent<LedgerUpdatedPayload>> {
-    const enriched = enrichPayloadWithHierarchy(payload.tenantId, {
-      ...payload,
-      timestamp: payload.timestamp || new Date().toISOString(),
-    });
-    const event: InternalEvent<LedgerUpdatedPayload> = {
-      eventId: `evt-ledger-${payload.transactionId || payload.userId}-${Date.now()}`,
-      eventType: 'ledger.updated',
-      tenantId: enriched.tenantId,
-      timestamp: new Date().toISOString(),
-      version: 1,
-      payload: enriched,
-    };
-
-    this.broadcastDashboardEvent(enriched.tenantId, 'ledger.updated', enriched, {
-      targetUserId: enriched.userId,
-    });
 
     await this.dispatch(event);
     return event;

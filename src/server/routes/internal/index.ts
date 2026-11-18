@@ -923,29 +923,6 @@ router.post(
         },
       });
 
-      const provisionedEvent = newUser.role === 'CLIENT' ? 'client.registered' : 'broker.added';
-      internalEventDispatcher.broadcastDashboardEvent(
-        tenantId,
-        provisionedEvent,
-        {
-          id: newUser.id,
-          userId: newUser.user_id,
-          tradingUserId: newUser.user_id,
-          clientId: newUser.id,
-          clientCode: newUser.user_id.toUpperCase(),
-          name: newUser.full_name,
-          fullName: newUser.full_name,
-          email: newUser.email,
-          phone: newUser.mobile,
-          role: newUser.role,
-          type: String(newUser.role || 'CLIENT').toLowerCase(),
-          parentId: newUser.parent_id,
-          status: newUser.status,
-          createdAt: newUser.created_at,
-        },
-        newUser.role === 'CLIENT' ? { targetUserId: newUser.user_id } : { adminOnly: true }
-      );
-
       const sanitized = { ...newUser };
       delete (sanitized as any).password_hash;
 
@@ -1349,16 +1326,11 @@ router.post('/events/client-registered', async (req: InternalAuthorizedRequest, 
 
     eventIdempotencyStore.record(eventId, eventType || 'client.registered', tenantId);
 
-    // Broadcast to tenant WebSocket and SSE connections with hierarchy fields
-    internalEventDispatcher.broadcastDashboardEvent(
+    // Broadcast to tenant WebSocket connections
+    tradingWebSocketServer.broadcastToTenant(tenantId, 'client.registered', {
+      ...payload,
       tenantId,
-      'client.registered',
-      {
-        ...payload,
-        tenantId,
-      },
-      { targetUserId: payload?.userId || payload?.tradingUserId }
-    );
+    });
 
     auditService.logEmergencyEvent({
       action: 'CENTRAL_ADMIN_EVENT_RECEIVED',
@@ -2081,19 +2053,8 @@ router.get(['/trading/stream', '/stream'], (req: InternalAuthorizedRequest, res:
 
   const tenantId = getInternalTenantId(req);
   const userId = req.query.userId as string;
-  const role = (req.query.role as string) || 'SUPER_ADMIN';
-  const masterId = req.query.masterId as string | undefined;
-  const brokerId = req.query.brokerId as string | undefined;
-  const subBrokerId = req.query.subBrokerId as string | undefined;
 
-  const unsubscribe = internalEventDispatcher.registerSseClient(res, {
-    tenantId,
-    userId,
-    role,
-    masterId,
-    brokerId,
-    subBrokerId,
-  });
+  const unsubscribe = internalEventDispatcher.registerSseClient(res, { tenantId, userId });
 
   const heartbeat = setInterval(() => {
     try {
