@@ -353,11 +353,24 @@ export function requireInternalAuth(
 
   const isTradingRoute = Boolean(
     rawPath.includes('/trading') ||
+    rawPath.includes('/snapshot') ||
+    rawPath.includes('/compliance/kyc') ||
     baseUrl.includes('/trading') ||
     requestPath.includes('/trading') ||
+    requestPath.includes('/snapshot') ||
     requestPath.includes('/api/internal/v1/trading') ||
+    requestPath.includes('/api/internal/v1/compliance/kyc') ||
     fullRoutePath.includes('/trading') ||
-    (isFromUserOrAdminPanel && (requestPath.includes('trading') || fullRoutePath.includes('trading') || rawPath.includes('trading')))
+    fullRoutePath.includes('/snapshot') ||
+    (isFromUserOrAdminPanel && (
+      requestPath.includes('trading') ||
+      requestPath.includes('snapshot') ||
+      requestPath.includes('kyc') ||
+      requestPath.includes('deposits') ||
+      requestPath.includes('withdrawals') ||
+      fullRoutePath.includes('trading') ||
+      rawPath.includes('trading')
+    ))
   );
 
   const isPermissiveAllowed = !isEmergencyRoute && isTradingRoute;

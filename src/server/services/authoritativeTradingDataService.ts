@@ -68,6 +68,35 @@ export function getSearchTenants(tenantId?: string | null): string[] {
   return Array.from(new Set(list));
 }
 
+function safeIso(value: unknown, fallback: string | null = new Date().toISOString()): string {
+  if (value === null || value === undefined || value === '') {
+    return fallback ?? new Date().toISOString();
+  }
+  try {
+    const d = value instanceof Date ? value : new Date(value as any);
+    if (isNaN(d.getTime())) return fallback ?? new Date().toISOString();
+    return d.toISOString();
+  } catch {
+    return fallback ?? new Date().toISOString();
+  }
+}
+
+function safeIsoOrNull(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  try {
+    const d = value instanceof Date ? value : new Date(value as any);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  } catch {
+    return null;
+  }
+}
+
+function safeUpper(value: unknown, fallback = ''): string {
+  if (value === null || value === undefined) return fallback;
+  const s = String(value).trim();
+  return s ? s.toUpperCase() : fallback;
+}
+
 export class AuthoritativeTradingDataService {
   /**
    * Resolves authoritative 4-tier hierarchy links (masterId, brokerId, subBrokerId) for any entity.
@@ -365,9 +394,9 @@ export class AuthoritativeTradingDataService {
           remaining_quantity: Number(row.remaining_quantity || 0),
           average_fill_price: Number(row.average_fill_price || 0),
           time_in_force: row.time_in_force || 'DAY',
-          created_at: new Date(row.created_at).toISOString(),
-          updated_at: new Date(row.updated_at).toISOString(),
-          cancelled_at: row.cancelled_at ? new Date(row.cancelled_at).toISOString() : null,
+          created_at: safeIso(row.created_at),
+          updated_at: safeIso(row.updated_at),
+          cancelled_at: safeIsoOrNull(row.cancelled_at),
         });
       }
 
@@ -453,9 +482,9 @@ export class AuthoritativeTradingDataService {
             remaining_quantity: Number(row.remaining_quantity || 0),
             average_fill_price: Number(row.average_fill_price || 0),
             time_in_force: row.time_in_force || 'DAY',
-            created_at: new Date(row.created_at).toISOString(),
-            updated_at: new Date(row.updated_at).toISOString(),
-            cancelled_at: row.cancelled_at ? new Date(row.cancelled_at).toISOString() : null,
+            created_at: safeIso(row.created_at),
+            updated_at: safeIso(row.updated_at),
+            cancelled_at: safeIsoOrNull(row.cancelled_at),
           });
         }
       }
@@ -2202,8 +2231,8 @@ export class AuthoritativeTradingDataService {
 
           return {
             id: row.id,
-            userId: row.user_id,
-            clientCode: row.user_id.toUpperCase(),
+            userId: row.user_id || row.id,
+            clientCode: safeUpper(row.user_id || row.id, 'CLIENT'),
             masterId: hLinks.masterId,
             master_id: hLinks.masterId,
             brokerId: hLinks.brokerId,
@@ -2310,8 +2339,8 @@ export class AuthoritativeTradingDataService {
 
       return {
         id: c.id,
-        userId: c.user_id,
-        clientCode: c.user_id.toUpperCase(),
+        userId: c.user_id || c.id,
+        clientCode: safeUpper(c.user_id || c.id, 'CLIENT'),
         masterId: hLinks.masterId,
         master_id: hLinks.masterId,
         brokerId: hLinks.brokerId,
@@ -2671,7 +2700,7 @@ export class AuthoritativeTradingDataService {
         transactions.push({
           id: tx.id,
           transactionId: tx.id,
-          clientCode: tx.user_id.toUpperCase(),
+          clientCode: safeUpper(tx.user_id || tx.id, 'CLIENT'),
           userId: uId,
           clientId: cId,
           client_id: cId,
@@ -2746,7 +2775,7 @@ export class AuthoritativeTradingDataService {
           transactions.push({
             id: tx.id,
             transactionId: tx.id,
-            clientCode: tx.user_id.toUpperCase(),
+            clientCode: safeUpper(tx.user_id || tx.id, 'CLIENT'),
             userId: uId,
             clientId: cId,
             client_id: cId,
@@ -2981,14 +3010,142 @@ export class AuthoritativeTradingDataService {
   }
 
   /**
+   * GET /trading/kyc
+   * Paged, tenant-scoped KYC submissions & client verification status.
+   */
+  public async getKycPaged(
+    tenantId: string,
+    options: { page?: number; limit?: number; status?: string; search?: string } = {}
+  ) {
+    const cleanTenant = sanitizeTenant(tenantId) || 'TNT-001';
+    const page = Math.max(1, Number(options.page || 1));
+    const limit = Math.min(1000, Math.max(1, Number(options.limit || 250)));
+    const offset = (page - 1) * limit;
+
+    const records: any[] = [];
+    const seenKeys = new Set<string>();
+
+    // 1. Query PostgreSQL kyc_records table if present
+    try {
+      const kycRes = await pgDb.query(
+        `SELECT * FROM kyc_records ORDER BY created_at DESC LIMIT 1000;`
+      ).catch(() => ({ rows: [] }));
+      for (const r of kycRes.rows || []) {
+        const key = String(r.client_id || r.user_id || r.id || '').toLowerCase();
+        if (key && seenKeys.has(key)) continue;
+        if (key) seenKeys.add(key);
+        const rawStatus = safeUpper(r.kyc_status || r.status || 'PENDING', 'PENDING');
+        const normalizedStatus = rawStatus === 'VERIFIED' ? 'APPROVED' : rawStatus;
+        records.push({
+          id: r.id || `KYC-${r.client_id || r.user_id}`,
+          kyc_id: r.id || `KYC-${r.client_id || r.user_id}`,
+          userId: r.user_id || r.client_id,
+          user_id: r.user_id || r.client_id,
+          clientId: r.client_id || r.user_id,
+          client_id: r.client_id || r.user_id,
+          clientCode: safeUpper(r.client_code || r.client_id || r.user_id, 'CLIENT'),
+          client_code: safeUpper(r.client_code || r.client_id || r.user_id, 'CLIENT'),
+          clientName: r.client_name || r.full_name || 'Trading Client',
+          client_name: r.client_name || r.full_name || 'Trading Client',
+          email: r.email || '',
+          phone: r.phone || r.mobile || '',
+          kycStatus: normalizedStatus,
+          kyc_status: normalizedStatus,
+          status: normalizedStatus,
+          documentType: r.document_type || 'PAN_CARD',
+          document_type: r.document_type || 'PAN_CARD',
+          idNumber: r.pan_number || r.aadhaar_number || null,
+          id_number: r.pan_number || r.aadhaar_number || null,
+          tenantId: r.tenant_id || cleanTenant,
+          tenant_id: r.tenant_id || cleanTenant,
+          submittedAt: safeIso(r.submitted_at || r.created_at),
+          submitted_date: safeIso(r.submitted_at || r.created_at),
+          notes: r.notes || null,
+        });
+      }
+    } catch {}
+
+    // 2. Merge live clients from getClientsPaged so every client has an authoritative KYC dossier
+    try {
+      const clientsRes = await this.getClientsPaged(cleanTenant, { page: 1, limit: 1000, search: options.search }).catch(() => ({ clients: [] }));
+      for (const c of clientsRes.clients || []) {
+        const uidKey = String(c.userId || '').toLowerCase();
+        const idKey = String(c.id || '').toLowerCase();
+        if ((uidKey && seenKeys.has(uidKey)) || (idKey && seenKeys.has(idKey))) continue;
+        if (uidKey) seenKeys.add(uidKey);
+        if (idKey) seenKeys.add(idKey);
+        const rawStatus = safeUpper(c.kycStatus || 'PENDING', 'PENDING');
+        const normalizedStatus = rawStatus === 'VERIFIED' ? 'APPROVED' : rawStatus;
+        records.push({
+          id: `KYC-${c.clientCode || c.userId || c.id}`,
+          kyc_id: `KYC-${c.clientCode || c.userId || c.id}`,
+          userId: c.userId || c.id,
+          user_id: c.userId || c.id,
+          clientId: c.id || c.userId,
+          client_id: c.id || c.userId,
+          clientCode: safeUpper(c.clientCode || c.userId || c.id, 'CLIENT'),
+          client_code: safeUpper(c.clientCode || c.userId || c.id, 'CLIENT'),
+          clientName: c.fullName || c.name || c.userId || 'Trading Client',
+          client_name: c.fullName || c.name || c.userId || 'Trading Client',
+          email: c.email || '',
+          phone: c.phone || '',
+          kycStatus: normalizedStatus,
+          kyc_status: normalizedStatus,
+          status: normalizedStatus,
+          documentType: 'PAN_AADHAAR',
+          document_type: 'PAN_AADHAAR',
+          idNumber: null,
+          id_number: null,
+          tenantId: c.tenantId || cleanTenant,
+          tenant_id: c.tenantId || cleanTenant,
+          submittedAt: safeIso(c.createdAt),
+          submitted_date: safeIso(c.createdAt),
+          notes: 'Live Trading Platform client KYC',
+        });
+      }
+    } catch {}
+
+    let filtered = records;
+    if (options.status && !['ALL', 'ALL STATUS'].includes(safeUpper(options.status))) {
+      const target = safeUpper(options.status) === 'VERIFIED' ? 'APPROVED' : safeUpper(options.status);
+      filtered = filtered.filter((r) => safeUpper(r.kyc_status) === target);
+    }
+    if (options.search && options.search.trim()) {
+      const q = options.search.trim().toLowerCase();
+      filtered = filtered.filter(
+        (r) =>
+          String(r.clientName || '').toLowerCase().includes(q) ||
+          String(r.clientCode || '').toLowerCase().includes(q) ||
+          String(r.email || '').toLowerCase().includes(q) ||
+          String(r.id || '').toLowerCase().includes(q)
+      );
+    }
+
+    const total = filtered.length;
+    const paged = filtered.slice(offset, offset + limit);
+    return {
+      tenant_id: cleanTenant,
+      data_state: 'authoritative',
+      page,
+      limit,
+      total,
+      count: paged.length,
+      kyc: paged,
+      records: paged,
+      items: paged,
+      data: paged,
+    };
+  }
+
+  /**
    * GET /trading/snapshot
    * Authoritative real-time tick-driven snapshot of active positions, client equity, and live prices.
    */
   public async getSnapshot(tenantId: string, options: { userId?: string } = {}) {
     const cleanTenant = sanitizeTenant(tenantId) || 'TNT-001';
     const [positionsRes, clientsRes] = await Promise.all([
-      this.getPositions(cleanTenant, { userId: options.userId, status: 'OPEN', limit: 500 }),
-      this.getClientsPaged(cleanTenant, { limit: 100 }),
+      this.getPositions(cleanTenant, { userId: options.userId, status: 'OPEN', limit: 500 }).catch(() => ({ positions: [] })),
+      this.getClientsPaged(cleanTenant, { limit: 100 }).catch(() => ({ clients: [] })),
     ]);
 
     let singleClientAccount: any = null;
@@ -2998,7 +3155,8 @@ export class AuthoritativeTradingDataService {
       } catch {}
     }
 
-    const positions = positionsRes.positions || [];
+    const positions = Array.isArray(positionsRes?.positions) ? positionsRes.positions : [];
+    const clients = Array.isArray(clientsRes?.clients) ? clientsRes.clients : [];
     const totalUnrealizedPnL = positions.reduce((sum: number, p: any) => sum + Number(p.unrealizedPnL ?? p.unrealized_pnl ?? 0), 0);
     const totalUsedMargin = positions.reduce((sum: number, p: any) => sum + Number(p.usedMargin ?? p.margin_used ?? 0), 0);
     const prices = marketDataGateway.getLivePriceSnapshot();
@@ -3010,12 +3168,13 @@ export class AuthoritativeTradingDataService {
       data_state: 'authoritative',
       timestamp: new Date().toISOString(),
       prices,
+      quotes: prices,
       positions,
-      clients: singleClientAccount ? [singleClientAccount] : clientsRes.clients,
+      clients: singleClientAccount ? [singleClientAccount] : clients,
       client: singleClientAccount || undefined,
       metrics: {
         totalUnrealizedPnL: Number(totalUnrealizedPnL.toFixed(2)),
-        totalEquity: Number((((singleClientAccount?.account?.equity) ?? (clientsRes.clients[0]?.totalEquity ?? 1000000)) + totalUnrealizedPnL).toFixed(2)),
+        totalEquity: Number((((singleClientAccount?.account?.equity) ?? (clients[0]?.totalEquity ?? 1000000)) + totalUnrealizedPnL).toFixed(2)),
         totalUsedMargin: Number(totalUsedMargin.toFixed(2)),
         openPositionsCount: positions.length,
         timestamp: Date.now(),

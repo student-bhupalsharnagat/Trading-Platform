@@ -168,11 +168,21 @@ export const fundsRateLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Internal Server-to-Server rate limiter (1200 requests/min per IP to protect from looping syncs)
+// Internal Server-to-Server rate limiter (high ceiling >= 2000 req/min; exempts /api/internal/v1/** & /api/admin/** sync traffic)
 export const s2sRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 1200,
+  max: 5000,
   validate: { xForwardedForHeader: false },
+  skip: (req) => {
+    const url = (req.originalUrl || req.url || '').toLowerCase();
+    const p = (req.path || '').toLowerCase();
+    return (
+      url.startsWith('/api/internal/') ||
+      url.startsWith('/api/admin/') ||
+      p.startsWith('/api/internal/') ||
+      p.startsWith('/api/admin/')
+    );
+  },
   message: {
     success: false,
     code: 'S2S_RATE_LIMIT_EXCEEDED',
@@ -182,17 +192,32 @@ export const s2sRateLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// General public API rate limiter (600 req/min per IP, excluding health checks)
+// General public API rate limiter (600 req/min per IP, excluding health checks, internal S2S, and admin sync routes)
 export const generalApiLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 600,
   validate: { xForwardedForHeader: false },
-  skip: (req) =>
-    req.path === '/health' ||
-    req.path === '/live' ||
-    req.path === '/ready' ||
-    req.path.startsWith('/api/health') ||
-    req.path.startsWith('/api/internal/'),
+  skip: (req) => {
+    const url = (req.originalUrl || req.url || '').toLowerCase();
+    const p = (req.path || '').toLowerCase();
+    return (
+      p === '/health' ||
+      p === '/live' ||
+      p === '/ready' ||
+      p.startsWith('/api/health') ||
+      p.startsWith('/health') ||
+      p.startsWith('/internal/') ||
+      p.startsWith('/api/internal/') ||
+      p.startsWith('/admin/') ||
+      p.startsWith('/api/admin/') ||
+      p.startsWith('/stream') ||
+      url.startsWith('/api/health') ||
+      url.startsWith('/api/internal/') ||
+      url.startsWith('/api/admin/') ||
+      url.startsWith('/api/stream') ||
+      url.startsWith('/api/v1/stream')
+    );
+  },
   message: {
     success: false,
     code: 'RATE_LIMIT_EXCEEDED',

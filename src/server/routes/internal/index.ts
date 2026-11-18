@@ -1941,15 +1941,30 @@ router.get('/events/health', (req: InternalAuthorizedRequest, res: Response) => 
  * Consolidated authoritative trading summary for Central Admin.
  */
 router.get('/trading/summary', async (req: InternalAuthorizedRequest, res: Response) => {
+  const tenantId = getInternalTenantId(req);
   try {
-    const tenantId = getInternalTenantId(req);
     const summary = await authoritativeTradingDataService.getTradingSummary(tenantId);
     res.json({ success: true, ...summary });
   } catch (err: any) {
-    res.status(err.statusCode || 500).json({
-      success: false,
-      error: err.message || 'Failed to retrieve trading summary',
-      code: err.code,
+    console.warn('[INTERNAL /trading/summary] Degraded fallback:', err?.message);
+    res.json({
+      success: true,
+      tenant_id: tenantId,
+      data_state: 'degraded',
+      timestamp: new Date().toISOString(),
+      metrics: {
+        total_users: 0,
+        active_users: 0,
+        pending_orders_count: 0,
+        executed_trades_count: 0,
+        open_positions_count: 0,
+        today_turnover: 0,
+        total_turnover: 0,
+        realized_pnl: 0,
+        unrealized_pnl: 0,
+        total_pnl: 0,
+        total_used_margin: 0,
+      },
     });
   }
 });
@@ -1959,19 +1974,16 @@ router.get('/trading/summary', async (req: InternalAuthorizedRequest, res: Respo
  * Authoritative list of tenant orders.
  */
 router.get('/trading/orders', async (req: InternalAuthorizedRequest, res: Response) => {
+  const tenantId = getInternalTenantId(req);
   try {
-    const tenantId = getInternalTenantId(req);
     const userId = req.query.userId as string;
     const status = req.query.status as string;
     const limit = parseInt(req.query.limit as string, 10) || 250;
     const orders = await authoritativeTradingDataService.getOrders(tenantId, { userId, status, limit });
     res.json({ success: true, ...orders });
   } catch (err: any) {
-    res.status(err.statusCode || 500).json({
-      success: false,
-      error: err.message || 'Failed to retrieve orders',
-      code: err.code,
-    });
+    console.warn('[INTERNAL /trading/orders] Degraded fallback:', err?.message);
+    res.json({ success: true, tenant_id: tenantId, count: 0, total: 0, data_state: 'degraded', orders: [], items: [] });
   }
 });
 
@@ -1980,40 +1992,34 @@ router.get('/trading/orders', async (req: InternalAuthorizedRequest, res: Respon
  * Authoritative list of executed trades.
  */
 router.get('/trading/trades', async (req: InternalAuthorizedRequest, res: Response) => {
+  const tenantId = getInternalTenantId(req);
   try {
-    const tenantId = getInternalTenantId(req);
     const userId = req.query.userId as string;
     const orderId = req.query.orderId as string;
     const limit = parseInt(req.query.limit as string, 10) || 250;
     const trades = await authoritativeTradingDataService.getTrades(tenantId, { userId, orderId, limit });
     res.json({ success: true, ...trades });
   } catch (err: any) {
-    res.status(err.statusCode || 500).json({
-      success: false,
-      error: err.message || 'Failed to retrieve trades',
-      code: err.code,
-    });
+    console.warn('[INTERNAL /trading/trades] Degraded fallback:', err?.message);
+    res.json({ success: true, tenant_id: tenantId, count: 0, total: 0, data_state: 'degraded', trades: [], items: [] });
   }
 });
 
 /**
  * GET /api/internal/v1/trading/positions
- * Authoritative list of open/closed positions.
+ * Authoritative list of open/closed positions (live MTM-enriched).
  */
 router.get('/trading/positions', async (req: InternalAuthorizedRequest, res: Response) => {
+  const tenantId = getInternalTenantId(req);
   try {
-    const tenantId = getInternalTenantId(req);
     const userId = req.query.userId as string;
     const status = req.query.status as string;
     const limit = parseInt(req.query.limit as string, 10) || 250;
     const positions = await authoritativeTradingDataService.getPositions(tenantId, { userId, status, limit });
     res.json({ success: true, ...positions });
   } catch (err: any) {
-    res.status(err.statusCode || 500).json({
-      success: false,
-      error: err.message || 'Failed to retrieve positions',
-      code: err.code,
-    });
+    console.warn('[INTERNAL /trading/positions] Degraded fallback:', err?.message);
+    res.json({ success: true, tenant_id: tenantId, count: 0, total: 0, data_state: 'degraded', positions: [], items: [] });
   }
 });
 
@@ -2022,16 +2028,24 @@ router.get('/trading/positions', async (req: InternalAuthorizedRequest, res: Res
  * Authoritative real-time tick-driven snapshot of active positions, client equity, and live prices.
  */
 router.get(['/trading/snapshot', '/snapshot'], async (req: InternalAuthorizedRequest, res: Response) => {
+  const tenantId = getInternalTenantId(req);
   try {
-    const tenantId = getInternalTenantId(req);
     const userId = req.query.userId as string;
     const snapshot = await authoritativeTradingDataService.getSnapshot(tenantId, { userId });
     res.json(snapshot);
   } catch (err: any) {
-    res.status(err.statusCode || 500).json({
-      success: false,
-      error: err.message || 'Failed to retrieve trading snapshot',
-      code: err.code,
+    console.warn('[INTERNAL /trading/snapshot] Degraded fallback:', err?.message);
+    res.json({
+      success: true,
+      tenant_id: tenantId,
+      tenantId,
+      data_state: 'degraded',
+      timestamp: new Date().toISOString(),
+      prices: {},
+      quotes: {},
+      positions: [],
+      clients: [],
+      metrics: { totalUnrealizedPnL: 0, totalEquity: 0, totalUsedMargin: 0, openPositionsCount: 0, timestamp: Date.now() },
     });
   }
 });
@@ -2141,8 +2155,8 @@ router.get('/trading/financial-summary', async (req: InternalAuthorizedRequest, 
  * HMAC-protected, paged, tenant-scoped, read-only client list for admin backfill.
  */
 router.get('/trading/clients', async (req: InternalAuthorizedRequest, res: Response) => {
+  const tenantId = getInternalTenantId(req);
   try {
-    const tenantId = getInternalTenantId(req);
     const page = parseInt(req.query.page as string, 10) || 1;
     const limit = parseInt(req.query.limit as string, 10) || 250;
     const search = req.query.search as string;
@@ -2150,11 +2164,8 @@ router.get('/trading/clients', async (req: InternalAuthorizedRequest, res: Respo
     const result = await authoritativeTradingDataService.getClientsPaged(tenantId, { page, limit, search });
     res.json({ success: true, ...result });
   } catch (err: any) {
-    res.status(err.statusCode || 500).json({
-      success: false,
-      error: err.message || 'Failed to retrieve clients backfill',
-      code: err.code,
-    });
+    console.warn('[INTERNAL /trading/clients] Degraded fallback:', err?.message);
+    res.json({ success: true, tenant_id: tenantId, data_state: 'degraded', page: 1, limit: 250, total: 0, clients: [], items: [] });
   }
 });
 
@@ -2163,8 +2174,8 @@ router.get('/trading/clients', async (req: InternalAuthorizedRequest, res: Respo
  * HMAC-protected, paged, tenant-scoped, read-only immutable ledger for admin backfill.
  */
 router.get('/trading/ledger', async (req: InternalAuthorizedRequest, res: Response) => {
+  const tenantId = getInternalTenantId(req);
   try {
-    const tenantId = getInternalTenantId(req);
     const page = parseInt(req.query.page as string, 10) || 1;
     const limit = parseInt(req.query.limit as string, 10) || 250;
     const userId = req.query.userId as string;
@@ -2172,11 +2183,8 @@ router.get('/trading/ledger', async (req: InternalAuthorizedRequest, res: Respon
     const result = await authoritativeTradingDataService.getLedgerPaged(tenantId, { page, limit, userId });
     res.json({ success: true, ...result });
   } catch (err: any) {
-    res.status(err.statusCode || 500).json({
-      success: false,
-      error: err.message || 'Failed to retrieve ledger backfill',
-      code: err.code,
-    });
+    console.warn('[INTERNAL /trading/ledger] Degraded fallback:', err?.message);
+    res.json({ success: true, tenant_id: tenantId, data_state: 'degraded', page: 1, limit: 250, total: 0, ledger: [], items: [] });
   }
 });
 
@@ -2185,8 +2193,8 @@ router.get('/trading/ledger', async (req: InternalAuthorizedRequest, res: Respon
  * HMAC-protected, paged, tenant-scoped, read-only deposit & withdrawal history for admin backfill.
  */
 router.get('/trading/funds', async (req: InternalAuthorizedRequest, res: Response) => {
+  const tenantId = getInternalTenantId(req);
   try {
-    const tenantId = getInternalTenantId(req);
     const page = parseInt(req.query.page as string, 10) || 1;
     const limit = parseInt(req.query.limit as string, 10) || 250;
     const userId = req.query.userId as string;
@@ -2202,11 +2210,80 @@ router.get('/trading/funds', async (req: InternalAuthorizedRequest, res: Respons
     });
     res.json({ success: true, ...result });
   } catch (err: any) {
-    res.status(err.statusCode || 500).json({
-      success: false,
-      error: err.message || 'Failed to retrieve funds backfill',
-      code: err.code,
+    console.warn('[INTERNAL /trading/funds] Degraded fallback:', err?.message);
+    res.json({ success: true, tenant_id: tenantId, data_state: 'degraded', page: 1, limit: 250, total: 0, funds: [], transactions: [], items: [] });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/deposits (alias: /trading/funds/deposits)
+ * Authoritative deposit & manual deposit request list for S2S sync.
+ */
+router.get(['/trading/deposits', '/trading/funds/deposits'], async (req: InternalAuthorizedRequest, res: Response) => {
+  const tenantId = getInternalTenantId(req);
+  try {
+    const page = parseInt(req.query.page as string, 10) || 1;
+    const limit = parseInt(req.query.limit as string, 10) || 250;
+    const userId = req.query.userId as string;
+    const status = req.query.status as string;
+
+    const result = await authoritativeTradingDataService.getFundsPaged(tenantId, {
+      page,
+      limit,
+      userId,
+      type: 'DEPOSIT',
+      status,
     });
+    res.json({ success: true, deposits: result.funds, ...result });
+  } catch (err: any) {
+    console.warn('[INTERNAL /trading/deposits] Degraded fallback:', err?.message);
+    res.json({ success: true, tenant_id: tenantId, data_state: 'degraded', page: 1, limit: 250, total: 0, deposits: [], funds: [], transactions: [], items: [] });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/withdrawals (alias: /trading/funds/withdrawals)
+ * Authoritative withdrawal request list for S2S sync.
+ */
+router.get(['/trading/withdrawals', '/trading/funds/withdrawals'], async (req: InternalAuthorizedRequest, res: Response) => {
+  const tenantId = getInternalTenantId(req);
+  try {
+    const page = parseInt(req.query.page as string, 10) || 1;
+    const limit = parseInt(req.query.limit as string, 10) || 250;
+    const userId = req.query.userId as string;
+    const status = req.query.status as string;
+
+    const result = await authoritativeTradingDataService.getFundsPaged(tenantId, {
+      page,
+      limit,
+      userId,
+      type: 'WITHDRAWAL',
+      status,
+    });
+    res.json({ success: true, withdrawals: result.funds, ...result });
+  } catch (err: any) {
+    console.warn('[INTERNAL /trading/withdrawals] Degraded fallback:', err?.message);
+    res.json({ success: true, tenant_id: tenantId, data_state: 'degraded', page: 1, limit: 250, total: 0, withdrawals: [], funds: [], transactions: [], items: [] });
+  }
+});
+
+/**
+ * GET /api/internal/v1/trading/kyc (alias: /compliance/kyc)
+ * Authoritative client KYC records for S2S sync.
+ */
+router.get(['/trading/kyc', '/compliance/kyc'], async (req: InternalAuthorizedRequest, res: Response) => {
+  const tenantId = getInternalTenantId(req);
+  try {
+    const page = parseInt(req.query.page as string, 10) || 1;
+    const limit = parseInt(req.query.limit as string, 10) || 250;
+    const status = req.query.status as string;
+    const search = req.query.search as string;
+
+    const result = await authoritativeTradingDataService.getKycPaged(tenantId, { page, limit, status, search });
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.warn('[INTERNAL /trading/kyc] Degraded fallback:', err?.message);
+    res.json({ success: true, tenant_id: tenantId, data_state: 'degraded', page: 1, limit: 250, total: 0, count: 0, kyc: [], records: [], items: [], data: [] });
   }
 });
 

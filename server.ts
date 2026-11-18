@@ -430,8 +430,9 @@ async function startServer() {
   app.use(resolveTenantMiddleware);
 
   // Internal Server-to-Server Routes (Central Admin -> Trading Platform)
-  // Protected by HMAC-SHA256, Nonce, Timestamp, and Tenant ID validation
+  // Protected by HMAC-SHA256, Nonce, Timestamp, and Tenant ID validation (exempt from general rate limiting)
   app.use('/api/internal/v1', internalRoutes);
+  app.use('/api/internal', internalRoutes);
 
   // Global Real-time SSE Stream Endpoint for market ticks, position MTM deltas, and dashboard KPI events
   app.get(['/api/stream', '/api/v1/stream'], (req, res) => {
@@ -474,13 +475,15 @@ async function startServer() {
     });
   });
 
+  // Admin API routes (exempt from general public rate limiter so admin sync/polling never gets 429)
+  app.use('/api/admin', adminRoutes);
+
   // Browser & Client API Routes with DDoS & spam rate limiting protection
   app.use('/api', generalApiLimiter);
   app.use('/api/tenant', tenantRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/trading', tradingRoutes);
   app.use('/api/deposit', depositRoutes);
-  app.use('/api/admin', adminRoutes);
 
   // Catch-all 404 for unmatched /api routes so they return JSON and NEVER fall through to HTML
   app.all('/api/*', (req, res) => {
