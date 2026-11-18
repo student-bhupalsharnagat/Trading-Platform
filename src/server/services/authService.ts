@@ -234,10 +234,15 @@ export class AuthService {
     });
 
     // Publish Central Admin client.registered, client.activated, and kyc.submitted events
+    const hierarchy = internalEventDispatcher.resolveHierarchyContext({
+      ...user,
+      brokerId: user.broker_id || 'BRK-001',
+    });
     const clientPayload: ClientRegisteredPayload = {
       tenantId: user.tenant_id || 'vertex-default',
       tradingUserId: user.user_id,
       userId: user.user_id,
+      clientId: user.id || user.user_id,
       clientCode: user.user_id.toUpperCase(),
       name: user.full_name,
       email: user.email || '',
@@ -245,6 +250,9 @@ export class AuthService {
       status: 'ACTIVE',
       accountStatus: user.status || 'ACTIVE',
       kycStatus: user.is_verified ? 'VERIFIED' : 'PENDING',
+      masterId: hierarchy.masterId,
+      brokerId: hierarchy.brokerId,
+      subBrokerId: hierarchy.subBrokerId,
       createdAt: user.created_at,
     };
 

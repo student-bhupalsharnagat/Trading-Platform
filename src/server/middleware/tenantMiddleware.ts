@@ -5,6 +5,20 @@ import { centralApiService } from '../services/centralApiService.ts';
 import { db } from '../db/database.ts';
 import { emergencyStateCache } from '../cache/EmergencyStateCache.ts';
 import { tenantConfigCache } from '../cache/TenantConfigCache.ts';
+import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
+
+function emitBlockedOrderRiskAlert(req: TenantRequest, tenantId: string, alertType: string, reason: string): void {
+  if (req.method !== 'POST' || !req.path?.includes('order')) return;
+  const userId = req.user?.userId || (req.user as any)?.user_id || req.user?.id || 'unknown';
+  internalEventDispatcher.dispatchRiskAlertTriggered({
+    tenantId,
+    userId,
+    alertType,
+    severity: 'CRITICAL',
+    reason,
+    symbol: req.body?.symbol || req.body?.instrument,
+  }).catch(() => {});
+}
 
 export interface TenantRequest extends AuthenticatedRequest {
   tenant?: TenantContextData;
@@ -92,13 +106,15 @@ export function requireTradingEnabled(
     tenant.tenant.status === 'frozen' ||
     cachedConfig?.tenantStatus === 'frozen'
   ) {
+    const reason =
+      emergencyState.reason ||
+      tenant.status.reason ||
+      'All platform trading operations are currently frozen by administration.';
+    emitBlockedOrderRiskAlert(req, tenantId, 'ORDER_BLOCKED', reason);
     res.status(403).json({
       success: false,
       code: 'TENANT_FROZEN',
-      message:
-        emergencyState.reason ||
-        tenant.status.reason ||
-        'All platform trading operations are currently frozen by administration.',
+      message: reason,
     });
     return;
   }
@@ -110,13 +126,15 @@ export function requireTradingEnabled(
     cachedConfig?.tradingEnabled === false ||
     !tenant.config.trading_enabled
   ) {
+    const reason =
+      emergencyState.reason ||
+      tenant.status.reason ||
+      'Trading is currently suspended for this platform. New orders cannot be placed.';
+    emitBlockedOrderRiskAlert(req, tenantId, 'TRADING_HALTED', reason);
     res.status(403).json({
       success: false,
       code: 'TRADING_DISABLED',
-      message:
-        emergencyState.reason ||
-        tenant.status.reason ||
-        'Trading is currently suspended for this platform. New orders cannot be placed.',
+      message: reason,
     });
     return;
   }
@@ -128,12 +146,14 @@ export function requireTradingEnabled(
     tenant.config.maintenance_mode ||
     tenant.status.maintenance_active
   ) {
+    const reason =
+      tenant.config.maintenance_message ||
+      'Platform maintenance in progress. Orders are temporarily suspended.';
+    emitBlockedOrderRiskAlert(req, tenantId, 'ORDER_BLOCKED', reason);
     res.status(503).json({
       success: false,
       code: 'MAINTENANCE_MODE',
-      message:
-        tenant.config.maintenance_message ||
-        'Platform maintenance in progress. Orders are temporarily suspended.',
+      message: reason,
     });
     return;
   }
@@ -236,12 +256,14 @@ export function requireActiveTrader(
 
     const freezeCheck = db.isUserOrHierarchyFrozen(userRecord);
     if (freezeCheck.frozen || userRecord.is_frozen || userRecord.status === 'suspended' || userRecord.status === 'SUSPENDED') {
+      const reason =
+        freezeCheck.reason ||
+        'Your account is currently frozen. Please contact customer support.';
+      emitBlockedOrderRiskAlert(req, req.tenant?.tenant?.id || userRecord.tenant_id || 'vertex-default', 'USER_FROZEN', reason);
       res.status(403).json({
         success: false,
         code: 'USER_FROZEN',
-        message:
-          freezeCheck.reason ||
-          'Your account is currently frozen. Please contact customer support.',
+        message: reason,
       });
       return;
     }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Wallet,
   ArrowDownLeft,
@@ -37,48 +37,75 @@ export const AdminFundsPage: React.FC<AdminFundsPageProps> = ({ onNavigate }) =>
   const [manualAmount, setManualAmount] = useState('');
   const [manualNote, setManualNote] = useState('');
 
-  const fetchFunds = async () => {
+  const fetchFunds = useCallback(async (silent?: boolean | unknown) => {
+    const isSilent = silent === true;
     try {
-      setLoading(true);
+      if (!isSilent) setLoading(true);
       setError(null);
       const data: any = await adminApi.getFunds();
       setTransactions(data?.data || data || []);
     } catch (err: any) {
-      setError(err.message || 'Failed to load fund transactions');
+      if (!isSilent) {
+        setError(err.message || 'Failed to load fund transactions');
+      }
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchFunds();
-  }, []);
+    fetchFunds(false);
+    const pollInterval = setInterval(() => {
+      fetchFunds(true);
+    }, 2500);
+    return () => clearInterval(pollInterval);
+  }, [fetchFunds]);
 
   // Real-time subscriptions for funds
   useEffect(() => {
     const handleNewFund = (tx: any) => {
-      setTransactions((prev) => [tx, ...prev.filter((t) => t.id !== tx.id)]);
-      setSuccessMsg(`New ${tx.type || tx.transaction_type} request received for ${tx.userId || tx.user_id}!`);
+      const txId = tx?.id || tx?.transactionId;
+      if (txId) {
+        setTransactions((prev) => [{ ...tx, id: txId }, ...prev.filter((t) => t.id !== txId)]);
+      }
+      setSuccessMsg(`New ${tx?.type || tx?.transaction_type || 'FUND'} request received for ${tx?.userId || tx?.user_id || 'client'}!`);
+      fetchFunds(true);
     };
 
     const handleProcessedFund = (tx: any) => {
-      setTransactions((prev) =>
-        prev.map((t) => (t.id === tx.id ? { ...t, ...tx, status: tx.status } : t))
-      );
+      const txId = tx?.id || tx?.transactionId;
+      if (txId) {
+        setTransactions((prev) => {
+          const exists = prev.some((t) => t.id === txId);
+          if (exists) {
+            return prev.map((t) => (t.id === txId ? { ...t, ...tx, id: txId, status: tx.status } : t));
+          }
+          return [{ ...tx, id: txId }, ...prev];
+        });
+      }
+      fetchFunds(true);
     };
 
     const unsubReq = subscribe('fund.requested', handleNewFund);
     const unsubCreated = subscribe('fund.created', handleNewFund);
     const unsubProc = subscribe('fund.processed', handleProcessedFund);
     const unsubUpd = subscribe('fund.updated', handleProcessedFund);
+    const unsubTxUpd = subscribe('fund.transaction_updated', handleProcessedFund);
+    const unsubManualCreated = subscribe('manual_deposit.created', handleNewFund);
+    const unsubManualApproved = subscribe('manual_deposit.approved', handleProcessedFund);
+    const unsubManualRejected = subscribe('manual_deposit.rejected', handleProcessedFund);
 
     return () => {
       unsubReq();
       unsubCreated();
       unsubProc();
       unsubUpd();
+      unsubTxUpd();
+      unsubManualCreated();
+      unsubManualApproved();
+      unsubManualRejected();
     };
-  }, [subscribe]);
+  }, [subscribe, fetchFunds]);
 
   const handleProcess = async (txId: string, action: 'APPROVE' | 'REJECT') => {
     try {

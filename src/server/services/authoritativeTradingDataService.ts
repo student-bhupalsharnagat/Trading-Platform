@@ -1653,11 +1653,15 @@ export class AuthoritativeTradingDataService {
     });
 
     const eventType = type === 'DEPOSIT' ? 'deposit.created' : 'withdrawal.created';
+    const hLinks = this.resolveHierarchyLinks({ user_id: resolvedUserId });
     const fundPayload = {
       id: txId,
       transactionId: txId,
       clientCode: resolvedUserId.toUpperCase(),
       tenantId,
+      masterId: hLinks.masterId,
+      brokerId: hLinks.brokerId,
+      subBrokerId: hLinks.subBrokerId,
       userId: resolvedUserId,
       clientId: resolvedUserId,
       tradingUserId: resolvedUserId,
@@ -1783,11 +1787,15 @@ export class AuthoritativeTradingDataService {
       }
 
       const eventType = tx.transaction_type === 'DEPOSIT' ? 'deposit.rejected' : 'withdrawal.rejected';
+      const hLinks = this.resolveHierarchyLinks({ user_id: tx.user_id });
       const rejectPayload = {
         id: txId,
         transactionId: txId,
         clientCode: tx.user_id.toUpperCase(),
         tenantId,
+        masterId: hLinks.masterId,
+        brokerId: hLinks.brokerId,
+        subBrokerId: hLinks.subBrokerId,
         userId: tx.user_id,
         clientId: tx.user_id,
         tradingUserId: tx.user_id,
@@ -1909,11 +1917,16 @@ export class AuthoritativeTradingDataService {
       );
 
       const eventType = tx.transaction_type === 'DEPOSIT' ? 'deposit.approved' : 'withdrawal.approved';
+      const hLinks = this.resolveHierarchyLinks({ user_id: tx.user_id });
+      const nowIso = new Date().toISOString();
       const approvePayload = {
         id: txId,
         transactionId: txId,
         clientCode: tx.user_id.toUpperCase(),
         tenantId,
+        masterId: hLinks.masterId,
+        brokerId: hLinks.brokerId,
+        subBrokerId: hLinks.subBrokerId,
         userId: tx.user_id,
         clientId: tx.user_id,
         tradingUserId: tx.user_id,
@@ -1927,8 +1940,8 @@ export class AuthoritativeTradingDataService {
         balanceBefore,
         balanceAfter: newBal,
         approvedBy: adminId,
-        createdAt: tx.created_at || new Date().toISOString(),
-        timestamp: new Date().toISOString(),
+        createdAt: tx.created_at || nowIso,
+        timestamp: nowIso,
       };
 
       await transactionalOutboxService.enqueue(
@@ -1943,6 +1956,9 @@ export class AuthoritativeTradingDataService {
 
       const walletPayload = {
         tenantId,
+        masterId: hLinks.masterId,
+        brokerId: hLinks.brokerId,
+        subBrokerId: hLinks.subBrokerId,
         userId: tx.user_id,
         clientId: tx.user_id,
         tradingUserId: tx.user_id,
@@ -1954,7 +1970,7 @@ export class AuthoritativeTradingDataService {
         usedMargin: Number(updatedWallet.used_margin),
         realizedPnl: Number(updatedWallet.realized_pnl || 0),
         equity: Number((updatedWallet.available_balance + updatedWallet.used_margin).toFixed(2)),
-        updatedAt: new Date().toISOString(),
+        updatedAt: nowIso,
       };
 
       await transactionalOutboxService.enqueue(
@@ -1967,7 +1983,36 @@ export class AuthoritativeTradingDataService {
         client
       );
 
-      return { updatedTx, approvePayload, walletPayload, eventType };
+      const ledgerPayload = {
+        tenantId,
+        entryId: `ledger-${tx.id}`,
+        transactionId: tx.id,
+        userId: tx.user_id,
+        clientId: tx.user_id,
+        type: ledgerType,
+        category: tx.transaction_type,
+        amount: Number(tx.amount),
+        balanceBefore,
+        balanceAfter: newBal,
+        reference: `Admin Approved ${tx.transaction_type} [${tx.reference_id || tx.id}]`,
+        createdBy: adminId,
+        masterId: hLinks.masterId,
+        brokerId: hLinks.brokerId,
+        subBrokerId: hLinks.subBrokerId,
+        updatedAt: nowIso,
+      };
+
+      await transactionalOutboxService.enqueue(
+        {
+          eventId: `evt-ledger-fund-${txId}`,
+          tenantId,
+          eventType: 'ledger.updated',
+          payload: ledgerPayload,
+        },
+        client
+      );
+
+      return { updatedTx, approvePayload, walletPayload, ledgerPayload, eventType };
     });
 
     // In-memory dual write for wallet, fund transaction, and ledger
@@ -2031,6 +2076,10 @@ export class AuthoritativeTradingDataService {
 
     internalEventDispatcher.dispatchWalletUpdated(approvalResult.walletPayload).catch((e) =>
       console.warn('[Event] wallet.updated dispatch warning:', e)
+    );
+
+    internalEventDispatcher.dispatchLedgerUpdated(approvalResult.ledgerPayload).catch((e) =>
+      console.warn('[Event] ledger.updated dispatch warning:', e)
     );
 
     // Real-time WebSocket delivery to client and broker panel

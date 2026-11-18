@@ -18,6 +18,7 @@ import { postgresWalletRepository } from '../../repositories/trading/PostgresWal
 import { postgresOrderEventRepository } from '../../repositories/trading/PostgresOrderEventRepository.ts';
 import { tradingWebSocketServer } from '../../websocket/WebSocketServer.ts';
 import { transactionalOutboxService } from '../../services/TransactionalOutboxService.ts';
+import { internalEventDispatcher } from '../../events/InternalEventDispatcher.ts';
 import { realBrokerAdapter } from './RealBrokerAdapter.ts';
 import { NormalizedOrderState } from '../types.ts';
 
@@ -334,11 +335,21 @@ export class BrokerWebhookHandler {
       );
     }
     if (newTrade) {
-      tradingWebSocketServer.broadcastToTenant(
-        tenantId,
+      internalEventDispatcher.broadcastRealtimeEvent(
         'trade.executed',
-        newTrade,
-        (ws) => ws.userId === newTrade.user_id || ws.role === 'SUPER_ADMIN'
+        tenantId,
+        {
+          ...newTrade,
+          tradeId: newTrade.id,
+          orderId: newTrade.order_id,
+          userId: newTrade.user_id,
+          symbol: newTrade.instrument_id,
+          executionPrice: Number(newTrade.execution_price),
+          executionValue: Number(newTrade.execution_value),
+          turnover: Number(newTrade.execution_value),
+          executedAt: newTrade.executed_at,
+        },
+        { targetUserId: newTrade.user_id }
       );
     }
     if (updatedWallet) {

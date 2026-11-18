@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Wallet,
   ArrowDownLeft,
@@ -51,6 +51,7 @@ export const AdminDepositRequestsPage: React.FC<AdminDepositRequestsPageProps> =
   initialTab = 'PENDING',
 }) => {
   const { showToast } = useAuth();
+  const { isConnected, subscribe } = useAdminRealtime();
 
   const [activeTab, setActiveTab] = useState<'PENDING' | 'ALL' | 'APPROVED' | 'REJECTED' | 'SETTINGS'>(initialTab);
   const [requests, setRequests] = useState<ManualDepositItem[]>([]);
@@ -78,10 +79,13 @@ export const AdminDepositRequestsPage: React.FC<AdminDepositRequestsPageProps> =
   });
   const [settingsSaving, setSettingsSaving] = useState(false);
 
-  const fetchRequests = async () => {
+  const fetchRequests = useCallback(async (silent?: boolean | unknown) => {
+    const isSilent = silent === true;
     try {
-      setLoading(true);
-      setError(null);
+      if (!isSilent) {
+        setLoading(true);
+        setError(null);
+      }
       const res = await adminApi.getDepositRequests({
         status: activeTab === 'ALL' || activeTab === 'SETTINGS' ? undefined : activeTab,
         search: searchQuery.trim() || undefined,
@@ -89,13 +93,15 @@ export const AdminDepositRequestsPage: React.FC<AdminDepositRequestsPageProps> =
       });
       setRequests(res.requests || []);
     } catch (err: any) {
-      setError(err.message || 'Failed to load deposit requests');
+      if (!isSilent) {
+        setError(err.message || 'Failed to load deposit requests');
+      }
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
-  };
+  }, [activeTab, searchQuery]);
 
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
     try {
       setSettingsLoading(true);
       const res = await adminApi.getPaymentSettings();
@@ -114,31 +120,34 @@ export const AdminDepositRequestsPage: React.FC<AdminDepositRequestsPageProps> =
     } finally {
       setSettingsLoading(false);
     }
-  };
-
-  const { isConnected, subscribe } = useAdminRealtime();
+  }, []);
 
   useEffect(() => {
-    fetchRequests();
+    fetchRequests(false);
     fetchSettings();
-  }, [activeTab]);
+  }, [activeTab, fetchRequests, fetchSettings]);
 
   useEffect(() => {
-    const unsub1 = subscribe('manual_deposit.created', () => {
-      fetchRequests();
-    });
-    const unsub2 = subscribe('manual_deposit.approved', () => {
-      fetchRequests();
-    });
-    const unsub3 = subscribe('manual_deposit.rejected', () => {
-      fetchRequests();
-    });
+    if (activeTab === 'SETTINGS') return;
+    const pollInterval = setInterval(() => {
+      fetchRequests(true);
+    }, 2500);
+    return () => clearInterval(pollInterval);
+  }, [activeTab, fetchRequests]);
+
+  useEffect(() => {
+    const refreshSilent = () => fetchRequests(true);
+    const unsub1 = subscribe('manual_deposit.created', refreshSilent);
+    const unsub2 = subscribe('manual_deposit.approved', refreshSilent);
+    const unsub3 = subscribe('manual_deposit.rejected', refreshSilent);
+    const unsub4 = subscribe('fund.transaction_updated', refreshSilent);
     return () => {
       unsub1();
       unsub2();
       unsub3();
+      unsub4();
     };
-  }, [subscribe]);
+  }, [subscribe, fetchRequests]);
 
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard?.writeText(text);

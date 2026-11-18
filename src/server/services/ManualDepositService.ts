@@ -10,6 +10,7 @@ import { db } from '../db/database.ts';
 import { auditService } from './auditService.ts';
 import { transactionalOutboxService } from './TransactionalOutboxService.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
+import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
 import { getTenantWallet, getTenantNotifications } from '../trading/tradingStore.ts';
 
 export class ManualDepositService {
@@ -166,56 +167,53 @@ export class ManualDepositService {
       proof_image_url: proofImageUrl,
     });
 
-    // 7. Real-time Notification
+    const hierarchy = internalEventDispatcher.resolveHierarchyContext({ userId });
+    const outboxPayload = {
+      id: newRequest.id,
+      depositId: newRequest.id,
+      transactionId: newRequest.id,
+      clientCode: (userId || '').toUpperCase(),
+      tenantId,
+      masterId: hierarchy.masterId,
+      brokerId: hierarchy.brokerId,
+      subBrokerId: hierarchy.subBrokerId,
+      userId,
+      clientId: userId,
+      tradingUserId: userId,
+      userName,
+      amount: numAmount,
+      type: 'DEPOSIT' as const,
+      status: 'PENDING' as const,
+      method: cleanMethod,
+      paymentMethod: cleanMethod,
+      reference: sanitizedUtr,
+      referenceId: sanitizedUtr,
+      utr: sanitizedUtr,
+      utr_number: sanitizedUtr,
+      payment_method: cleanMethod,
+      proof_image_url: proofImageUrl,
+      createdAt: newRequest.created_at,
+      timestamp: new Date().toISOString(),
+    };
+
+    // 7. Real-time Notification (/ws + SSE)
     try {
       tradingWebSocketServer.broadcastToTenant(
         tenantId,
         'manual_deposit.created',
-        {
-          id: newRequest.id,
-          depositId: newRequest.id,
-          transactionId: newRequest.id,
-          userId,
-          userName,
-          amount: numAmount,
-          utr: sanitizedUtr,
-          utr_number: sanitizedUtr,
-          payment_method: cleanMethod,
-          proof_image_url: proofImageUrl,
-          status: 'PENDING',
-          createdAt: newRequest.created_at,
-        },
+        outboxPayload,
         (client) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(client.role)
+      );
+      internalEventDispatcher.broadcastRealtimeEvent(
+        'fund.transaction_updated',
+        tenantId,
+        outboxPayload,
+        { targetUserId: userId }
       );
     } catch {}
 
     // 8. Outbound S2S Transactional Outbox Event (deposit.created / manual_deposit.created)
     try {
-      const outboxPayload = {
-        id: newRequest.id,
-        depositId: newRequest.id,
-        transactionId: newRequest.id,
-        clientCode: (userId || '').toUpperCase(),
-        tenantId,
-        userId,
-        clientId: userId,
-        tradingUserId: userId,
-        userName,
-        amount: numAmount,
-        type: 'DEPOSIT',
-        status: 'PENDING',
-        method: cleanMethod,
-        paymentMethod: cleanMethod,
-        reference: sanitizedUtr,
-        referenceId: sanitizedUtr,
-        utr: sanitizedUtr,
-        utr_number: sanitizedUtr,
-        payment_method: cleanMethod,
-        proof_image_url: proofImageUrl,
-        createdAt: newRequest.created_at,
-        timestamp: new Date().toISOString(),
-      };
-
       await transactionalOutboxService.enqueue({
         eventId: `evt-deposit-${newRequest.id}`,
         eventType: 'deposit.created',
@@ -279,6 +277,7 @@ export class ManualDepositService {
     const adminId = actualAdmin?.userId || actualAdmin?.id || (typeof actualAdmin === 'string' ? actualAdmin : 'ADMIN');
     const adminName = actualAdmin?.fullName || actualAdmin?.full_name || 'Administrator';
     const adminRole = actualAdmin?.role || 'SUPER_ADMIN';
+    let balanceBefore = 0;
     let balanceAfter = 0;
 
     // Atomic execution inside database transaction
@@ -304,7 +303,7 @@ export class ManualDepositService {
 
       // 2. Lock the user's trading wallet row FOR UPDATE
       const wallet = await postgresWalletRepository.lockWalletForUpdate(reqTenant, request.user_id, client);
-      const balanceBefore = Number(wallet.available_balance || 0);
+      balanceBefore = Number(wallet.available_balance || 0);
       balanceAfter = Number((balanceBefore + depositAmount).toFixed(4));
 
       // 3. Atomically credit the wallet balance
@@ -399,19 +398,38 @@ export class ManualDepositService {
         },
       });
 
-      // Real-time WebSocket broadcasts
+      // Real-time WebSocket & SSE broadcasts
+      const effectiveTenant = approvedRequest.tenant_id || actualTenant;
+      const hierarchy = internalEventDispatcher.resolveHierarchyContext({ userId: approvedRequest.user_id });
+      const nowIso = new Date().toISOString();
       const payload = {
+        id: approvedRequest.id,
         depositId: approvedRequest.id,
+        transactionId: approvedRequest.id,
+        tenantId: effectiveTenant,
+        masterId: hierarchy.masterId,
+        brokerId: hierarchy.brokerId,
+        subBrokerId: hierarchy.subBrokerId,
         userId: approvedRequest.user_id,
+        clientId: approvedRequest.user_id,
+        tradingUserId: approvedRequest.user_id,
+        userName: approvedRequest.user_name,
         amount: Number(approvedRequest.amount),
+        type: 'DEPOSIT' as const,
+        method: approvedRequest.payment_method,
+        paymentMethod: approvedRequest.payment_method,
+        reference: approvedRequest.utr_number,
         utr: approvedRequest.utr_number,
-        status: 'APPROVED',
+        status: 'APPROVED' as const,
+        balanceBefore,
+        balanceAfter,
         approvedBy: adminId,
-        timestamp: new Date().toISOString(),
+        createdAt: approvedRequest.created_at,
+        timestamp: nowIso,
       };
 
       tradingWebSocketServer.broadcastToTenant(
-        approvedRequest.tenant_id || tenantId,
+        effectiveTenant,
         'manual_deposit.approved',
         payload,
         (client) =>
@@ -420,17 +438,47 @@ export class ManualDepositService {
       );
 
       tradingWebSocketServer.broadcastToTenant(
-        approvedRequest.tenant_id || tenantId,
+        effectiveTenant,
         'wallet.updated',
         {
+          tenantId: effectiveTenant,
+          masterId: hierarchy.masterId,
+          brokerId: hierarchy.brokerId,
+          subBrokerId: hierarchy.subBrokerId,
           userId: approvedRequest.user_id,
           availableBalance: balanceAfter,
           available_balance: balanceAfter,
           amountCredited: Number(approvedRequest.amount),
-          timestamp: new Date().toISOString(),
+          timestamp: nowIso,
         },
-        (client) => client.userId === approvedRequest.user_id
+        (client) =>
+          client.userId === approvedRequest.user_id ||
+          ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(client.role)
       );
+
+      // Emit fund.transaction_updated + ledger.updated over /ws, SSE, and Outbox
+      internalEventDispatcher.dispatchFundTransaction('deposit.approved', payload).catch((e) =>
+        console.warn('[ManualDeposit] fund.transaction_updated dispatch warning:', e)
+      );
+
+      internalEventDispatcher.dispatchLedgerUpdated({
+        tenantId: effectiveTenant,
+        entryId: `ledger-${approvedRequest.id}`,
+        transactionId: approvedRequest.id,
+        userId: approvedRequest.user_id,
+        clientId: approvedRequest.user_id,
+        type: 'CREDIT',
+        category: 'DEPOSIT',
+        amount: Number(approvedRequest.amount),
+        balanceBefore,
+        balanceAfter,
+        reference: `Manual Deposit Approved - UTR: ${approvedRequest.utr_number}`,
+        createdBy: adminId,
+        masterId: hierarchy.masterId,
+        brokerId: hierarchy.brokerId,
+        subBrokerId: hierarchy.subBrokerId,
+        updatedAt: nowIso,
+      }).catch((e) => console.warn('[ManualDeposit] ledger.updated dispatch warning:', e));
     } catch (postSyncErr) {
       console.warn('[ManualDeposit] Notice during post-approval notification:', postSyncErr);
     }
@@ -522,24 +570,45 @@ export class ManualDepositService {
         },
       });
 
+      const effectiveTenant = rejectedRequest.tenant_id || actualTenant;
+      const hierarchy = internalEventDispatcher.resolveHierarchyContext({ userId: rejectedRequest.user_id });
+      const nowIso = new Date().toISOString();
       const payload = {
+        id: rejectedRequest.id,
         depositId: rejectedRequest.id,
+        transactionId: rejectedRequest.id,
+        tenantId: effectiveTenant,
+        masterId: hierarchy.masterId,
+        brokerId: hierarchy.brokerId,
+        subBrokerId: hierarchy.subBrokerId,
         userId: rejectedRequest.user_id,
+        clientId: rejectedRequest.user_id,
+        tradingUserId: rejectedRequest.user_id,
+        userName: rejectedRequest.user_name,
         amount: Number(rejectedRequest.amount),
+        type: 'DEPOSIT' as const,
+        method: rejectedRequest.payment_method,
+        paymentMethod: rejectedRequest.payment_method,
+        reference: rejectedRequest.utr_number,
         utr: rejectedRequest.utr_number,
-        status: 'REJECTED',
-        reason: rejectedRequest.rejection_reason,
+        status: 'REJECTED' as const,
+        reason: rejectedRequest.rejection_reason || undefined,
         rejectedBy: adminId,
-        timestamp: new Date().toISOString(),
+        createdAt: rejectedRequest.created_at,
+        timestamp: nowIso,
       };
 
       tradingWebSocketServer.broadcastToTenant(
-        rejectedRequest.tenant_id || tenantId,
+        effectiveTenant,
         'manual_deposit.rejected',
         payload,
         (client) =>
           client.userId === rejectedRequest.user_id ||
           ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(client.role)
+      );
+
+      internalEventDispatcher.dispatchFundTransaction('deposit.rejected', payload).catch((e) =>
+        console.warn('[ManualDeposit] fund.transaction_updated rejection dispatch warning:', e)
       );
     } catch (notifErr) {
       console.warn('[ManualDeposit] Notice during post-rejection notification:', notifErr);

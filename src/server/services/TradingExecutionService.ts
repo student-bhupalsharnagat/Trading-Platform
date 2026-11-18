@@ -102,7 +102,18 @@ export class TradingExecutionService {
     const emergencyState = emergencyStateCache.get(tenantId);
     const cachedConfig = tenantConfigCache.get(tenantId);
     if (emergencyState.tradingHalted || cachedConfig?.tradingEnabled === false) {
-      const err = new Error('Trading is temporarily halted by Central Admin emergency control.');
+      const reason = 'Trading is temporarily halted by Central Admin emergency control.';
+      internalEventDispatcher.dispatchRiskAlertTriggered({
+        tenantId,
+        userId,
+        alertType: 'TRADING_HALTED',
+        severity: 'CRITICAL',
+        reason,
+        symbol,
+        side,
+      }).catch((e) => console.error('[Event] risk.alert_triggered dispatch error:', e));
+
+      const err = new Error(reason);
       (err as any).statusCode = 403;
       (err as any).code = 'TRADING_HALTED';
       throw err;
@@ -211,9 +222,23 @@ export class TradingExecutionService {
       const pendingResult = await pgDb.transaction(async (client: DbClient) => {
         const wallet = await postgresWalletRepository.lockWalletForUpdate(tenantId, userId, client);
         if (wallet.available_balance < requiredMargin) {
-          const err = new Error(
-            `Insufficient margin. Required ₹${requiredMargin.toLocaleString('en-IN')}, available ₹${wallet.available_balance.toLocaleString('en-IN')}.`
-          );
+          const reason = `Insufficient margin. Required ₹${requiredMargin.toLocaleString('en-IN')}, available ₹${wallet.available_balance.toLocaleString('en-IN')}.`;
+          internalEventDispatcher.dispatchRiskAlertTriggered({
+            tenantId,
+            userId,
+            alertType: 'MARGIN_SHORTFALL',
+            severity: 'CRITICAL',
+            reason,
+            orderId,
+            symbol: inst.symbol,
+            side,
+            requiredMargin,
+            availableMargin: wallet.available_balance,
+            usedMargin: wallet.used_margin,
+            exposure: wallet.used_margin + requiredMargin,
+          }).catch((e) => console.error('[Event] risk.alert_triggered dispatch error:', e));
+
+          const err = new Error(reason);
           (err as any).statusCode = 400;
           (err as any).code = 'INSUFFICIENT_MARGIN';
           throw err;
@@ -345,7 +370,23 @@ export class TradingExecutionService {
         const excessMargin = excessLots * (requiredMargin / lots);
 
         if (wallet.available_balance + marginReleased + realizedPnL < excessMargin) {
-          const err = new Error(`Insufficient margin for reversed position.`);
+          const reason = `Insufficient margin for reversed position.`;
+          internalEventDispatcher.dispatchRiskAlertTriggered({
+            tenantId,
+            userId,
+            alertType: 'MARGIN_SHORTFALL',
+            severity: 'CRITICAL',
+            reason,
+            orderId,
+            symbol: inst.symbol,
+            side,
+            requiredMargin: excessMargin,
+            availableMargin: wallet.available_balance + marginReleased + realizedPnL,
+            usedMargin: wallet.used_margin,
+            exposure: wallet.used_margin + excessMargin,
+          }).catch((e) => console.error('[Event] risk.alert_triggered dispatch error:', e));
+
+          const err = new Error(reason);
           (err as any).statusCode = 400;
           (err as any).code = 'INSUFFICIENT_MARGIN';
           throw err;
@@ -415,6 +456,7 @@ export class TradingExecutionService {
       } else {
         // Opening or adding to position
         if (wallet.available_balance < requiredMargin) {
+          const reason = `Insufficient margin. Required ₹${requiredMargin.toLocaleString('en-IN')}, available ₹${wallet.available_balance.toLocaleString('en-IN')}.`;
           internalEventDispatcher.dispatchMarginBreach({
             tenantId,
             userId,
@@ -422,11 +464,14 @@ export class TradingExecutionService {
             availableMargin: wallet.available_balance,
             exposure: wallet.used_margin + requiredMargin,
             threshold: 1.0,
+            orderId,
+            symbol: inst.symbol,
+            side,
+            requiredMargin,
+            reason,
           }).catch((e) => console.error('[Event] Margin breach dispatch error:', e));
 
-          const err = new Error(
-            `Insufficient margin. Required ₹${requiredMargin.toLocaleString('en-IN')}, available ₹${wallet.available_balance.toLocaleString('en-IN')}.`
-          );
+          const err = new Error(reason);
           (err as any).statusCode = 400;
           (err as any).code = 'INSUFFICIENT_MARGIN';
           throw err;
@@ -589,27 +634,40 @@ export class TradingExecutionService {
       const userRecord = db.findUserByUserId(userId);
       const clientCode = clientMapping?.external_client_code || userRecord?.user_id.toUpperCase() || userId.toUpperCase();
       const clientName = userRecord?.full_name || userId;
+      const hierarchy = internalEventDispatcher.resolveHierarchyContext({
+        userId,
+        brokerId: userRecord?.broker_id,
+      });
 
       const tradePayload = {
+        id: newTrade.id,
         tenantId,
+        masterId: hierarchy.masterId,
+        brokerId: hierarchy.brokerId,
+        subBrokerId: hierarchy.subBrokerId,
         userId,
+        user_id: userId,
         clientId: userId,
         tradingUserId: userId,
         clientCode,
         clientName,
         orderId: newOrder.id,
+        order_id: newOrder.id,
         tradeId: newTrade.id,
         symbol: inst.symbol,
+        instrument_id: inst.symbol,
         exchange: (inst as any).exchange || 'NSE',
         side: newOrder.side,
         quantity: Math.abs(cleanNumeric(newOrder.quantity)),
         qty: Math.abs(cleanNumeric(newOrder.quantity)),
         price: cleanNumeric(newOrder.price),
         executionPrice: cleanNumeric(newOrder.price),
+        execution_price: cleanNumeric(newOrder.price),
         ltp: cleanNumeric(newOrder.price),
         currentPrice: cleanNumeric(newOrder.price),
         current_price: cleanNumeric(newOrder.price),
         executionValue: cleanNumeric(executionValue),
+        execution_value: cleanNumeric(executionValue),
         totalValue: cleanNumeric(executionValue),
         turnover: cleanNumeric(executionValue),
         fees: Number((executionValue * 0.0003).toFixed(2)),
@@ -617,6 +675,7 @@ export class TradingExecutionService {
         realizedPnl: cleanNumeric(newTrade.realized_pnl || 0),
         realized_pnl: cleanNumeric(newTrade.realized_pnl || 0),
         executedAt: newTrade.executed_at,
+        executed_at: newTrade.executed_at,
       };
 
       await transactionalOutboxService.enqueue(
@@ -709,6 +768,35 @@ export class TradingExecutionService {
         client
       );
 
+      const ledgerPayload = {
+        tenantId,
+        entryId: `ledger-${newTrade.id}`,
+        transactionId: newTrade.id,
+        userId,
+        clientId: userId,
+        type: (realizedPnL !== 0 ? (realizedPnL >= 0 ? 'CREDIT' : 'DEBIT') : 'DEBIT') as 'CREDIT' | 'DEBIT',
+        category: realizedPnL !== 0 ? 'TRADE_PNL' : 'TRADE_MARGIN',
+        amount: realizedPnL !== 0 ? Math.abs(realizedPnL) : requiredMargin,
+        balanceBefore: wallet.available_balance,
+        balanceAfter: updatedWallet.available_balance,
+        reference: realizedPnL !== 0 ? `Trade PnL for ${inst.symbol}` : `Trade execution margin for ${inst.symbol}`,
+        createdBy: 'SYSTEM',
+        masterId: hierarchy.masterId,
+        brokerId: hierarchy.brokerId,
+        subBrokerId: hierarchy.subBrokerId,
+        updatedAt: new Date().toISOString(),
+      };
+
+      await transactionalOutboxService.enqueue(
+        {
+          eventId: `evt-ledger-${newTrade.id}`,
+          tenantId,
+          eventType: 'ledger.updated',
+          payload: ledgerPayload,
+        },
+        client
+      );
+
       return {
         newOrder,
         newTrade,
@@ -717,6 +805,7 @@ export class TradingExecutionService {
         tradePayload,
         positionPayload,
         walletPayload,
+        ledgerPayload,
       };
     });
 
@@ -837,7 +926,6 @@ export class TradingExecutionService {
       const userFilter = (ws: any) => ws.userId === userId || isPrivileged(ws.role);
       const target = { targetUserId: userId };
       tradingWebSocketServer.broadcastToTenant(tenantId, 'order.created', result.newOrder, userFilter, false, target);
-      tradingWebSocketServer.broadcastToTenant(tenantId, 'trade.executed', result.newTrade, userFilter, false, target);
 
       const normalizedPositionPayload = {
         ...result.updatedPosition,
@@ -868,9 +956,13 @@ export class TradingExecutionService {
       console.error('[WebSocket] Broadcast error:', wsErr);
     }
 
-    // Dispatch events to Central Admin asynchronously (non-blocking)
+    // Dispatch events to Central Admin + real-time /ws & SSE asynchronously (non-blocking)
     internalEventDispatcher.dispatchTradeExecuted(result.tradePayload).catch((e) =>
       console.error('[Event] trade.executed dispatch error:', e)
+    );
+
+    internalEventDispatcher.dispatchLedgerUpdated(result.ledgerPayload).catch((e) =>
+      console.error('[Event] ledger.updated dispatch error:', e)
     );
 
     internalEventDispatcher.dispatchPositionUpdated(result.positionPayload).catch((e) =>
@@ -1132,6 +1224,84 @@ export class TradingExecutionService {
         );
       }
 
+      const closeHierarchy = internalEventDispatcher.resolveHierarchyContext({ userId });
+      const closeUserRecord = db.findUserByUserId(userId);
+      const closeExecutionValue = Number((soQty * soPrice).toFixed(2));
+      const closeTradePayload = {
+        id: closeTrade.id,
+        tenantId,
+        masterId: closeHierarchy.masterId,
+        brokerId: closeHierarchy.brokerId,
+        subBrokerId: closeHierarchy.subBrokerId,
+        userId,
+        user_id: userId,
+        clientId: userId,
+        tradingUserId: userId,
+        clientCode: userId.toUpperCase(),
+        clientName: closeUserRecord?.full_name || userId,
+        orderId: closeOrder.id,
+        order_id: closeOrder.id,
+        tradeId: closeTrade.id,
+        symbol: pos.instrument_id,
+        instrument_id: pos.instrument_id,
+        exchange: (inst as any)?.exchange || 'NSE',
+        side: soSide,
+        quantity: soQty,
+        qty: soQty,
+        price: soPrice,
+        executionPrice: soPrice,
+        execution_price: soPrice,
+        executionValue: closeExecutionValue,
+        execution_value: closeExecutionValue,
+        totalValue: closeExecutionValue,
+        turnover: closeExecutionValue,
+        fees: Number((closeExecutionValue * 0.0003).toFixed(2)),
+        commission: 0,
+        realizedPnl: Number(tradeExitPnL),
+        realized_pnl: Number(tradeExitPnL),
+        executedAt: closeTrade.executed_at,
+        executed_at: closeTrade.executed_at,
+      };
+
+      await transactionalOutboxService.enqueue(
+        {
+          eventId: `evt-trade-close-${closeTrade.id}`,
+          tenantId,
+          eventType: 'trade.executed',
+          payload: closeTradePayload,
+        },
+        client
+      );
+
+      const closeLedgerPayload = {
+        tenantId,
+        entryId: `ledger-${closeTrade.id}`,
+        transactionId: closeTrade.id,
+        userId,
+        clientId: userId,
+        type: (tradeExitPnL >= 0 ? 'CREDIT' : 'DEBIT') as 'CREDIT' | 'DEBIT',
+        category: tradeExitPnL !== 0 ? 'TRADE_PNL' : 'MARGIN_RELEASE',
+        amount: tradeExitPnL !== 0 ? Math.abs(tradeExitPnL) : releasedMargin,
+        balanceBefore: wallet.available_balance,
+        balanceAfter: updatedWallet.available_balance,
+        reference: `Position square-off ${pos.instrument_id}`,
+        createdBy: 'SYSTEM',
+        masterId: closeHierarchy.masterId,
+        brokerId: closeHierarchy.brokerId,
+        subBrokerId: closeHierarchy.subBrokerId,
+        updatedAt: new Date().toISOString(),
+      };
+
+      await transactionalOutboxService.enqueue(
+        {
+          eventId: `evt-ledger-close-${closeTrade.id}`,
+          tenantId,
+          eventType: 'ledger.updated',
+          payload: closeLedgerPayload,
+        },
+        client
+      );
+
       return {
         pos,
         updatedWallet,
@@ -1139,6 +1309,8 @@ export class TradingExecutionService {
         closeTrade,
         closedPositionPayload,
         walletPayload,
+        closeTradePayload,
+        closeLedgerPayload,
       };
     });
 
@@ -1253,9 +1425,16 @@ export class TradingExecutionService {
     };
     tradingWebSocketServer.broadcastToTenant(tenantId, 'wallet.updated', normalizedCloseWallet, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
     tradingWebSocketServer.broadcastToTenant(tenantId, 'order.created', result.closeOrder, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
-    tradingWebSocketServer.broadcastToTenant(tenantId, 'trade.executed', result.closeTrade, (ws) => ws.userId === userId || isPrivileged(ws.role), false, target);
 
-    // Dispatch Central Admin events
+    // Dispatch Central Admin + real-time /ws & SSE events
+    internalEventDispatcher.dispatchTradeExecuted(result.closeTradePayload).catch((e) =>
+      console.error('[Event] trade.executed dispatch error on close:', e)
+    );
+
+    internalEventDispatcher.dispatchLedgerUpdated(result.closeLedgerPayload).catch((e) =>
+      console.error('[Event] ledger.updated dispatch error on close:', e)
+    );
+
     internalEventDispatcher.dispatchPositionUpdated(result.closedPositionPayload).catch((e) =>
       console.error('[Event] position.updated dispatch error on close:', e)
     );

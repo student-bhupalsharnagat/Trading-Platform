@@ -1326,8 +1326,8 @@ router.post('/events/client-registered', async (req: InternalAuthorizedRequest, 
 
     eventIdempotencyStore.record(eventId, eventType || 'client.registered', tenantId);
 
-    // Broadcast to tenant WebSocket connections
-    tradingWebSocketServer.broadcastToTenant(tenantId, 'client.registered', {
+    // Broadcast to tenant WebSocket & SSE connections with hierarchy scope
+    internalEventDispatcher.broadcastRealtimeEvent('client.registered', tenantId, {
       ...payload,
       tenantId,
     });
@@ -2053,8 +2053,19 @@ router.get(['/trading/stream', '/stream'], (req: InternalAuthorizedRequest, res:
 
   const tenantId = getInternalTenantId(req);
   const userId = req.query.userId as string;
+  const masterId = req.query.masterId as string | undefined;
+  const brokerId = req.query.brokerId as string | undefined;
+  const subBrokerId = req.query.subBrokerId as string | undefined;
+  const role = req.query.role as string | undefined;
 
-  const unsubscribe = internalEventDispatcher.registerSseClient(res, { tenantId, userId });
+  const unsubscribe = internalEventDispatcher.registerSseClient(res, {
+    tenantId,
+    userId,
+    masterId,
+    brokerId,
+    subBrokerId,
+    role,
+  });
 
   const heartbeat = setInterval(() => {
     try {

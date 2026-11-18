@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   Crown,
   Briefcase,
@@ -35,55 +35,74 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async (silent?: boolean | unknown) => {
+    const isSilent = silent === true;
     try {
-      setLoading(true);
-      const res = await adminApi.getKPIs();
+      if (!isSilent) setLoading(true);
+      const res = await adminApi.getMetrics();
       setKpis(res.kpis);
       setCharts(res.charts);
+      setError(null);
 
       // Also grab scoped clients
       const clients = await adminApi.getClients();
       setRecentClients(clients.slice(0, 5));
     } catch (err: any) {
-      setError(err.message || 'Failed to load dashboard metrics');
+      if (!isSilent) {
+        setError(err.message || 'Failed to load dashboard metrics');
+      }
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchDashboardData();
-  }, []);
+    fetchDashboardData(false);
+    const pollInterval = setInterval(() => {
+      fetchDashboardData(true);
+    }, 2500);
+    return () => clearInterval(pollInterval);
+  }, [fetchDashboardData]);
 
   // Real-time synchronization
   useEffect(() => {
-    const unsubOrder = subscribe('order.created', () => fetchDashboardData());
-    const unsubTrade = subscribe('trade.executed', () => fetchDashboardData());
-    const unsubWallet = subscribe('wallet.updated', () => fetchDashboardData());
-    const unsubPos = subscribe('position.updated', () => fetchDashboardData());
-    const unsubClient = subscribe('client.created', () => fetchDashboardData());
-    const unsubClientReg = subscribe('client.registered', () => fetchDashboardData());
-    const unsubClientAct = subscribe('client.activated', () => fetchDashboardData());
-    const unsubFund = subscribe('fund.requested', () => fetchDashboardData());
-    const unsubFundCreated = subscribe('fund.created', () => fetchDashboardData());
-    const unsubFundProc = subscribe('fund.processed', () => fetchDashboardData());
-    const unsubFundUpd = subscribe('fund.updated', () => fetchDashboardData());
+    const refreshSilent = () => fetchDashboardData(true);
+    const unsubOrder = subscribe('order.created', refreshSilent);
+    const unsubTrade = subscribe('trade.executed', refreshSilent);
+    const unsubLedger = subscribe('ledger.updated', refreshSilent);
+    const unsubWallet = subscribe('wallet.updated', refreshSilent);
+    const unsubPos = subscribe('position.updated', refreshSilent);
+    const unsubClient = subscribe('client.created', refreshSilent);
+    const unsubClientReg = subscribe('client.registered', refreshSilent);
+    const unsubClientAct = subscribe('client.activated', refreshSilent);
+    const unsubBroker = subscribe('broker.added', refreshSilent);
+    const unsubHierarchy = subscribe('hierarchy.updated', refreshSilent);
+    const unsubFund = subscribe('fund.requested', refreshSilent);
+    const unsubFundCreated = subscribe('fund.created', refreshSilent);
+    const unsubFundProc = subscribe('fund.processed', refreshSilent);
+    const unsubFundUpd = subscribe('fund.updated', refreshSilent);
+    const unsubFundTx = subscribe('fund.transaction_updated', refreshSilent);
+    const unsubRiskAlert = subscribe('risk.alert_triggered', refreshSilent);
 
     return () => {
       unsubOrder();
       unsubTrade();
+      unsubLedger();
       unsubWallet();
       unsubPos();
       unsubClient();
       unsubClientReg();
       unsubClientAct();
+      unsubBroker();
+      unsubHierarchy();
       unsubFund();
       unsubFundCreated();
       unsubFundProc();
       unsubFundUpd();
+      unsubFundTx();
+      unsubRiskAlert();
     };
-  }, [subscribe]);
+  }, [subscribe, fetchDashboardData]);
 
   const formatCurrency = (val?: number) => {
     if (val === undefined || val === null) return '₹0';

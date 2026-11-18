@@ -258,7 +258,8 @@ export class TradingWebSocketServer {
             distMsg.event,
             distMsg.payload,
             (client) => {
-              if (distMsg.targetUserId && client.userId !== distMsg.targetUserId && client.role !== 'SUPER_ADMIN') {
+              const isPrivileged = ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(client.role);
+              if (distMsg.targetUserId && client.userId !== distMsg.targetUserId && !isPrivileged) {
                 return false;
               }
               if (distMsg.targetRole && client.role !== distMsg.targetRole && client.role !== 'SUPER_ADMIN') {

@@ -9,12 +9,15 @@
 export type InternalEventType =
   | 'client.registered'
   | 'client.activated'
+  | 'broker.added'
   | 'kyc.submitted'
   | 'support.ticket_created'
   | 'support.ticket_updated'
   | 'trade.executed'
+  | 'ledger.updated'
   | 'position.updated'
   | 'wallet.updated'
+  | 'fund.transaction_updated'
   | 'deposit.created'
   | 'deposit.updated'
   | 'deposit.approved'
@@ -24,6 +27,7 @@ export type InternalEventType =
   | 'withdrawal.approved'
   | 'withdrawal.rejected'
   | 'risk.margin_breach'
+  | 'risk.alert_triggered'
   | 'execution.failure'
   | 'emergency.control_activated'
   | 'reconciliation.mismatch'
@@ -31,6 +35,13 @@ export type InternalEventType =
   | 'manual_deposit.approved'
   | 'manual_deposit.rejected'
   | string;
+
+export interface HierarchyEventScope {
+  tenantId?: string;
+  masterId?: string | null;
+  brokerId?: string | null;
+  subBrokerId?: string | null;
+}
 
 export interface InternalEvent<T = any> {
   eventId: string;
@@ -41,7 +52,7 @@ export interface InternalEvent<T = any> {
   payload: T;
 }
 
-export interface ClientRegisteredPayload {
+export interface ClientRegisteredPayload extends HierarchyEventScope {
   tenantId: string;
   tradingUserId: string;
   userId: string;
@@ -56,7 +67,22 @@ export interface ClientRegisteredPayload {
   createdAt: string;
 }
 
-export interface ClientActivatedPayload {
+export interface BrokerAddedPayload extends HierarchyEventScope {
+  tenantId: string;
+  id: string;
+  userId: string;
+  name: string;
+  fullName?: string;
+  email?: string;
+  phone?: string;
+  role: 'MASTER' | 'BROKER' | 'SUB_BROKER';
+  parentId?: string | null;
+  commissionRate?: number;
+  status: string;
+  createdAt: string;
+}
+
+export interface ClientActivatedPayload extends HierarchyEventScope {
   tenantId: string;
   tradingUserId: string;
   userId: string;
@@ -71,32 +97,56 @@ export interface ClientActivatedPayload {
   createdAt: string;
 }
 
-export interface TradeExecutedPayload {
+export interface TradeExecutedPayload extends HierarchyEventScope {
+  id?: string;
   tenantId?: string;
   userId: string;
+  user_id?: string;
   clientId?: string;
   tradingUserId?: string;
   clientCode?: string;
   clientName?: string;
   orderId: string;
+  order_id?: string;
   tradeId?: string;
   symbol: string;
+  instrument_id?: string;
   exchange?: string;
   side: 'BUY' | 'SELL';
   quantity: number;
   qty?: number;
   price?: number;
   executionPrice: number;
+  execution_price?: number;
   executionValue?: number;
+  execution_value?: number;
   totalValue?: number;
   turnover?: number;
   fees?: number;
   commission?: number;
   realizedPnl?: number;
+  realized_pnl?: number;
   executedAt?: string;
+  executed_at?: string;
 }
 
-export interface PositionUpdatedPayload {
+export interface LedgerUpdatedPayload extends HierarchyEventScope {
+  tenantId: string;
+  entryId?: string;
+  transactionId?: string;
+  userId: string;
+  clientId?: string;
+  type: 'CREDIT' | 'DEBIT';
+  category: string;
+  amount: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  reference?: string;
+  createdBy?: string;
+  updatedAt?: string;
+}
+
+export interface PositionUpdatedPayload extends HierarchyEventScope {
   tenantId: string;
   userId: string;
   clientId: string;
@@ -117,7 +167,7 @@ export interface PositionUpdatedPayload {
   updatedAt: string;
 }
 
-export interface WalletUpdatedPayload {
+export interface WalletUpdatedPayload extends HierarchyEventScope {
   tenantId: string;
   userId: string;
   clientId: string;
@@ -133,7 +183,7 @@ export interface WalletUpdatedPayload {
   updatedAt: string;
 }
 
-export interface FundTransactionPayload {
+export interface FundTransactionPayload extends HierarchyEventScope {
   id?: string;
   depositId?: string;
   transactionId: string;
@@ -188,13 +238,31 @@ export interface SupportTicketPayload {
   updatedAt: string;
 }
 
-export interface MarginBreachPayload {
+export interface MarginBreachPayload extends HierarchyEventScope {
   userId: string;
   usedMargin: number;
   availableMargin: number;
   exposure: number;
   threshold: number;
   detectedAt: string;
+}
+
+export interface RiskAlertTriggeredPayload extends HierarchyEventScope {
+  tenantId: string;
+  userId: string;
+  clientId?: string;
+  alertType: 'MARGIN_SHORTFALL' | 'ORDER_BLOCKED' | 'MARGIN_BREACH' | 'USER_FROZEN' | 'TRADING_HALTED' | string;
+  severity: 'WARNING' | 'CRITICAL';
+  reason: string;
+  orderId?: string;
+  symbol?: string;
+  side?: 'BUY' | 'SELL';
+  requiredMargin?: number;
+  availableMargin?: number;
+  usedMargin?: number;
+  exposure?: number;
+  threshold?: number;
+  triggeredAt?: string;
 }
 
 export interface ExecutionFailurePayload {

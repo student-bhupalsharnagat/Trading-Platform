@@ -7,6 +7,7 @@ import { pgDb } from '../db/postgres.ts';
 import { PasswordHashUtil } from '../utils/passwordHash.ts';
 import { transactionalOutboxService } from './TransactionalOutboxService.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
+import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
 
 export interface HierarchyNodeView {
   id: string;
@@ -355,11 +356,34 @@ export class HierarchyService {
     }).catch(() => {});
 
     // Broadcast WebSocket event
+    const masterNodeView = await this.toNodeView(record);
     tradingWebSocketServer.broadcastToTenant(tenantId, 'hierarchy.updated', {
       type: 'master',
       action: 'created',
-      node: await this.toNodeView(record),
+      tenantId,
+      masterId: record.id,
+      brokerId: null,
+      subBrokerId: null,
+      node: masterNodeView,
     });
+
+    internalEventDispatcher.dispatchBrokerAdded({
+      tenantId,
+      id: record.id,
+      userId: record.user_id,
+      name: record.full_name,
+      fullName: record.full_name,
+      email: record.email,
+      phone: record.mobile,
+      role: 'MASTER',
+      parentId: record.parent_id,
+      masterId: record.id,
+      brokerId: null,
+      subBrokerId: null,
+      commissionRate: record.commission_rate,
+      status: record.status,
+      createdAt: record.created_at,
+    }).catch(() => {});
 
     auditService.log({
       actorId: caller.id,
@@ -455,11 +479,34 @@ export class HierarchyService {
     }).catch(() => {});
 
     // Broadcast WebSocket event
+    const brokerNodeView = await this.toNodeView(record);
     tradingWebSocketServer.broadcastToTenant(tenantId, 'hierarchy.updated', {
       type: 'broker',
       action: 'created',
-      node: await this.toNodeView(record),
+      tenantId,
+      masterId: parentMaster.id,
+      brokerId: record.id,
+      subBrokerId: null,
+      node: brokerNodeView,
     });
+
+    internalEventDispatcher.dispatchBrokerAdded({
+      tenantId,
+      id: record.id,
+      userId: record.user_id,
+      name: record.full_name,
+      fullName: record.full_name,
+      email: record.email,
+      phone: record.mobile,
+      role: 'BROKER',
+      parentId: parentMaster.id,
+      masterId: parentMaster.id,
+      brokerId: record.id,
+      subBrokerId: null,
+      commissionRate: record.commission_rate,
+      status: record.status,
+      createdAt: record.created_at,
+    }).catch(() => {});
 
     auditService.log({
       actorId: caller.id,
@@ -558,11 +605,34 @@ export class HierarchyService {
     }).catch(() => {});
 
     // Broadcast WebSocket event
+    const subBrokerNodeView = await this.toNodeView(record);
     tradingWebSocketServer.broadcastToTenant(tenantId, 'hierarchy.updated', {
       type: 'sub_broker',
       action: 'created',
-      node: await this.toNodeView(record),
+      tenantId,
+      masterId: masterId || null,
+      brokerId: parentBroker.id,
+      subBrokerId: record.id,
+      node: subBrokerNodeView,
     });
+
+    internalEventDispatcher.dispatchBrokerAdded({
+      tenantId,
+      id: record.id,
+      userId: record.user_id,
+      name: record.full_name,
+      fullName: record.full_name,
+      email: record.email,
+      phone: record.mobile,
+      role: 'SUB_BROKER',
+      parentId: parentBroker.id,
+      masterId: masterId || null,
+      brokerId: parentBroker.id,
+      subBrokerId: record.id,
+      commissionRate: record.commission_rate,
+      status: record.status,
+      createdAt: record.created_at,
+    }).catch(() => {});
 
     auditService.log({
       actorId: caller.id,
@@ -877,18 +947,65 @@ export class HierarchyService {
       ]).catch(() => {});
     }
 
-    // Broadcast WebSocket event
+    // Broadcast WebSocket & SSE events
+    const syncedView = await this.toNodeView(existing);
+    const syncedMasterId = role === 'MASTER' ? existing.id : (node.master_id || node.masterId || null);
+    const syncedBrokerId = role === 'BROKER' ? existing.id : (role === 'SUB_BROKER' ? parentId : (node.broker_id || node.brokerId || null));
+    const syncedSubBrokerId = role === 'SUB_BROKER' ? existing.id : (node.sub_broker_id || node.subBrokerId || null);
+
     tradingWebSocketServer.broadcastToTenant(tenantId, 'hierarchy.updated', {
       type: role.toLowerCase(),
       action,
-      node: await this.toNodeView(existing),
+      tenantId,
+      masterId: syncedMasterId,
+      brokerId: syncedBrokerId,
+      subBrokerId: syncedSubBrokerId,
+      node: syncedView,
     });
+
+    if (action === 'created') {
+      if (role === 'CLIENT') {
+        internalEventDispatcher.broadcastRealtimeEvent('client.registered', tenantId, {
+          tenantId,
+          tradingUserId: existing.user_id,
+          userId: existing.user_id,
+          clientId: existing.id,
+          clientCode: existing.user_id.toUpperCase(),
+          name: existing.full_name,
+          email: existing.email || '',
+          phone: existing.mobile || '',
+          status: existing.status,
+          masterId: syncedMasterId,
+          brokerId: syncedBrokerId,
+          subBrokerId: syncedSubBrokerId,
+          createdAt: existing.created_at,
+        }, { targetUserId: existing.user_id });
+      } else if (role === 'MASTER' || role === 'BROKER' || role === 'SUB_BROKER') {
+        internalEventDispatcher.broadcastRealtimeEvent('broker.added', tenantId, {
+          tenantId,
+          id: existing.id,
+          userId: existing.user_id,
+          name: existing.full_name,
+          fullName: existing.full_name,
+          email: existing.email || '',
+          phone: existing.mobile || '',
+          role,
+          parentId,
+          masterId: syncedMasterId,
+          brokerId: syncedBrokerId,
+          subBrokerId: syncedSubBrokerId,
+          commissionRate: existing.commission_rate,
+          status: existing.status,
+          createdAt: existing.created_at,
+        }, { privilegedOnly: true });
+      }
+    }
 
     return {
       success: true,
       processed: true,
       action,
-      node: await this.toNodeView(existing),
+      node: syncedView,
     };
   }
 }

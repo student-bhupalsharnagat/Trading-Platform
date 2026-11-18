@@ -365,8 +365,19 @@ router.get('/stream', optionalAuth, (req: TenantRequest, res: Response) => {
   const tenantId = getReqTenantId(req);
   const userObj = (req as any).user;
   const userId = userObj?.userId || userObj?.user_id || userObj?.id || (req.query.userId as string);
+  const masterId = req.query.masterId as string | undefined;
+  const brokerId = req.query.brokerId as string | undefined;
+  const subBrokerId = req.query.subBrokerId as string | undefined;
+  const role = userObj?.role || (req.query.role as string | undefined);
 
-  const unsubscribe = internalEventDispatcher.registerSseClient(res, { tenantId, userId });
+  const unsubscribe = internalEventDispatcher.registerSseClient(res, {
+    tenantId,
+    userId,
+    masterId,
+    brokerId,
+    subBrokerId,
+    role,
+  });
 
   const heartbeat = setInterval(() => {
     try {
@@ -413,10 +424,20 @@ router.post(
         if (latestUser) {
           const check = db.isUserOrHierarchyFrozen(latestUser);
           if (check.frozen || Boolean(latestUser.is_frozen)) {
+            const reason = check.reason || 'Your account is currently frozen.';
+            internalEventDispatcher.dispatchRiskAlertTriggered({
+              tenantId,
+              userId: orderUserId,
+              alertType: 'USER_FROZEN',
+              severity: 'CRITICAL',
+              reason,
+              symbol: req.body?.symbol || req.body?.instrument,
+            }).catch(() => {});
+
             res.status(403).json({
               success: false,
               code: 'USER_FROZEN',
-              message: check.reason || 'Your account is currently frozen.',
+              message: reason,
             });
             return;
           }
@@ -470,10 +491,21 @@ router.post(
         (inst as any).status === 'SUSPENDED' ||
         (inst as any).isSuspended
       ) {
+        const reason = `Trading is disabled for instrument ${inst.symbol}.`;
+        internalEventDispatcher.dispatchRiskAlertTriggered({
+          tenantId,
+          userId: orderUserId,
+          alertType: 'ORDER_BLOCKED',
+          severity: 'WARNING',
+          reason,
+          symbol: inst.symbol,
+          side: orderSide,
+        }).catch(() => {});
+
         res.status(403).json({
           success: false,
           code: 'INSTRUMENT_DISABLED',
-          message: `Trading is disabled for instrument ${inst.symbol}.`,
+          message: reason,
         });
         return;
       }

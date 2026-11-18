@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   AlertTriangle,
   ShieldAlert,
@@ -32,10 +32,13 @@ export const AdminRiskPage: React.FC<AdminRiskPageProps> = ({ onNavigate }) => {
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const fetchRiskData = async () => {
+  const fetchRiskData = useCallback(async (silent?: boolean | unknown) => {
+    const isSilent = silent === true;
     try {
-      setLoading(true);
-      setError(null);
+      if (!isSilent) {
+        setLoading(true);
+        setError(null);
+      }
       const [summaryRes, positionsRes] = await Promise.all([
         adminApi.getRiskSummary(),
         adminApi.getRiskPositions(),
@@ -44,15 +47,21 @@ export const AdminRiskPage: React.FC<AdminRiskPageProps> = ({ onNavigate }) => {
       setRiskData((summaryRes as any)?.data || summaryRes || null);
       setPositions((positionsRes as any)?.data || positionsRes || []);
     } catch (err: any) {
-      setError(err.message || 'Failed to load risk metrics');
+      if (!isSilent) {
+        setError(err.message || 'Failed to load risk metrics');
+      }
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchRiskData();
-  }, []);
+    fetchRiskData(false);
+    const pollInterval = setInterval(() => {
+      fetchRiskData(true);
+    }, 2500);
+    return () => clearInterval(pollInterval);
+  }, [fetchRiskData]);
 
   // Real-time subscriptions for RMS
   useEffect(() => {
@@ -97,7 +106,12 @@ export const AdminRiskPage: React.FC<AdminRiskPageProps> = ({ onNavigate }) => {
 
     const unsubBreach = subscribe('risk.margin_breach', (breachPayload: any) => {
       setError(`RMS ALERT: Margin breach detected for client ${breachPayload.userId}! Margin utilization exceeded 100%.`);
-      fetchRiskData();
+      fetchRiskData(true);
+    });
+
+    const unsubRiskAlert = subscribe('risk.alert_triggered', (alertPayload: any) => {
+      setError(`RMS ALERT (${alertPayload?.alertType || 'RISK'}): ${alertPayload?.reason || `Risk alert triggered for client ${alertPayload?.userId || 'unknown'}`}`);
+      fetchRiskData(true);
     });
 
     const unsubMtmBatch = subscribe('positions.mtm_batch', (batch: any) => {
@@ -149,10 +163,11 @@ export const AdminRiskPage: React.FC<AdminRiskPageProps> = ({ onNavigate }) => {
       unsubPos();
       unsubTicks();
       unsubBreach();
+      unsubRiskAlert();
       unsubMtmBatch();
       unsubSingleTick();
     };
-  }, [subscribe]);
+  }, [subscribe, fetchRiskData]);
 
   const handleSquareOff = async (userId: string, positionId: string) => {
     try {

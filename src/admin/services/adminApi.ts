@@ -32,6 +32,9 @@ export const adminApi = {
   getKPIs: async (): Promise<{ kpis: AdminDashboardKPIs; charts: ChartDataPoint[] }> => {
     return request<{ kpis: AdminDashboardKPIs; charts: ChartDataPoint[] }>('/dashboard/kpis');
   },
+  getMetrics: async (): Promise<{ kpis: AdminDashboardKPIs; charts: ChartDataPoint[] }> => {
+    return request<{ kpis: AdminDashboardKPIs; charts: ChartDataPoint[] }>('/metrics');
+  },
 
   // Masters
   getMasters: async (): Promise<HierarchyNode[]> => {

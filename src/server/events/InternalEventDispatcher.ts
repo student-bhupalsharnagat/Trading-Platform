@@ -16,11 +16,14 @@ import {
   InternalEventType,
   TradeExecutedPayload,
   ClientRegisteredPayload,
+  BrokerAddedPayload,
   ClientActivatedPayload,
+  LedgerUpdatedPayload,
   PositionUpdatedPayload,
   WalletUpdatedPayload,
   FundTransactionPayload,
   MarginBreachPayload,
+  RiskAlertTriggeredPayload,
   ExecutionFailurePayload,
   EmergencyControlPayload,
   ReconciliationMismatchPayload,
@@ -36,6 +39,7 @@ import {
 import { auditService } from '../services/auditService.ts';
 import { transactionalOutboxService } from '../services/TransactionalOutboxService.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
+import { db } from '../db/database.ts';
 
 export interface DispatcherHealthMetrics {
   queueSize: number;
@@ -92,13 +96,32 @@ export class InternalEventDispatcher {
     res: any;
     tenantId?: string;
     userId?: string;
+    masterId?: string;
+    brokerId?: string;
+    subBrokerId?: string;
+    role?: string;
   }>();
 
   public registerSseClient(
     res: any,
-    filter?: { tenantId?: string; userId?: string }
+    filter?: {
+      tenantId?: string;
+      userId?: string;
+      masterId?: string;
+      brokerId?: string;
+      subBrokerId?: string;
+      role?: string;
+    }
   ): () => void {
-    const client = { res, tenantId: filter?.tenantId, userId: filter?.userId };
+    const client = {
+      res,
+      tenantId: filter?.tenantId,
+      userId: filter?.userId,
+      masterId: filter?.masterId,
+      brokerId: filter?.brokerId,
+      subBrokerId: filter?.subBrokerId,
+      role: filter?.role,
+    };
     this.sseClients.add(client);
     return () => {
       this.sseClients.delete(client);
@@ -109,19 +132,136 @@ export class InternalEventDispatcher {
     return this.sseClients.size;
   }
 
+  /**
+   * Resolves authoritative 4-tier hierarchy links (masterId, brokerId, subBrokerId)
+   * for any user, node, trade, fund, ledger, or risk payload.
+   */
+  public resolveHierarchyContext(entity: any): {
+    masterId: string | null;
+    brokerId: string | null;
+    subBrokerId: string | null;
+  } {
+    if (!entity || typeof entity !== 'object') {
+      return { masterId: null, brokerId: null, subBrokerId: null };
+    }
+
+    let masterId: string | null = entity.masterId ?? entity.master_id ?? null;
+    let brokerId: string | null = entity.brokerId ?? entity.broker_id ?? null;
+    let subBrokerId: string | null = entity.subBrokerId ?? entity.sub_broker_id ?? null;
+
+    const rawRole = String(entity.role || '').toUpperCase();
+    if (rawRole === 'MASTER') {
+      return {
+        masterId: masterId || entity.id || entity.userId || null,
+        brokerId: null,
+        subBrokerId: null,
+      };
+    }
+    if (rawRole === 'BROKER') {
+      return {
+        masterId: masterId || entity.parentId || entity.parent_id || null,
+        brokerId: brokerId || entity.id || entity.userId || null,
+        subBrokerId: null,
+      };
+    }
+    if (rawRole === 'SUB_BROKER') {
+      const bId = brokerId || entity.parentId || entity.parent_id || null;
+      let mId = masterId;
+      if (!mId && bId) {
+        const parentBroker = db.findUserById(bId) || db.findUserByUserId(bId);
+        if (parentBroker?.parent_id) mId = parentBroker.parent_id;
+      }
+      return {
+        masterId: mId,
+        brokerId: bId,
+        subBrokerId: subBrokerId || entity.id || entity.userId || null,
+      };
+    }
+
+    const uid = entity.userId || entity.user_id || entity.tradingUserId || entity.trading_user_id || entity.clientId;
+    const user = uid ? (db.findUserByUserId(uid) || db.findUserById(uid)) : null;
+
+    if (user) {
+      if (!brokerId && user.broker_id) brokerId = user.broker_id;
+      if (!subBrokerId && (user as any).sub_broker_id) subBrokerId = (user as any).sub_broker_id;
+      if (!masterId && (user as any).master_id) masterId = (user as any).master_id;
+
+      const hPath = user.hierarchy_path || entity.hierarchyPath || entity.hierarchy_path || '';
+      if (hPath && hPath.startsWith('root.')) {
+        const parts = hPath.split('.');
+        if (!masterId && parts.length >= 2 && parts[1] !== user.user_id) masterId = parts[1];
+        if (!brokerId && parts.length >= 3 && parts[2] !== user.user_id) brokerId = parts[2];
+        if (!subBrokerId && parts.length >= 4 && parts[3] !== user.user_id) subBrokerId = parts[3];
+      }
+
+      if (user.parent_id && (!masterId || !brokerId || !subBrokerId)) {
+        const parent = db.findUserById(user.parent_id) || db.findUserByUserId(user.parent_id);
+        if (parent) {
+          if (parent.role === 'SUB_BROKER') {
+            if (!subBrokerId) subBrokerId = parent.id;
+            if (parent.parent_id) {
+              const broker = db.findUserById(parent.parent_id) || db.findUserByUserId(parent.parent_id);
+              if (broker) {
+                if (!brokerId) brokerId = broker.id;
+                if (!masterId && broker.parent_id) masterId = broker.parent_id;
+              }
+            }
+          } else if (parent.role === 'BROKER') {
+            if (!brokerId) brokerId = parent.id;
+            if (!masterId && parent.parent_id) masterId = parent.parent_id;
+          } else if (parent.role === 'MASTER') {
+            if (!masterId) masterId = parent.id;
+          }
+        }
+      }
+    }
+
+    if (!masterId && !brokerId && !subBrokerId) {
+      masterId = 'master-node-0001';
+      brokerId = 'BRK-001';
+    }
+
+    return { masterId, brokerId, subBrokerId };
+  }
+
   public broadcastSse(
     event: string,
     payload: any,
-    filter?: { tenantId?: string; userId?: string }
+    filter?: {
+      tenantId?: string;
+      userId?: string;
+      masterId?: string | null;
+      brokerId?: string | null;
+      subBrokerId?: string | null;
+      privilegedOnly?: boolean;
+    }
   ): void {
     const data = JSON.stringify(payload);
     const message = `event: ${event}\ndata: ${data}\n\n`;
+    const isPrivilegedRole = (role?: string) =>
+      Boolean(role && ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(role.toUpperCase()));
+
+    const eventMasterId = filter?.masterId ?? payload?.masterId ?? null;
+    const eventBrokerId = filter?.brokerId ?? payload?.brokerId ?? null;
+    const eventSubBrokerId = filter?.subBrokerId ?? payload?.subBrokerId ?? null;
 
     this.sseClients.forEach((client) => {
       if (filter?.tenantId && client.tenantId && client.tenantId !== filter.tenantId && client.tenantId !== 'global') {
         return;
       }
-      if (filter?.userId && client.userId && client.userId !== filter.userId) {
+      if (filter?.privilegedOnly && client.role && !isPrivilegedRole(client.role)) {
+        return;
+      }
+      if (filter?.userId && client.userId && client.userId !== filter.userId && !isPrivilegedRole(client.role)) {
+        return;
+      }
+      if (client.masterId && eventMasterId && client.masterId !== eventMasterId) {
+        return;
+      }
+      if (client.brokerId && eventBrokerId && client.brokerId !== eventBrokerId) {
+        return;
+      }
+      if (client.subBrokerId && eventSubBrokerId && client.subBrokerId !== eventSubBrokerId) {
         return;
       }
       try {
@@ -130,6 +270,56 @@ export class InternalEventDispatcher {
         this.sseClients.delete(client);
       }
     });
+  }
+
+  /**
+   * Broadcasts an authoritative hierarchy-tagged dashboard/KPI event over both /ws and SSE.
+   */
+  public broadcastRealtimeEvent<T extends Record<string, any>>(
+    eventType: string,
+    tenantId: string,
+    payload: T,
+    options?: { targetUserId?: string; privilegedOnly?: boolean; skipWs?: boolean }
+  ): T & { tenantId: string; masterId: string | null; brokerId: string | null; subBrokerId: string | null } {
+    const hierarchy = this.resolveHierarchyContext(payload);
+    const enrichedPayload = {
+      ...payload,
+      tenantId: payload?.tenantId || tenantId,
+      masterId: hierarchy.masterId,
+      brokerId: hierarchy.brokerId,
+      subBrokerId: hierarchy.subBrokerId,
+    };
+
+    const isPrivileged = (role: string) => ['SUPER_ADMIN', 'MASTER', 'BROKER', 'SUB_BROKER'].includes(role);
+    const targetUserId = options?.targetUserId || enrichedPayload.userId || enrichedPayload.user_id;
+
+    if (!options?.skipWs) {
+      const wsFilter = options?.privilegedOnly
+        ? (ws: any) => isPrivileged(ws.role)
+        : targetUserId
+          ? (ws: any) => ws.userId === targetUserId || isPrivileged(ws.role)
+          : undefined;
+
+      tradingWebSocketServer.broadcastToTenant(
+        enrichedPayload.tenantId,
+        eventType,
+        enrichedPayload,
+        wsFilter,
+        false,
+        targetUserId ? { targetUserId } : undefined
+      );
+    }
+
+    this.broadcastSse(eventType, enrichedPayload, {
+      tenantId: enrichedPayload.tenantId,
+      userId: options?.privilegedOnly ? undefined : targetUserId,
+      masterId: hierarchy.masterId,
+      brokerId: hierarchy.brokerId,
+      subBrokerId: hierarchy.subBrokerId,
+      privilegedOnly: options?.privilegedOnly,
+    });
+
+    return enrichedPayload;
   }
 
   public broadcastRealtimeTick(tick: {
@@ -290,37 +480,56 @@ export class InternalEventDispatcher {
    * Only authoritative operational details are included; no secrets or tokens.
    */
   public async dispatchTradeExecuted(
-    params: TradeExecutedPayload & { tenantId: string }
+    params: TradeExecutedPayload & { tenantId: string },
+    options?: { skipWs?: boolean }
   ): Promise<InternalEvent<TradeExecutedPayload>> {
-    const tradeId = params.tradeId || `TRD-${Date.now()}`;
+    const tradeId = params.tradeId || params.id || `TRD-${Date.now()}`;
     const qty = Number(params.quantity);
     const price = Number(params.executionPrice);
-    const val = Number(params.executionValue ?? params.totalValue ?? (qty * price));
+    const val = Number(params.executionValue ?? params.execution_value ?? params.totalValue ?? (qty * price));
+    const executedAt = params.executedAt || params.executed_at || new Date().toISOString();
+    const hierarchy = this.resolveHierarchyContext(params);
 
     const payload: TradeExecutedPayload = {
+      id: tradeId,
       tenantId: params.tenantId,
+      masterId: hierarchy.masterId,
+      brokerId: hierarchy.brokerId,
+      subBrokerId: hierarchy.subBrokerId,
       userId: params.userId,
+      user_id: params.user_id || params.userId,
       clientId: params.clientId || params.tradingUserId || params.userId,
       tradingUserId: params.tradingUserId || params.clientId || params.userId,
       clientCode: params.clientCode || (params.userId ? params.userId.toUpperCase() : 'CLIENT'),
       clientName: params.clientName || params.userId || 'Client',
       orderId: params.orderId,
+      order_id: params.order_id || params.orderId,
       tradeId,
       symbol: params.symbol,
+      instrument_id: params.instrument_id || params.symbol,
       exchange: params.exchange || 'NSE',
       side: params.side,
       quantity: qty,
       qty,
       price,
       executionPrice: price,
+      execution_price: price,
       executionValue: val,
+      execution_value: val,
       totalValue: val,
       turnover: val,
       fees: Number(params.fees ?? 0),
       commission: Number(params.commission ?? 0),
-      realizedPnl: Number(params.realizedPnl ?? 0),
-      executedAt: params.executedAt || new Date().toISOString(),
+      realizedPnl: Number(params.realizedPnl ?? params.realized_pnl ?? 0),
+      realized_pnl: Number(params.realized_pnl ?? params.realizedPnl ?? 0),
+      executedAt,
+      executed_at: executedAt,
     };
+
+    this.broadcastRealtimeEvent('trade.executed', params.tenantId, payload, {
+      targetUserId: params.userId,
+      skipWs: options?.skipWs,
+    });
 
     const event: InternalEvent<TradeExecutedPayload> = {
       eventId: `evt-trade-${tradeId}`,
@@ -336,8 +545,51 @@ export class InternalEventDispatcher {
   }
 
   /**
+   * Helper: Dispatches a Ledger Updated event over /ws, SSE, and Outbox/S2S
+   * so turnover & ledger balance KPIs recalculate in real time.
+   */
+  public async dispatchLedgerUpdated(
+    params: LedgerUpdatedPayload
+  ): Promise<InternalEvent<LedgerUpdatedPayload>> {
+    const hierarchy = this.resolveHierarchyContext(params);
+    const updatedAt = params.updatedAt || new Date().toISOString();
+    const entryId = params.entryId || params.transactionId || `LED-${Date.now()}`;
+
+    const payload: LedgerUpdatedPayload = {
+      ...params,
+      entryId,
+      tenantId: params.tenantId,
+      clientId: params.clientId || params.userId,
+      masterId: hierarchy.masterId,
+      brokerId: hierarchy.brokerId,
+      subBrokerId: hierarchy.subBrokerId,
+      amount: Number(params.amount),
+      balanceBefore: Number(params.balanceBefore),
+      balanceAfter: Number(params.balanceAfter),
+      updatedAt,
+    };
+
+    this.broadcastRealtimeEvent('ledger.updated', params.tenantId, payload, {
+      targetUserId: params.userId,
+    });
+
+    const event: InternalEvent<LedgerUpdatedPayload> = {
+      eventId: `evt-ledger-${entryId}-${Date.now()}`,
+      eventType: 'ledger.updated',
+      tenantId: params.tenantId,
+      timestamp: updatedAt,
+      version: 1,
+      payload,
+    };
+
+    await this.dispatch(event);
+    return event;
+  }
+
+  /**
    * Helper: Dispatches a Margin Breach event with state tracking & deduplication.
    * If the breach state is unchanged within cooldown window (60s), suppresses duplicate.
+   * Also emits risk.alert_triggered over /ws and SSE for dashboard risk KPI updates.
    */
   public async dispatchMarginBreach(params: {
     tenantId: string;
@@ -348,6 +600,14 @@ export class InternalEventDispatcher {
     threshold?: number;
     detectedAt?: string;
     force?: boolean;
+    orderId?: string;
+    symbol?: string;
+    side?: 'BUY' | 'SELL';
+    requiredMargin?: number;
+    reason?: string;
+    masterId?: string | null;
+    brokerId?: string | null;
+    subBrokerId?: string | null;
   }): Promise<InternalEvent<MarginBreachPayload> | null> {
     const dedupKey = `${params.tenantId}:${params.userId}`;
     const existing = this.activeMarginBreaches.get(dedupKey);
@@ -375,20 +635,95 @@ export class InternalEventDispatcher {
       reportedAt: now,
     });
 
+    const detectedAt = params.detectedAt || new Date().toISOString();
+    const hierarchy = this.resolveHierarchyContext(params);
+
+    const breachPayload: MarginBreachPayload = {
+      tenantId: params.tenantId,
+      masterId: hierarchy.masterId,
+      brokerId: hierarchy.brokerId,
+      subBrokerId: hierarchy.subBrokerId,
+      userId: params.userId,
+      usedMargin: params.usedMargin,
+      availableMargin: params.availableMargin,
+      exposure: params.exposure,
+      threshold: params.threshold ?? 0.8,
+      detectedAt,
+    };
+
+    this.broadcastRealtimeEvent('risk.margin_breach', params.tenantId, breachPayload, {
+      targetUserId: params.userId,
+    });
+
+    this.broadcastRealtimeEvent(
+      'risk.alert_triggered',
+      params.tenantId,
+      {
+        tenantId: params.tenantId,
+        userId: params.userId,
+        clientId: params.userId,
+        alertType: 'MARGIN_SHORTFALL',
+        severity: 'CRITICAL',
+        reason: params.reason || 'Insufficient margin for order execution',
+        orderId: params.orderId,
+        symbol: params.symbol,
+        side: params.side,
+        requiredMargin: params.requiredMargin,
+        availableMargin: params.availableMargin,
+        usedMargin: params.usedMargin,
+        exposure: params.exposure,
+        threshold: params.threshold ?? 0.8,
+        triggeredAt: detectedAt,
+        masterId: hierarchy.masterId,
+        brokerId: hierarchy.brokerId,
+        subBrokerId: hierarchy.subBrokerId,
+      },
+      { targetUserId: params.userId }
+    );
+
     const event: InternalEvent<MarginBreachPayload> = {
       eventId: `evt-risk-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
       eventType: 'risk.margin_breach',
       tenantId: params.tenantId,
-      timestamp: new Date().toISOString(),
+      timestamp: detectedAt,
       version: 1,
-      payload: {
-        userId: params.userId,
-        usedMargin: params.usedMargin,
-        availableMargin: params.availableMargin,
-        exposure: params.exposure,
-        threshold: params.threshold ?? 0.8,
-        detectedAt: params.detectedAt || new Date().toISOString(),
-      },
+      payload: breachPayload,
+    };
+
+    await this.dispatch(event);
+    return event;
+  }
+
+  /**
+   * Helper: Dispatches a Risk Alert Triggered event for margin shortfalls or blocked orders.
+   */
+  public async dispatchRiskAlertTriggered(
+    params: RiskAlertTriggeredPayload
+  ): Promise<InternalEvent<RiskAlertTriggeredPayload>> {
+    const hierarchy = this.resolveHierarchyContext(params);
+    const triggeredAt = params.triggeredAt || new Date().toISOString();
+
+    const payload: RiskAlertTriggeredPayload = {
+      ...params,
+      tenantId: params.tenantId,
+      clientId: params.clientId || params.userId,
+      masterId: hierarchy.masterId,
+      brokerId: hierarchy.brokerId,
+      subBrokerId: hierarchy.subBrokerId,
+      triggeredAt,
+    };
+
+    this.broadcastRealtimeEvent('risk.alert_triggered', params.tenantId, payload, {
+      targetUserId: params.userId,
+    });
+
+    const event: InternalEvent<RiskAlertTriggeredPayload> = {
+      eventId: `evt-risk-alert-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+      eventType: 'risk.alert_triggered',
+      tenantId: params.tenantId,
+      timestamp: triggeredAt,
+      version: 1,
+      payload,
     };
 
     await this.dispatch(event);
@@ -492,13 +827,58 @@ export class InternalEventDispatcher {
   public async dispatchClientRegistered(
     payload: ClientRegisteredPayload
   ): Promise<InternalEvent<ClientRegisteredPayload>> {
+    const hierarchy = this.resolveHierarchyContext(payload);
+    const enrichedPayload: ClientRegisteredPayload = {
+      ...payload,
+      tenantId: payload.tenantId,
+      masterId: hierarchy.masterId,
+      brokerId: hierarchy.brokerId,
+      subBrokerId: hierarchy.subBrokerId,
+    };
+
+    this.broadcastRealtimeEvent('client.registered', payload.tenantId, enrichedPayload, {
+      targetUserId: payload.userId,
+    });
+
     const event: InternalEvent<ClientRegisteredPayload> = {
       eventId: `evt-client-${payload.userId}-${Date.now()}`,
       eventType: 'client.registered',
       tenantId: payload.tenantId,
       timestamp: new Date().toISOString(),
       version: 1,
-      payload,
+      payload: enrichedPayload,
+    };
+
+    await this.dispatch(event);
+    return event;
+  }
+
+  /**
+   * Publishes a broker.added event whenever a Master, Broker, or Sub-Broker is created.
+   */
+  public async dispatchBrokerAdded(
+    payload: BrokerAddedPayload
+  ): Promise<InternalEvent<BrokerAddedPayload>> {
+    const hierarchy = this.resolveHierarchyContext(payload);
+    const enrichedPayload: BrokerAddedPayload = {
+      ...payload,
+      tenantId: payload.tenantId,
+      masterId: hierarchy.masterId,
+      brokerId: hierarchy.brokerId,
+      subBrokerId: hierarchy.subBrokerId,
+    };
+
+    this.broadcastRealtimeEvent('broker.added', payload.tenantId, enrichedPayload, {
+      privilegedOnly: true,
+    });
+
+    const event: InternalEvent<BrokerAddedPayload> = {
+      eventId: `evt-broker-${payload.id}-${Date.now()}`,
+      eventType: 'broker.added',
+      tenantId: payload.tenantId,
+      timestamp: new Date().toISOString(),
+      version: 1,
+      payload: enrichedPayload,
     };
 
     await this.dispatch(event);
@@ -576,12 +956,13 @@ export class InternalEventDispatcher {
   }
 
   /**
-   * Publishes a deposit or withdrawal fund event.
+   * Publishes a deposit or withdrawal fund event and broadcasts fund.transaction_updated over /ws & SSE.
    */
   public async dispatchFundTransaction(
     eventType: InternalEventType,
     payload: FundTransactionPayload
   ): Promise<InternalEvent<FundTransactionPayload>> {
+    const hierarchy = this.resolveHierarchyContext(payload);
     const enrichedPayload: FundTransactionPayload = {
       ...payload,
       id: payload.id || payload.transactionId,
@@ -589,7 +970,15 @@ export class InternalEventDispatcher {
       method: payload.method || payload.paymentMethod || 'BANK_TRANSFER',
       reference: payload.reference || payload.referenceId || payload.transactionId,
       createdAt: payload.createdAt || payload.timestamp,
+      masterId: hierarchy.masterId,
+      brokerId: hierarchy.brokerId,
+      subBrokerId: hierarchy.subBrokerId,
     };
+
+    this.broadcastRealtimeEvent('fund.transaction_updated', payload.tenantId, enrichedPayload, {
+      targetUserId: payload.userId,
+    });
+
     const event: InternalEvent<FundTransactionPayload> = {
       eventId: `evt-fund-${payload.transactionId}-${Date.now()}`,
       eventType,

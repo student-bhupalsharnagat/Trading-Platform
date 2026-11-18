@@ -9,6 +9,75 @@ import { CircuitBreaker } from '../events/CircuitBreaker.ts';
 import { InternalEvent } from '../events/types.ts';
 import { auditService } from './auditService.ts';
 import { cleanNumeric } from '../utils/cleanNumeric.ts';
+import { db } from '../db/database.ts';
+
+function enrichOutboxHierarchyPayload(tenantId: string, payload: any): any {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload;
+  }
+
+  let masterId: string | null = payload.masterId ?? payload.master_id ?? null;
+  let brokerId: string | null = payload.brokerId ?? payload.broker_id ?? null;
+  let subBrokerId: string | null = payload.subBrokerId ?? payload.sub_broker_id ?? null;
+
+  if (!masterId && !brokerId && !subBrokerId) {
+    const rawRole = String(payload.role || '').toUpperCase();
+    if (rawRole === 'MASTER') {
+      masterId = payload.id || payload.userId || null;
+    } else if (rawRole === 'BROKER') {
+      masterId = payload.parentId || payload.parent_id || null;
+      brokerId = payload.id || payload.userId || null;
+    } else if (rawRole === 'SUB_BROKER') {
+      brokerId = payload.parentId || payload.parent_id || null;
+      subBrokerId = payload.id || payload.userId || null;
+      if (brokerId) {
+        const parentBroker = db.findUserById(brokerId) || db.findUserByUserId(brokerId);
+        if (parentBroker?.parent_id) masterId = parentBroker.parent_id;
+      }
+    } else {
+      const uid = payload.userId || payload.user_id || payload.tradingUserId || payload.trading_user_id || payload.clientId;
+      const user = uid ? (db.findUserByUserId(uid) || db.findUserById(uid)) : null;
+      if (user) {
+        if (user.broker_id) brokerId = user.broker_id;
+        if ((user as any).sub_broker_id) subBrokerId = (user as any).sub_broker_id;
+        if ((user as any).master_id) masterId = (user as any).master_id;
+
+        if (user.parent_id && (!masterId || !brokerId || !subBrokerId)) {
+          const parent = db.findUserById(user.parent_id) || db.findUserByUserId(user.parent_id);
+          if (parent) {
+            if (parent.role === 'SUB_BROKER') {
+              if (!subBrokerId) subBrokerId = parent.id;
+              if (parent.parent_id) {
+                const broker = db.findUserById(parent.parent_id) || db.findUserByUserId(parent.parent_id);
+                if (broker) {
+                  if (!brokerId) brokerId = broker.id;
+                  if (!masterId && broker.parent_id) masterId = broker.parent_id;
+                }
+              }
+            } else if (parent.role === 'BROKER') {
+              if (!brokerId) brokerId = parent.id;
+              if (!masterId && parent.parent_id) masterId = parent.parent_id;
+            } else if (parent.role === 'MASTER') {
+              if (!masterId) masterId = parent.id;
+            }
+          }
+        }
+      }
+      if (!masterId && !brokerId && !subBrokerId && uid) {
+        masterId = 'master-node-0001';
+        brokerId = 'BRK-001';
+      }
+    }
+  }
+
+  return {
+    ...payload,
+    tenantId: payload.tenantId || tenantId,
+    masterId,
+    brokerId,
+    subBrokerId,
+  };
+}
 
 export interface OutboxServiceOptions {
   client?: CentralAdminEventClient;
@@ -54,6 +123,7 @@ export class TransactionalOutboxService {
   ): Promise<OutboxEventRecord> {
     const id = `outbox-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const eventId = event.eventId || `evt-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const enrichedPayload = enrichOutboxHierarchyPayload(event.tenantId, event.payload);
 
     return await postgresOutboxRepository.insert(
       {
@@ -61,7 +131,7 @@ export class TransactionalOutboxService {
         event_id: eventId,
         tenant_id: event.tenantId,
         event_type: event.eventType,
-        payload: event.payload,
+        payload: enrichedPayload,
         max_attempts: event.maxAttempts ?? 5,
       },
       client
@@ -176,6 +246,35 @@ export class TransactionalOutboxService {
             eventType: 'client.activated',
             tenantId: tId,
             payload: { ...clientPayload, clientId: u.id || u.user_id },
+          }).catch(() => {});
+        } else if (u.role === 'MASTER' || u.role === 'BROKER' || u.role === 'SUB_BROKER') {
+          const tId = u.tenant_id && u.tenant_id !== 'vertex-default' && u.tenant_id !== 'default' ? u.tenant_id : targetTenantId;
+          const hLinks = authoritativeTradingDataService.resolveHierarchyLinks(u);
+          const masterId = u.role === 'MASTER' ? u.id : hLinks.masterId;
+          const brokerId = u.role === 'BROKER' ? u.id : (u.role === 'SUB_BROKER' ? (u.parent_id || hLinks.brokerId) : null);
+          const subBrokerId = u.role === 'SUB_BROKER' ? u.id : null;
+
+          await this.enqueue({
+            eventId: `sync-brk-${u.id}`,
+            eventType: 'broker.added',
+            tenantId: tId,
+            payload: {
+              tenantId: tId,
+              id: u.id,
+              userId: u.user_id,
+              name: u.full_name,
+              fullName: u.full_name,
+              email: u.email || '',
+              phone: u.phone_e164 || u.mobile || '',
+              role: u.role,
+              parentId: u.parent_id || null,
+              masterId,
+              brokerId,
+              subBrokerId,
+              commissionRate: u.commission_rate ?? 0,
+              status: u.status || 'ACTIVE',
+              createdAt: u.created_at || new Date().toISOString(),
+            },
           }).catch(() => {});
         }
       }

@@ -433,7 +433,7 @@ async function startServer() {
   // Protected by HMAC-SHA256, Nonce, Timestamp, and Tenant ID validation
   app.use('/api/internal/v1', internalRoutes);
 
-  // Global Real-time SSE Stream Endpoint for market ticks & position MTM deltas
+  // Global Real-time SSE Stream Endpoint for market ticks, position MTM deltas, and dashboard KPI events
   app.get(['/api/stream', '/api/v1/stream'], (req, res) => {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -443,9 +443,23 @@ async function startServer() {
       'Access-Control-Allow-Origin': '*',
     });
     res.write(': keep-alive\n\n');
-    const tenantId = (req as any).tenantId || (req.query.tenantId as string);
-    const userId = (req as any).userId || (req.query.userId as string);
-    const unsubscribe = internalEventDispatcher.registerSseClient(res, { tenantId, userId });
+    const tenantId =
+      (req.query.tenantId as string) ||
+      (req as any).tenantId ||
+      (req as any).tenant?.tenant?.id;
+    const userId = (req.query.userId as string) || (req as any).userId;
+    const masterId = req.query.masterId as string | undefined;
+    const brokerId = req.query.brokerId as string | undefined;
+    const subBrokerId = req.query.subBrokerId as string | undefined;
+    const role = req.query.role as string | undefined;
+    const unsubscribe = internalEventDispatcher.registerSseClient(res, {
+      tenantId,
+      userId,
+      masterId,
+      brokerId,
+      subBrokerId,
+      role,
+    });
     const heartbeat = setInterval(() => {
       try {
         res.write(': ping\n\n');
