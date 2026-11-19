@@ -12,10 +12,12 @@ export type AccountStatus =
   | 'SUSPENDED'
   | 'LOCKED'
   | 'DISABLED'
+  | 'DELETED'
   | 'active'
   | 'suspended'
   | 'demo'
-  | 'deactivated';
+  | 'deactivated'
+  | 'deleted';
 
 export interface UserRecord {
   id: string; // UUID
@@ -228,8 +230,14 @@ class DatabaseService {
             if (row.master_id && !existing.master_id) {
               existing.master_id = row.master_id;
             }
+            if (row.broker_id && !existing.broker_id) {
+              existing.broker_id = row.broker_id;
+            }
             if (row.sub_broker_id && !existing.sub_broker_id) {
               existing.sub_broker_id = row.sub_broker_id;
+            }
+            if (row.status) {
+              existing.status = row.status;
             }
           }
         }
@@ -496,6 +504,18 @@ class DatabaseService {
     };
     this.save();
     return this.state.users[userIndex];
+  }
+
+  public deleteUser(id: string): boolean {
+    if (!id) return false;
+    const normId = id.trim().toLowerCase();
+    const beforeCount = this.state.users.length;
+    this.state.users = this.state.users.filter((u) => u.id !== id && (!u.user_id || u.user_id.toLowerCase() !== normId));
+    if (this.state.users.length !== beforeCount) {
+      this.save();
+      return true;
+    }
+    return false;
   }
 
   public markUserVerified(userId: string): boolean {

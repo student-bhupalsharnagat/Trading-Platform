@@ -368,6 +368,20 @@ async function startServer() {
     console.error('[DB] Migration error during startup:', migErr.message);
   }
 
+  // Ensure B2B hierarchy & referral columns exist on users
+  try {
+    await pgDb.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(64);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by VARCHAR(64);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS master_id VARCHAR(64);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS broker_id VARCHAR(64);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS sub_broker_id VARCHAR(64);
+      CREATE INDEX IF NOT EXISTS idx_users_broker_id ON users(broker_id);
+    `);
+  } catch (colErr: any) {
+    console.warn('[DB] Hierarchy column check notice:', colErr.message);
+  }
+
   // Purge test/dummy users only if explicitly requested via environment variable
   if (process.env.PURGE_TEST_RECORDS === 'true') {
     await purgeDummyAndTestRecords();

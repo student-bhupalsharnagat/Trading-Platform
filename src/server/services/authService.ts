@@ -92,6 +92,22 @@ export function sanitizeUser(user: UserRecord): SafeUser {
 
 export class AuthService {
   private revokedTokens = new Set<string>();
+  private revokedUserIds = new Set<string>();
+
+  public revokeUser(userIdOrId?: string | null): void {
+    if (!userIdOrId) return;
+    this.revokedUserIds.add(String(userIdOrId).trim().toLowerCase());
+  }
+
+  public unrevokeUser(userIdOrId?: string | null): void {
+    if (!userIdOrId) return;
+    this.revokedUserIds.delete(String(userIdOrId).trim().toLowerCase());
+  }
+
+  public isUserRevoked(userIdOrId?: string | null): boolean {
+    if (!userIdOrId) return false;
+    return this.revokedUserIds.has(String(userIdOrId).trim().toLowerCase());
+  }
 
   /**
    * Register a new user and generate initial OTP
@@ -648,8 +664,16 @@ export class AuthService {
         broker_id: pgUser.broker_id || 'BRK-001',
       };
       db.addUser(user);
-    } else if (user && pgUser && pgUser.password_hash && (!user.password_hash || user.password_hash === '')) {
-      user.password_hash = pgUser.password_hash;
+    } else if (user && pgUser) {
+      if (pgUser.password_hash && (!user.password_hash || user.password_hash === '')) {
+        user.password_hash = pgUser.password_hash;
+      }
+      if (pgUser.status && pgUser.status !== user.status) {
+        user.status = pgUser.status;
+      }
+      if (pgUser.is_frozen !== undefined) {
+        user.is_frozen = pgUser.is_frozen;
+      }
     }
 
     // Actionable error if user is not in database or state
@@ -752,6 +776,40 @@ export class AuthService {
     }
 
     // 3. Check Account Statuses
+    if (user.status === 'DELETED' || user.status === 'deleted') {
+      auditService.log({
+        actorId: user.user_id,
+        actorName: user.full_name,
+        actorRole: user.role || 'CLIENT',
+        action: 'LOGIN_REJECTED_DELETED',
+        module: 'AUTH',
+        targetId: user.user_id,
+        ipAddress,
+      });
+
+      const err = new Error('Your account has been deleted. Please contact customer support.');
+      (err as any).statusCode = 403;
+      (err as any).code = 'ACCOUNT_DELETED';
+      throw err;
+    }
+
+    if (user.status === 'SUSPENDED' || user.status === 'suspended' || user.is_frozen) {
+      auditService.log({
+        actorId: user.user_id,
+        actorName: user.full_name,
+        actorRole: user.role || 'CLIENT',
+        action: 'LOGIN_REJECTED_SUSPENDED',
+        module: 'AUTH',
+        targetId: user.user_id,
+        ipAddress,
+      });
+
+      const err = new Error('Your account is currently suspended. Please contact VERTEX customer support.');
+      (err as any).statusCode = 403;
+      (err as any).code = 'ACCOUNT_SUSPENDED';
+      throw err;
+    }
+
     const isStaff = user.role && user.role !== 'CLIENT';
     const isPending =
       user.status === 'PENDING_EMAIL_VERIFICATION' ||
@@ -776,23 +834,6 @@ export class AuthService {
       throw err;
     }
 
-    if (user.status === 'SUSPENDED' || user.status === 'suspended' || user.is_frozen) {
-      auditService.log({
-        actorId: user.user_id,
-        actorName: user.full_name,
-        actorRole: user.role || 'CLIENT',
-        action: 'LOGIN_REJECTED_SUSPENDED',
-        module: 'AUTH',
-        targetId: user.user_id,
-        ipAddress,
-      });
-
-      const err = new Error('Your account is currently suspended. Please contact VERTEX customer support.');
-      (err as any).statusCode = 403;
-      (err as any).code = 'ACCOUNT_SUSPENDED';
-      throw err;
-    }
-
     if (user.status === 'DISABLED' || user.status === 'deactivated') {
       auditService.log({
         actorId: user.user_id,
@@ -811,6 +852,8 @@ export class AuthService {
     }
 
     // Record login success and reset failure counters
+    this.unrevokeUser(user.id);
+    this.unrevokeUser(user.user_id);
     db.recordLoginSuccess(user.user_id, ipAddress);
 
     auditService.log({
@@ -1327,8 +1370,11 @@ export class AuthService {
       // Check if user account was updated/invalidated after token issue
       const uid = decoded.userId || decoded.id;
       if (uid) {
+        if (this.isUserRevoked(uid) || (decoded.id && this.isUserRevoked(decoded.id)) || (decoded.userId && this.isUserRevoked(decoded.userId))) {
+          return null;
+        }
         const user = db.findUserByUserId(uid) || db.findUserById(uid);
-        if (user && (user.status === 'LOCKED' || user.status === 'DISABLED')) {
+        if (user && (user.status === 'LOCKED' || user.status === 'DISABLED' || user.status === 'DELETED' || user.status === 'deleted' || user.status === 'SUSPENDED' || user.status === 'suspended' || user.is_frozen)) {
           return null;
         }
       }

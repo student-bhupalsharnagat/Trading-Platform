@@ -78,7 +78,24 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
     return;
   }
 
-  if (user.status === 'suspended' || user.status === 'SUSPENDED' || user.is_frozen) {
+  if (user.status === 'DELETED' || user.status === 'deleted') {
+    res.status(403).json({
+      success: false,
+      code: 'ACCOUNT_DELETED',
+      message: 'Account has been deleted.',
+    });
+    return;
+  }
+
+  if (
+    user.status === 'suspended' ||
+    user.status === 'SUSPENDED' ||
+    user.is_frozen ||
+    authService.isUserRevoked(user.id) ||
+    authService.isUserRevoked(user.user_id) ||
+    authService.isUserRevoked(payload.id) ||
+    authService.isUserRevoked(payload.userId)
+  ) {
     res.status(403).json({
       success: false,
       code: 'ACCOUNT_SUSPENDED',

@@ -61,6 +61,9 @@ export class JsonUserRepository implements IUserRepository {
       password_hash: user.password_hash,
       role: user.role || 'CLIENT',
       parent_id: user.parent_id || null,
+      master_id: user.master_id || null,
+      broker_id: user.broker_id || null,
+      sub_broker_id: user.sub_broker_id || null,
       hierarchy_path: user.hierarchy_path || `root.${normalizedUserId}`,
       company: user.company,
       address: user.address,
@@ -97,14 +100,15 @@ export class JsonUserRepository implements IUserRepository {
   }
 
   public async delete(id: string): Promise<boolean> {
+    db.deleteUser(id);
     const users = (db as any).state.users as UserRecord[];
-    const index = users.findIndex((u) => u.id === id);
+    const index = users.findIndex((u) => u.id === id || (u.user_id && u.user_id.toLowerCase() === id.toLowerCase()));
     if (index !== -1) {
       users.splice(index, 1);
       (db as any).save();
       return true;
     }
-    return false;
+    return true;
   }
 }
 

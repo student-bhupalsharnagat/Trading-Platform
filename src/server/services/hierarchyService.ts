@@ -1,13 +1,22 @@
 import { jsonUserRepository } from '../repositories/JsonUserRepository.ts';
 import { jsonHierarchyRepository } from '../repositories/JsonHierarchyRepository.ts';
 import { auditService } from './auditService.ts';
-import type { UserRecord, UserRole, AccountStatus } from '../db/database.ts';
+import { db, type UserRecord, type UserRole, type AccountStatus } from '../db/database.ts';
 import crypto from 'crypto';
 import { pgDb } from '../db/postgres.ts';
 import { PasswordHashUtil } from '../utils/passwordHash.ts';
 import { transactionalOutboxService } from './TransactionalOutboxService.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
 import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
+
+let _authServiceRef: any = null;
+async function getAuthServiceRef() {
+  if (!_authServiceRef) {
+    const mod = await import('./authService.ts');
+    _authServiceRef = mod.authService;
+  }
+  return _authServiceRef;
+}
 
 export interface HierarchyNodeView {
   id: string;
@@ -230,11 +239,13 @@ export class HierarchyService {
           id, tenant_id, full_name, user_id, country_code, mobile, email,
           password_hash, role, parent_id, hierarchy_path, company, address,
           commission_rate, referral_code, is_verified, status, account_type, demo_balance,
+          master_id, broker_id, sub_broker_id,
           created_at, updated_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7,
           $8, $9, $10, $11, $12, $13,
           $14, $15, $16, $17, $18, $19,
+          $20, $21, $22,
           NOW(), NOW()
         )
         ON CONFLICT (tenant_id, user_id) DO UPDATE SET
@@ -249,6 +260,9 @@ export class HierarchyService {
           address = EXCLUDED.address,
           commission_rate = EXCLUDED.commission_rate,
           referral_code = COALESCE(NULLIF(EXCLUDED.referral_code, ''), users.referral_code),
+          master_id = COALESCE(EXCLUDED.master_id, users.master_id),
+          broker_id = COALESCE(EXCLUDED.broker_id, users.broker_id),
+          sub_broker_id = COALESCE(EXCLUDED.sub_broker_id, users.sub_broker_id),
           status = EXCLUDED.status,
           updated_at = NOW();
       `, [
@@ -271,6 +285,9 @@ export class HierarchyService {
         user.status || 'active',
         user.account_type || 'real',
         user.demo_balance || 1000000.0,
+        user.master_id || null,
+        user.broker_id || null,
+        user.sub_broker_id || null,
       ]);
     } catch (pgErr: any) {
       // Fallback update if conflict target differs
@@ -279,12 +296,16 @@ export class HierarchyService {
           full_name = $1, mobile = $2, email = $3, role = $4,
           parent_id = $5, hierarchy_path = $6, company = $7,
           address = $8, commission_rate = $9, referral_code = COALESCE(NULLIF($10, ''), referral_code),
-          status = $11, updated_at = NOW()
-        WHERE id = $12 OR (tenant_id = $13 AND LOWER(user_id) = LOWER($14))
+          master_id = COALESCE(NULLIF($11, ''), master_id),
+          broker_id = COALESCE(NULLIF($12, ''), broker_id),
+          sub_broker_id = COALESCE(NULLIF($13, ''), sub_broker_id),
+          status = $14, updated_at = NOW()
+        WHERE id = $15 OR (tenant_id = $16 AND LOWER(user_id) = LOWER($17))
       `, [
         user.full_name, user.mobile, user.email, user.role,
         user.parent_id, user.hierarchy_path, user.company,
         user.address, user.commission_rate, user.referral_code || '',
+        user.master_id || '', user.broker_id || '', user.sub_broker_id || '',
         user.status, user.id, tenantId, user.user_id
       ]).catch(() => {});
     }
@@ -836,7 +857,7 @@ export class HierarchyService {
 
   public async syncFromCentralAdmin(payload: any): Promise<any> {
     const rawType = (payload?.type || payload?.role || 'user').toLowerCase();
-    const action = payload?.action || 'updated';
+    const actionUpper = String(payload?.action || 'UPSERT').toUpperCase();
     const node = payload?.node || payload || {};
     const tenantId = payload?.tenantId || node?.tenant_id || node?.tenantId || 'vertex-default';
 
@@ -844,7 +865,140 @@ export class HierarchyService {
     if (!userId) {
       return { success: false, error: 'User identifier missing in node' };
     }
+    const targetId = node.id || userId;
+    const authSvc = await getAuthServiceRef();
 
+    // 1. Action: DELETE
+    if (actionUpper === 'DELETE' || actionUpper === 'DELETED') {
+      authSvc?.revokeUser(userId);
+      authSvc?.revokeUser(targetId);
+
+      await pgDb.query(
+        `UPDATE users SET status = 'DELETED', updated_at = NOW() WHERE id = $1 OR LOWER(user_id) = LOWER($2);`,
+        [targetId, userId]
+      ).catch(() => {});
+      await pgDb.query(
+        `UPDATE client_mappings SET status = 'DELETED', updated_at = NOW() WHERE client_id = $1 OR LOWER(user_id) = LOWER($2);`,
+        [targetId, userId]
+      ).catch(() => {});
+
+      await jsonUserRepository.update(targetId, { status: 'DELETED' as any });
+      db.updateUser(targetId, { status: 'DELETED' });
+      db.updateUser(userId, { status: 'DELETED' });
+
+      tradingWebSocketServer.broadcastToTenant(tenantId, 'hierarchy.deleted', {
+        type: rawType,
+        action: 'DELETE',
+        tenantId,
+        id: targetId,
+        userId,
+      });
+      if (rawType.includes('client')) {
+        tradingWebSocketServer.broadcastToTenant(tenantId, 'client.deleted', {
+          tenantId,
+          id: targetId,
+          userId,
+        });
+      }
+
+      return {
+        success: true,
+        processed: true,
+        action: 'DELETE',
+        id: targetId,
+        userId,
+      };
+    }
+
+    // 2. Action: STATUS_CHANGE
+    if (actionUpper === 'STATUS_CHANGE' || actionUpper === 'STATUS_UPDATED') {
+      const newStatus = (node.status || payload.status || 'ACTIVE').toUpperCase();
+      const isSuspended = newStatus === 'SUSPENDED' || newStatus === 'DELETED';
+
+      if (isSuspended) {
+        authSvc?.revokeUser(userId);
+        authSvc?.revokeUser(targetId);
+      } else if (newStatus === 'ACTIVE') {
+        authSvc?.unrevokeUser(userId);
+        authSvc?.unrevokeUser(targetId);
+      }
+
+      await pgDb.query(
+        `UPDATE users SET status = $1, is_frozen = $2, updated_at = NOW() WHERE id = $3 OR LOWER(user_id) = LOWER($4);`,
+        [newStatus, isSuspended, targetId, userId]
+      ).catch(() => {});
+      await pgDb.query(
+        `UPDATE client_mappings SET status = $1, updated_at = NOW() WHERE client_id = $2 OR LOWER(user_id) = LOWER($3);`,
+        [newStatus, targetId, userId]
+      ).catch(() => {});
+
+      const existing = (await jsonUserRepository.findByUserId(userId)) || (await jsonUserRepository.findById(targetId));
+      if (existing) {
+        await jsonUserRepository.update(existing.id, {
+          status: newStatus as any,
+          is_frozen: isSuspended,
+        });
+        db.updateUser(existing.id, {
+          status: newStatus as any,
+          is_frozen: isSuspended,
+        });
+      }
+
+      tradingWebSocketServer.broadcastToTenant(tenantId, 'hierarchy.updated', {
+        type: rawType,
+        action: 'STATUS_CHANGE',
+        tenantId,
+        id: targetId,
+        userId,
+        status: newStatus,
+      });
+
+      return {
+        success: true,
+        processed: true,
+        action: 'STATUS_CHANGE',
+        status: newStatus,
+        id: targetId,
+        userId,
+      };
+    }
+
+    // 3. Action: PASSWORD_RESET
+    if (actionUpper === 'PASSWORD_RESET' || actionUpper === 'PASSWORD_UPDATED') {
+      const incomingHash = node.passwordHash || node.password_hash || payload?.passwordHash || payload?.password_hash || '';
+      const passwordHash = node.password
+        ? await PasswordHashUtil.hashPassword(node.password)
+        : (incomingHash || '$2a$10$wT8BfZF/Y/wZ84aG9U0t6eYxUo9Jg7v1sYqQ4M4e4K0n0s9N7w5vC');
+
+      authSvc?.revokeUser(userId);
+      authSvc?.revokeUser(targetId);
+
+      await pgDb.query(
+        `UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2 OR LOWER(user_id) = LOWER($3);`,
+        [passwordHash, targetId, userId]
+      ).catch(() => {});
+      await pgDb.query(
+        `UPDATE trading_platform_accounts SET password_hash = $1, updated_at = NOW() WHERE LOWER(user_id) = LOWER($2);`,
+        [passwordHash, userId]
+      ).catch(() => {});
+
+      const existing = (await jsonUserRepository.findByUserId(userId)) || (await jsonUserRepository.findById(targetId));
+      if (existing) {
+        await jsonUserRepository.update(existing.id, { password_hash: passwordHash });
+        db.updateUserPassword(existing.user_id, passwordHash);
+      }
+
+      return {
+        success: true,
+        processed: true,
+        action: 'PASSWORD_RESET',
+        id: targetId,
+        userId,
+      };
+    }
+
+    // 4. Action: UPSERT (created / updated / default)
+    const action = payload?.action || 'updated';
     const fullName = node.name || node.fullName || node.full_name || userId;
     const email = node.email || `${userId}@tradematrix.io`;
     const mobile = (node.phone || node.mobile || '9999999999').replace(/\D/g, '');
@@ -854,28 +1008,44 @@ export class HierarchyService {
     const passwordHash = node.password
       ? await PasswordHashUtil.hashPassword(node.password)
       : (incomingHash || '$2a$10$wT8BfZF/Y/wZ84aG9U0t6eYxUo9Jg7v1sYqQ4M4e4K0n0s9N7w5vC');
-    const status = (node.status || 'ACTIVE').toLowerCase();
+    const status = (node.status || 'ACTIVE').toUpperCase();
+
+    if (status === 'SUSPENDED' || status === 'DELETED') {
+      authSvc?.revokeUser(userId);
+      authSvc?.revokeUser(targetId);
+    } else if (status === 'ACTIVE') {
+      authSvc?.unrevokeUser(userId);
+      authSvc?.unrevokeUser(targetId);
+    }
 
     let role: UserRole = 'CLIENT';
     let parentId: string | null = null;
     let hierarchyPath = `root.${userId}`;
+    let masterId: string | null = node.master_id || node.masterId || null;
+    let brokerId: string | null = node.broker_id || node.brokerId || null;
+    let subBrokerId: string | null = node.sub_broker_id || node.subBrokerId || null;
 
     if (rawType.includes('master')) {
       role = 'MASTER';
       parentId = 'super-admin-root-0001';
       hierarchyPath = `root.${userId}`;
+      masterId = targetId;
     } else if (rawType.includes('sub_broker') || rawType.includes('subbroker')) {
       role = 'SUB_BROKER';
       parentId = node.broker_id || node.brokerId || node.parentId || 'broker-node-0001';
       const parentBroker = (await jsonUserRepository.findById(parentId)) || (await jsonUserRepository.findByUserId(parentId));
       const bPath = parentBroker?.hierarchy_path || 'root.master_alpha.broker_metro';
       hierarchyPath = `${bPath}.${userId}`;
+      subBrokerId = targetId;
+      brokerId = brokerId || parentId;
     } else if (rawType.includes('broker')) {
       role = 'BROKER';
       parentId = node.master_id || node.masterId || node.parentId || 'master-node-0001';
       const parentMaster = (await jsonUserRepository.findById(parentId)) || (await jsonUserRepository.findByUserId(parentId));
       const mPath = parentMaster?.hierarchy_path || 'root.master_alpha';
       hierarchyPath = `${mPath}.${userId}`;
+      brokerId = targetId;
+      masterId = masterId || parentId;
     } else {
       role = 'CLIENT';
       const bId = node.broker_id || node.brokerId;
@@ -897,6 +1067,9 @@ export class HierarchyService {
         password_hash: passwordHash,
         role,
         parent_id: parentId,
+        master_id: masterId,
+        broker_id: brokerId,
+        sub_broker_id: subBrokerId,
         hierarchy_path: hierarchyPath,
         company: node.company || null,
         address: node.address || null,
@@ -914,6 +1087,9 @@ export class HierarchyService {
           mobile,
           role,
           parent_id: parentId,
+          master_id: masterId || existing.master_id,
+          broker_id: brokerId || existing.broker_id,
+          sub_broker_id: subBrokerId || existing.sub_broker_id,
           hierarchy_path: hierarchyPath,
           commission_rate: commissionRate,
           referral_code: referralCode || existing.referral_code,
@@ -931,9 +1107,9 @@ export class HierarchyService {
     if (role === 'CLIENT') {
       await pgDb.query(`
         INSERT INTO client_mappings (
-          id, tenant_id, client_id, user_id, master_id, broker_id, sub_broker_id, parent_id, hierarchy_path, account_type, created_at, updated_at
+          id, tenant_id, client_id, user_id, master_id, broker_id, sub_broker_id, parent_id, hierarchy_path, referral_code, account_type, status, created_at, updated_at
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW()
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW()
         )
         ON CONFLICT (tenant_id, user_id) DO UPDATE SET
           master_id = EXCLUDED.master_id,
@@ -941,18 +1117,22 @@ export class HierarchyService {
           sub_broker_id = EXCLUDED.sub_broker_id,
           parent_id = EXCLUDED.parent_id,
           hierarchy_path = EXCLUDED.hierarchy_path,
+          referral_code = COALESCE(NULLIF(EXCLUDED.referral_code, ''), client_mappings.referral_code),
+          status = EXCLUDED.status,
           updated_at = NOW();
       `, [
         `map_${existing.id}`,
         tenantId,
         existing.id,
         existing.user_id,
-        node.master_id || node.masterId || 'master-node-0001',
-        node.broker_id || node.brokerId || 'BRK-001',
-        node.sub_broker_id || node.subBrokerId || null,
+        masterId || 'master-node-0001',
+        brokerId || 'BRK-001',
+        subBrokerId || null,
         parentId,
         hierarchyPath,
+        referralCode || null,
         'real',
+        status,
       ]).catch(() => {});
     }
 
