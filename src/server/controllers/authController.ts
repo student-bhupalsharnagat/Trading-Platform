@@ -105,7 +105,11 @@ export class AuthController {
 
   public async login(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const validatedData = loginSchema.parse(req.body);
+      const loginIdentifier = req.body?.userId || req.body?.identifier || req.body?.email || req.body?.user_id;
+      const validatedData = loginSchema.parse({
+        ...req.body,
+        userId: loginIdentifier,
+      });
       const ipAddress = getClientIp(req);
 
       const result = await authService.login(validatedData.userId, validatedData.password, ipAddress);

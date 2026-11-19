@@ -305,7 +305,9 @@ export class PostgresClientMappingRepository {
     const parentId = userData.parent_id !== undefined ? userData.parent_id : (subBrokerId || brokerId || masterId || 'super-admin-root-0001');
     const hierarchyPath = userData.hierarchy_path || `root.${normUserId}`;
     const accountType = userData.account_type || (normUserId.includes('demo') ? 'demo' : 'real');
-    const balance = userData.demo_balance !== undefined ? Number(userData.demo_balance) : 1000000.0;
+    const rawBal = (userData as any).initialBalance ?? (userData as any).initial_balance ?? (userData as any).balance ?? (userData as any).available_balance ?? userData.demo_balance;
+    const initialBalNum = rawBal !== undefined ? Number(rawBal) : NaN;
+    const balance = !isNaN(initialBalNum) && initialBalNum > 0 ? initialBalNum : (userData.demo_balance !== undefined ? Number(userData.demo_balance) : 1000000.0);
 
     const tenants = Array.from(new Set([tId, targetTenantId, 'TNT-001', 'vertex-default']));
 
@@ -338,6 +340,7 @@ export class PostgresClientMappingRepository {
             referred_by = COALESCE(EXCLUDED.referred_by, users.referred_by),
             status = EXCLUDED.status,
             is_verified = EXCLUDED.is_verified,
+            demo_balance = CASE WHEN EXCLUDED.demo_balance > 0 THEN EXCLUDED.demo_balance ELSE users.demo_balance END,
             updated_at = NOW();`,
           [
             tenant === tId ? id : `usr-${tenant}-${normUserId}`,
@@ -450,7 +453,12 @@ export class PostgresClientMappingRepository {
           ) VALUES (
             $1, $2, $3, $4, 0, 0, 0, NOW()
           )
-          ON CONFLICT (tenant_id, user_id) DO NOTHING;`,
+          ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+            available_balance = CASE
+              WHEN EXCLUDED.available_balance > 0 THEN EXCLUDED.available_balance
+              ELSE trading_wallets.available_balance
+            END,
+            updated_at = NOW();`,
           [`wal_${tenant}_${normUserId}`, tenant, normUserId, balance]
         );
       } catch (err: any) {

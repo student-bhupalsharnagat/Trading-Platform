@@ -612,6 +612,7 @@ export class AuthService {
                is_frozen, account_type, demo_balance, client_code, broker_id, created_at, last_login_at
         FROM users
         WHERE LOWER(user_id) = \$1
+           OR LOWER(id) = \$1
            OR (client_code IS NOT NULL AND LOWER(client_code) = \$1)
            OR (email IS NOT NULL AND LOWER(email) = \$1)
            OR (mobile IS NOT NULL AND RIGHT(REGEXP_REPLACE(mobile, '[^0-9]', '', 'g'), 10) = \$2 AND LENGTH(\$2) >= 7)
@@ -626,6 +627,7 @@ export class AuthService {
                  password_hash, role, status, broker_id, client_code, created_at
           FROM trading_platform_accounts
           WHERE LOWER(user_id) = \$1
+             OR LOWER(id) = \$1
              OR (client_code IS NOT NULL AND LOWER(client_code) = \$1)
              OR (email IS NOT NULL AND LOWER(email) = \$1)
              OR (phone IS NOT NULL AND RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 10) = \$2 AND LENGTH(\$2) >= 7)
@@ -665,7 +667,7 @@ export class AuthService {
       };
       db.addUser(user);
     } else if (user && pgUser) {
-      if (pgUser.password_hash && (!user.password_hash || user.password_hash === '')) {
+      if (pgUser.password_hash && (!user.password_hash || user.password_hash === '' || pgUser.password_hash !== user.password_hash)) {
         user.password_hash = pgUser.password_hash;
       }
       if (pgUser.status && pgUser.status !== user.status) {
@@ -673,6 +675,24 @@ export class AuthService {
       }
       if (pgUser.is_frozen !== undefined) {
         user.is_frozen = pgUser.is_frozen;
+      }
+      if (pgUser.email && !user.email) {
+        user.email = pgUser.email;
+      }
+      if (pgUser.mobile && !user.mobile) {
+        user.mobile = pgUser.mobile;
+      }
+    }
+
+    // Ensure S2S-provisioned / active clients are treated as verified so they are never blocked on first login
+    if (user && (user.role === 'CLIENT' || user.status === 'ACTIVE' || user.status === 'active')) {
+      if (!user.is_verified) {
+        user.is_verified = true;
+        db.updateUser(user.id, { is_verified: true });
+        pgDb.query(`UPDATE users SET is_verified = true WHERE id = \$1 OR LOWER(user_id) = LOWER(\$2);`, [user.id, user.user_id]).catch(() => {});
+      }
+      if (!user.email_verified_at) {
+        user.email_verified_at = new Date().toISOString();
       }
     }
 
@@ -812,11 +832,11 @@ export class AuthService {
 
     const isStaff = user.role && user.role !== 'CLIENT';
     const isPending =
-      user.status === 'PENDING_EMAIL_VERIFICATION' ||
-      user.status === 'PENDING_PHONE_VERIFICATION' ||
+      (user.status === 'PENDING_EMAIL_VERIFICATION' ||
+       user.status === 'PENDING_PHONE_VERIFICATION') &&
       !user.is_verified;
 
-    if (!isStaff && (isPending || (!user.email_verified_at && user.status !== 'ACTIVE' && user.status !== 'active' && user.user_id !== 'vtx123'))) {
+    if (!isStaff && (isPending || (!user.is_verified && user.status !== 'ACTIVE' && user.status !== 'active' && user.user_id !== 'vtx123'))) {
       auditService.log({
         actorId: user.user_id,
         actorName: user.full_name,

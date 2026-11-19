@@ -8,6 +8,7 @@ import { PasswordHashUtil } from '../utils/passwordHash.ts';
 import { transactionalOutboxService } from './TransactionalOutboxService.ts';
 import { tradingWebSocketServer } from '../websocket/WebSocketServer.ts';
 import { internalEventDispatcher } from '../events/InternalEventDispatcher.ts';
+import { postgresClientMappingRepository } from '../repositories/PostgresClientMappingRepository.ts';
 
 let _authServiceRef: any = null;
 async function getAuthServiceRef() {
@@ -264,6 +265,8 @@ export class HierarchyService {
           broker_id = COALESCE(EXCLUDED.broker_id, users.broker_id),
           sub_broker_id = COALESCE(EXCLUDED.sub_broker_id, users.sub_broker_id),
           status = EXCLUDED.status,
+          is_verified = COALESCE(EXCLUDED.is_verified, users.is_verified),
+          demo_balance = CASE WHEN EXCLUDED.demo_balance > 0 THEN EXCLUDED.demo_balance ELSE users.demo_balance END,
           updated_at = NOW();
       `, [
         user.id,
@@ -289,6 +292,37 @@ export class HierarchyService {
         user.broker_id || null,
         user.sub_broker_id || null,
       ]);
+
+      await pgDb.query(`
+        INSERT INTO trading_platform_accounts (
+          id, tenant_id, user_id, client_code, name, email, phone,
+          password_hash, role, broker_id, status, created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7,
+          $8, $9, $10, $11, NOW(), NOW()
+        )
+        ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+          name = EXCLUDED.name,
+          email = EXCLUDED.email,
+          phone = EXCLUDED.phone,
+          password_hash = CASE WHEN EXCLUDED.password_hash != '' THEN EXCLUDED.password_hash ELSE trading_platform_accounts.password_hash END,
+          client_code = COALESCE(EXCLUDED.client_code, trading_platform_accounts.client_code),
+          broker_id = COALESCE(EXCLUDED.broker_id, trading_platform_accounts.broker_id),
+          status = EXCLUDED.status,
+          updated_at = NOW();
+      `, [
+        user.id,
+        tenantId,
+        user.user_id,
+        user.client_code || user.user_id.toUpperCase(),
+        user.full_name,
+        user.email,
+        user.mobile,
+        user.password_hash,
+        user.role || 'CLIENT',
+        user.broker_id || 'BRK-001',
+        user.status || 'ACTIVE',
+      ]).catch(() => {});
     } catch (pgErr: any) {
       // Fallback update if conflict target differs
       await pgDb.query(`
@@ -861,7 +895,7 @@ export class HierarchyService {
     const node = payload?.node || payload || {};
     const tenantId = payload?.tenantId || node?.tenant_id || node?.tenantId || 'vertex-default';
 
-    const userId = (node.user_id || node.userId || node.code || node.id || '').toLowerCase().trim();
+    const userId = (node.user_id || node.userId || node.code || node.id || (node.email ? String(node.email).split('@')[0] : '') || '').toLowerCase().trim();
     if (!userId) {
       return { success: false, error: 'User identifier missing in node' };
     }
@@ -1000,8 +1034,11 @@ export class HierarchyService {
     // 4. Action: UPSERT (created / updated / default)
     const action = payload?.action || 'updated';
     const fullName = node.name || node.fullName || node.full_name || userId;
-    const email = node.email || `${userId}@tradematrix.io`;
-    const mobile = (node.phone || node.mobile || '9999999999').replace(/\D/g, '');
+    const cleanEmail = (node.email || `${userId}@tradematrix.io`).trim().toLowerCase();
+    const rawPhone = String(node.phone || node.mobile || '').trim();
+    const cleanMobile = rawPhone.replace(/\D/g, '') || '9999999999';
+    const rawBal = node.initialBalance ?? node.initial_balance ?? node.balance ?? node.wallet_balance ?? payload?.initialBalance ?? 0;
+    const initialBalance = typeof rawBal === 'number' ? rawBal : parseFloat(String(rawBal).replace(/[^0-9.-]/g, '')) || 0;
     const commissionRate = Number(node.commissionShare || node.commissionRate || node.commission || 0);
     const referralCode = node.referralCode || node.referral_code || undefined;
     const incomingHash = node.passwordHash || node.password_hash || payload?.passwordHash || payload?.password_hash || '';
@@ -1062,8 +1099,8 @@ export class HierarchyService {
         full_name: fullName,
         user_id: userId,
         country_code: node.countryCode || '+91',
-        mobile,
-        email,
+        mobile: cleanMobile,
+        email: cleanEmail,
         password_hash: passwordHash,
         role,
         parent_id: parentId,
@@ -1083,8 +1120,8 @@ export class HierarchyService {
       existing =
         (await jsonUserRepository.update(existing.id, {
           full_name: fullName,
-          email,
-          mobile,
+          email: cleanEmail,
+          mobile: cleanMobile,
           role,
           parent_id: parentId,
           master_id: masterId || existing.master_id,
@@ -1097,14 +1134,96 @@ export class HierarchyService {
           status: status as any,
           company: node.company || existing.company,
           password_hash: (node.password || incomingHash) ? passwordHash : existing.password_hash,
+          is_verified: true,
         })) || existing;
     }
 
+    // Keep database.ts in-memory state fully synchronized
+    const userForDb: UserRecord = {
+      id: existing.id,
+      full_name: fullName,
+      user_id: existing.user_id,
+      country_code: node.countryCode || '+91',
+      mobile: cleanMobile,
+      email: cleanEmail,
+      email_verified_at: new Date().toISOString(),
+      password_hash: (node.password || incomingHash) ? passwordHash : (existing.password_hash || passwordHash),
+      role,
+      parent_id: parentId,
+      master_id: masterId,
+      broker_id: brokerId,
+      sub_broker_id: subBrokerId,
+      hierarchy_path: hierarchyPath,
+      company: node.company || undefined,
+      address: node.address || undefined,
+      commission_rate: commissionRate,
+      referral_code: referralCode,
+      tenant_id: tenantId,
+      is_verified: true,
+      status: status as any,
+      demo_balance: initialBalance > 0 ? initialBalance : (existing.demo_balance || 1000000.0),
+      client_code: existing.user_id.toUpperCase(),
+      created_at: (existing as any).created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    if (db.findUserByUserIdOrMobile(existing.user_id) || db.findUserByUserIdOrMobile(existing.id)) {
+      db.updateUser(existing.id, userForDb);
+    } else {
+      db.addUser(userForDb);
+    }
+
     // Persist to Postgres
+    existing.demo_balance = initialBalance > 0 ? initialBalance : (existing.demo_balance || 1000000.0);
+    existing.is_verified = true;
     await this.persistUserToPostgres(existing, tenantId);
 
-    // If client, also update client_mappings
+    // If client, ensure full mapping and trading wallet provisioning
     if (role === 'CLIENT') {
+      try {
+        await postgresClientMappingRepository.createClientMappingAndWallet({
+          id: existing.id,
+          user_id: existing.user_id,
+          full_name: fullName,
+          country_code: node.countryCode || '+91',
+          mobile: cleanMobile,
+          email: cleanEmail,
+          password_hash: passwordHash,
+          passwordHash,
+          client_code: existing.user_id.toUpperCase(),
+          master_id: masterId,
+          broker_id: brokerId,
+          sub_broker_id: subBrokerId,
+          parent_id: parentId,
+          hierarchy_path: hierarchyPath,
+          referral_code: referralCode,
+          role: 'CLIENT',
+          status,
+          is_verified: true,
+          account_type: 'real',
+          demo_balance: initialBalance > 0 ? initialBalance : 1000000.0,
+          tenant_id: tenantId,
+        }, tenantId);
+      } catch (mapErr: any) {
+        console.warn('[hierarchyService] Notice: createClientMappingAndWallet notice:', mapErr.message);
+      }
+
+      // Ensure trading_wallets has initialBalance set across all tenant aliases
+      if (initialBalance > 0) {
+        const tenants = Array.from(new Set([tenantId, 'TNT-001', 'vertex-default']));
+        for (const t of tenants) {
+          await pgDb.query(`
+            INSERT INTO trading_wallets (
+              id, tenant_id, user_id, available_balance, blocked_balance, used_margin, realized_pnl, updated_at
+            ) VALUES (
+              $1, $2, $3, $4, 0, 0, 0, NOW()
+            )
+            ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+              available_balance = EXCLUDED.available_balance,
+              updated_at = NOW();
+          `, [`wal_${t}_${existing.user_id}`, t, existing.user_id, initialBalance]).catch(() => {});
+        }
+      }
+
       await pgDb.query(`
         INSERT INTO client_mappings (
           id, tenant_id, client_id, user_id, master_id, broker_id, sub_broker_id, parent_id, hierarchy_path, referral_code, account_type, status, created_at, updated_at

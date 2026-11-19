@@ -23,7 +23,7 @@ export const Login: React.FC<LoginProps> = ({ onNavigate }) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!identifier.trim()) {
-      setError('Please enter your User ID or registered mobile number.');
+      setError('Please enter your Email, User ID, or registered mobile number.');
       return;
     }
     if (!password) {
@@ -48,7 +48,7 @@ export const Login: React.FC<LoginProps> = ({ onNavigate }) => {
         });
         onNavigate('/verify-otp', { userId: err.userId });
       } else {
-        setError(err.message || 'Invalid User ID or password.');
+        setError(err.message || 'Invalid Email, User ID, or password.');
       }
     } finally {
       setLoading(false);
@@ -121,12 +121,12 @@ export const Login: React.FC<LoginProps> = ({ onNavigate }) => {
       </div>
 
       <form onSubmit={handleSubmit} noValidate>
-        {/* User ID / Mobile No. */}
+        {/* Email / User ID / Mobile No. */}
         <AuthInput
           id="login-identifier"
-          label="User ID / Mobile No."
-          placeholder="e.g. VTX123 or 9876543210"
-          helperText="Enter your User ID or registered mobile number"
+          label="Email, User ID, or Mobile No."
+          placeholder="e.g. trader@example.com, VTX123, or 9876543210"
+          helperText="Enter your Email, User ID, or registered mobile number"
           value={identifier}
           onChange={(e) => {
             setIdentifier(e.target.value);
