@@ -260,10 +260,11 @@ export class HierarchyService {
           company = EXCLUDED.company,
           address = EXCLUDED.address,
           commission_rate = EXCLUDED.commission_rate,
+          commission_share = EXCLUDED.commission_rate,
           referral_code = COALESCE(NULLIF(EXCLUDED.referral_code, ''), users.referral_code),
-          master_id = COALESCE(EXCLUDED.master_id, users.master_id),
-          broker_id = COALESCE(EXCLUDED.broker_id, users.broker_id),
-          sub_broker_id = COALESCE(EXCLUDED.sub_broker_id, users.sub_broker_id),
+          master_id = EXCLUDED.master_id,
+          broker_id = EXCLUDED.broker_id,
+          sub_broker_id = EXCLUDED.sub_broker_id,
           status = EXCLUDED.status,
           is_verified = COALESCE(EXCLUDED.is_verified, users.is_verified),
           demo_balance = CASE WHEN EXCLUDED.demo_balance > 0 THEN EXCLUDED.demo_balance ELSE users.demo_balance END,
@@ -307,7 +308,10 @@ export class HierarchyService {
           phone = EXCLUDED.phone,
           password_hash = CASE WHEN EXCLUDED.password_hash != '' THEN EXCLUDED.password_hash ELSE trading_platform_accounts.password_hash END,
           client_code = COALESCE(EXCLUDED.client_code, trading_platform_accounts.client_code),
-          broker_id = COALESCE(EXCLUDED.broker_id, trading_platform_accounts.broker_id),
+          broker_id = EXCLUDED.broker_id,
+          master_id = COALESCE(EXCLUDED.master_id, trading_platform_accounts.master_id),
+          sub_broker_id = COALESCE(EXCLUDED.sub_broker_id, trading_platform_accounts.sub_broker_id),
+          commission_share = COALESCE(EXCLUDED.commission_share, trading_platform_accounts.commission_share),
           status = EXCLUDED.status,
           updated_at = NOW();
       `, [
@@ -329,10 +333,10 @@ export class HierarchyService {
         UPDATE users SET
           full_name = $1, mobile = $2, email = $3, role = $4,
           parent_id = $5, hierarchy_path = $6, company = $7,
-          address = $8, commission_rate = $9, referral_code = COALESCE(NULLIF($10, ''), referral_code),
-          master_id = COALESCE(NULLIF($11, ''), master_id),
-          broker_id = COALESCE(NULLIF($12, ''), broker_id),
-          sub_broker_id = COALESCE(NULLIF($13, ''), sub_broker_id),
+          address = $8, commission_rate = $9, commission_share = $9, referral_code = COALESCE(NULLIF($10, ''), referral_code),
+          master_id = NULLIF($11, ''),
+          broker_id = NULLIF($12, ''),
+          sub_broker_id = NULLIF($13, ''),
           status = $14, updated_at = NOW()
         WHERE id = $15 OR (tenant_id = $16 AND LOWER(user_id) = LOWER($17))
       `, [
@@ -1130,9 +1134,9 @@ export class HierarchyService {
           mobile: cleanMobile,
           role,
           parent_id: parentId,
-          master_id: masterId || existing.master_id,
-          broker_id: brokerId || existing.broker_id,
-          sub_broker_id: subBrokerId || existing.sub_broker_id,
+          master_id: masterId !== undefined ? masterId : existing.master_id,
+          broker_id: brokerId !== undefined ? brokerId : existing.broker_id,
+          sub_broker_id: subBrokerId !== undefined ? subBrokerId : existing.sub_broker_id,
           hierarchy_path: hierarchyPath,
           commission_rate: commissionRate,
           referral_code: referralCode || existing.referral_code,
@@ -1183,6 +1187,15 @@ export class HierarchyService {
     existing.demo_balance = initialBalance > 0 ? initialBalance : (existing.demo_balance || 1000000.0);
     existing.is_verified = true;
     await this.persistUserToPostgres(existing, tenantId);
+
+    // Cascade reassignment to child entities if Broker or Sub-Broker was reassigned
+    if (role === 'BROKER' && masterId) {
+      await pgDb.query(`UPDATE users SET master_id = $1, updated_at = NOW() WHERE broker_id = $2;`, [masterId, targetId]).catch(() => {});
+      await pgDb.query(`UPDATE client_mappings SET master_id = $1, updated_at = NOW() WHERE broker_id = $2;`, [masterId, targetId]).catch(() => {});
+    } else if (role === 'SUB_BROKER' && brokerId) {
+      await pgDb.query(`UPDATE users SET broker_id = $1, master_id = COALESCE($2, master_id), updated_at = NOW() WHERE sub_broker_id = $3;`, [brokerId, masterId, targetId]).catch(() => {});
+      await pgDb.query(`UPDATE client_mappings SET broker_id = $1, master_id = COALESCE($2, master_id), updated_at = NOW() WHERE sub_broker_id = $3;`, [brokerId, masterId, targetId]).catch(() => {});
+    }
 
     // If client, ensure full mapping and trading wallet provisioning
     if (role === 'CLIENT') {
@@ -1242,6 +1255,7 @@ export class HierarchyService {
           parent_id = EXCLUDED.parent_id,
           hierarchy_path = EXCLUDED.hierarchy_path,
           referral_code = COALESCE(NULLIF(EXCLUDED.referral_code, ''), client_mappings.referral_code),
+          commission_share = COALESCE(EXCLUDED.commission_share, client_mappings.commission_share),
           status = EXCLUDED.status,
           updated_at = NOW();
       `, [

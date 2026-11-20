@@ -8,6 +8,17 @@
  */
 
 export const DEFAULT_INTERNAL_FALLBACK_SECRET = 'nextrade-internal-hmac-secret-2026';
+export const DEFAULT_ADMIN_PANEL_URL = 'https://admin-dashbord-wxcq.onrender.com';
+export const DEFAULT_TRADING_PLATFORM_URL = 'https://trading-platform-2t6r.onrender.com';
+
+export function getCentralAdminUrl(): string {
+  const rawUrl =
+    process.env.ADMIN_PANEL_URL ||
+    process.env.CENTRAL_ADMIN_URL ||
+    process.env.CENTRAL_ADMIN_BASE_URL ||
+    DEFAULT_ADMIN_PANEL_URL;
+  return resolveInternalRenderUrl(rawUrl).replace(/\/+$/, '').replace(/\/api$/, '');
+}
 
 if (process.env.NODE_ENV === 'production') {
   const secret =
@@ -24,6 +35,8 @@ if (process.env.NODE_ENV === 'production') {
 
 export interface InternalAuthConfig {
   tradingPlatformBaseUrl: string;
+  centralAdminBaseUrl: string;
+  adminPanelUrl: string;
   internalCommunicationSecret: string;
   candidateSecrets: string[];
   maxAgeMs: number;
@@ -90,8 +103,12 @@ export function getInternalAuthConfig(): InternalAuthConfig {
   const baseUrl = resolveInternalRenderUrl(rawBaseUrl);
   const maxAgeMs = parseInt(process.env.INTERNAL_REQUEST_MAX_AGE_MS || '30000', 10) || 30000;
 
+  const adminUrl = getCentralAdminUrl();
+
   return {
     tradingPlatformBaseUrl: baseUrl,
+    centralAdminBaseUrl: adminUrl,
+    adminPanelUrl: adminUrl,
     internalCommunicationSecret: effectiveSecret,
     candidateSecrets,
     maxAgeMs,
