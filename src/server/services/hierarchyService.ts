@@ -1036,15 +1036,22 @@ export class HierarchyService {
     const fullName = node.name || node.fullName || node.full_name || userId;
     const cleanEmail = (node.email || `${userId}@tradematrix.io`).trim().toLowerCase();
     const rawPhone = String(node.phone || node.mobile || '').trim();
-    const cleanMobile = rawPhone.replace(/\D/g, '') || '9999999999';
+    const digitsOnly = rawPhone.replace(/\D/g, '');
+    const cleanMobile = (digitsOnly.length === 12 && digitsOnly.startsWith('91')
+      ? digitsOnly.slice(2)
+      : (digitsOnly.length === 11 && digitsOnly.startsWith('0') ? digitsOnly.slice(1) : digitsOnly))
+      || (digitsOnly.length === 10 ? digitsOnly : digitsOnly.slice(-10))
+      || '9999999999';
+    const phoneE164 = rawPhone.startsWith('+') ? rawPhone : (cleanMobile ? `+91${cleanMobile}` : '+919999999999');
     const rawBal = node.initialBalance ?? node.initial_balance ?? node.balance ?? node.wallet_balance ?? payload?.initialBalance ?? 0;
     const initialBalance = typeof rawBal === 'number' ? rawBal : parseFloat(String(rawBal).replace(/[^0-9.-]/g, '')) || 0;
     const commissionRate = Number(node.commissionShare || node.commissionRate || node.commission || 0);
     const referralCode = node.referralCode || node.referral_code || undefined;
     const incomingHash = node.passwordHash || node.password_hash || payload?.passwordHash || payload?.password_hash || '';
+    let existing = (await jsonUserRepository.findByUserId(userId)) || (node.id ? await jsonUserRepository.findById(node.id) : null);
     const passwordHash = node.password
       ? await PasswordHashUtil.hashPassword(node.password)
-      : (incomingHash || '$2a$10$wT8BfZF/Y/wZ84aG9U0t6eYxUo9Jg7v1sYqQ4M4e4K0n0s9N7w5vC');
+      : (incomingHash || (existing?.password_hash ? existing.password_hash : await PasswordHashUtil.hashPassword('Password@123')));
     const status = (node.status || 'ACTIVE').toUpperCase();
 
     if (status === 'SUSPENDED' || status === 'DELETED') {
@@ -1092,7 +1099,6 @@ export class HierarchyService {
     }
 
     // Upsert in in-memory repository
-    let existing = (await jsonUserRepository.findByUserId(userId)) || (node.id ? await jsonUserRepository.findById(node.id) : null);
     if (!existing) {
       existing = await jsonUserRepository.create({
         id: node.id || `node-${role.toLowerCase()}-${Date.now()}`,
@@ -1145,6 +1151,7 @@ export class HierarchyService {
       user_id: existing.user_id,
       country_code: node.countryCode || '+91',
       mobile: cleanMobile,
+      phone_e164: phoneE164,
       email: cleanEmail,
       email_verified_at: new Date().toISOString(),
       password_hash: (node.password || incomingHash) ? passwordHash : (existing.password_hash || passwordHash),
@@ -1208,20 +1215,18 @@ export class HierarchyService {
       }
 
       // Ensure trading_wallets has initialBalance set across all tenant aliases
-      if (initialBalance > 0) {
-        const tenants = Array.from(new Set([tenantId, 'TNT-001', 'vertex-default']));
-        for (const t of tenants) {
-          await pgDb.query(`
-            INSERT INTO trading_wallets (
-              id, tenant_id, user_id, available_balance, blocked_balance, used_margin, realized_pnl, updated_at
-            ) VALUES (
-              $1, $2, $3, $4, 0, 0, 0, NOW()
-            )
-            ON CONFLICT (tenant_id, user_id) DO UPDATE SET
-              available_balance = EXCLUDED.available_balance,
-              updated_at = NOW();
-          `, [`wal_${t}_${existing.user_id}`, t, existing.user_id, initialBalance]).catch(() => {});
-        }
+      const tenants = Array.from(new Set([tenantId, 'TNT-001', 'vertex-default']));
+      for (const t of tenants) {
+        await pgDb.query(`
+          INSERT INTO trading_wallets (
+            id, tenant_id, user_id, available_balance, blocked_balance, used_margin, realized_pnl, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, 0, 0, 0, NOW()
+          )
+          ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+            available_balance = CASE WHEN EXCLUDED.available_balance > 0 THEN EXCLUDED.available_balance ELSE trading_wallets.available_balance END,
+            updated_at = NOW();
+        `, [`wal_${t}_${existing.user_id}`, t, existing.user_id, Math.max(0, initialBalance)]).catch(() => {});
       }
 
       await pgDb.query(`

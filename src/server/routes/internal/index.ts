@@ -2422,6 +2422,30 @@ router.get('/trading/clients/:clientId/funds', async (req: InternalAuthorizedReq
 });
 
 /**
+ * POST /api/internal/v1/trading/clients
+ * Provisioning trading clients from Central Admin or User Panel.
+ */
+router.post(['/trading/clients', '/trading/client'], async (req: InternalAuthorizedRequest, res: Response) => {
+  try {
+    const tenantId = getInternalTenantId(req);
+    await handleIdempotentOperation(req, res, async () => {
+      const result = await hierarchyService.syncFromCentralAdmin({
+        ...req.body,
+        type: 'client',
+        role: 'CLIENT',
+        tenantId: req.body?.tenantId || tenantId,
+      });
+      return { success: true, ...result };
+    });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message || 'Failed to provision trading client',
+    });
+  }
+});
+
+/**
  * POST /api/internal/v1/trading/clients/map
  * Links Admin Client ID with Trading User ID
  */

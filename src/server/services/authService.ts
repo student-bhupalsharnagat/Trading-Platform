@@ -698,6 +698,70 @@ export class AuthService {
 
     // Actionable error if user is not in database or state
     if (!user && !pgUser) {
+      // JIT fallback to Central Admin
+      try {
+        const publicAdminUrl = (process.env.ADMIN_PANEL_URL || process.env.CENTRAL_ADMIN_URL || process.env.CENTRAL_ADMIN_BASE_URL || 'https://admin-dashbord-wxcq.onrender.com').replace(/\/+$/, '').replace(/\/api$/, '');
+        const hmacSecret = process.env.INTERNAL_COMMUNICATION_SECRET || process.env.INTERNAL_API_SECRET || process.env.S2S_SECRET || 'nextrade-internal-hmac-secret-2026';
+        const timestamp = Date.now().toString();
+        const lookupPath = '/api/internal/v1/auth/lookup-credential';
+        const bodyStr = JSON.stringify({ identifier: trimmed, email: cleanLower, phone: cleanDigits });
+        const canonical = `${timestamp}.POST.${lookupPath}.${bodyStr}`;
+        const signature = crypto.createHmac('sha256', hmacSecret).update(canonical).digest('hex');
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 4000);
+        const lRes = await fetch(`${publicAdminUrl}${lookupPath}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Internal-Signature': signature,
+            'X-S2S-Signature': signature,
+            'X-Signature-SHA256': signature,
+            'X-Internal-Timestamp': timestamp,
+            'X-Timestamp': timestamp,
+            'X-Tenant-ID': 'vertex-default'
+          },
+          body: bodyStr,
+          signal: controller.signal
+        });
+        clearTimeout(timeout);
+        if (lRes.ok) {
+          const lData = await lRes.json().catch(() => ({}));
+          if (lData?.found && lData?.user) {
+            const u = lData.user;
+            await hierarchyService.syncFromCentralAdmin({
+              type: u.role?.toLowerCase() || 'client',
+              action: 'UPSERT',
+              id: u.id,
+              userId: u.userId || u.id,
+              name: u.name,
+              email: u.email,
+              phone: u.phone,
+              passwordHash: u.passwordHash,
+              initialBalance: u.initialBalance || 100000,
+              tenantId: u.tenantId || 'vertex-default',
+              role: u.role || 'CLIENT',
+              status: u.status || 'ACTIVE',
+              masterId: u.masterId,
+              brokerId: u.brokerId,
+              subBrokerId: u.subBrokerId,
+              referralCode: u.referralCode,
+              node: u
+            }).catch(e => console.warn('[JIT Sync Notice]', e));
+
+            user = db.findUserByUserIdOrMobile(trimmed)
+              || db.findUserByUserIdOrMobile(u.id)
+              || db.findUserByUserIdOrMobile(u.userId || '')
+              || (u.email ? db.findUserByUserIdOrMobile(u.email) : undefined)
+              || (u.phone ? db.findUserByUserIdOrMobile(u.phone) : undefined);
+          }
+        }
+      } catch (jitErr: any) {
+        console.warn('[Auth Login] Central Admin JIT lookup notice:', jitErr?.message || jitErr);
+      }
+    }
+
+    if (!user && !pgUser) {
       auditService.log({
         actorId: 'anonymous',
         actorName: 'Unregistered User',
@@ -755,6 +819,49 @@ export class AuthService {
     }
 
     if (!isMatch) {
+      // Check Central Admin for recently updated password or JIT hash match
+      try {
+        const publicAdminUrl = (process.env.ADMIN_PANEL_URL || process.env.CENTRAL_ADMIN_URL || process.env.CENTRAL_ADMIN_BASE_URL || 'https://admin-dashbord-wxcq.onrender.com').replace(/\/+$/, '').replace(/\/api$/, '');
+        const hmacSecret = process.env.INTERNAL_COMMUNICATION_SECRET || process.env.INTERNAL_API_SECRET || process.env.S2S_SECRET || 'nextrade-internal-hmac-secret-2026';
+        const timestamp = Date.now().toString();
+        const lookupPath = '/api/internal/v1/auth/lookup-credential';
+        const bodyStr = JSON.stringify({ identifier: trimmed, email: cleanLower, phone: cleanDigits });
+        const canonical = `${timestamp}.POST.${lookupPath}.${bodyStr}`;
+        const signature = crypto.createHmac('sha256', hmacSecret).update(canonical).digest('hex');
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3000);
+        const lRes = await fetch(`${publicAdminUrl}${lookupPath}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Internal-Signature': signature,
+            'X-S2S-Signature': signature,
+            'X-Signature-SHA256': signature,
+            'X-Internal-Timestamp': timestamp,
+            'X-Timestamp': timestamp,
+            'X-Tenant-ID': 'vertex-default'
+          },
+          body: bodyStr,
+          signal: controller.signal
+        });
+        clearTimeout(timeout);
+        if (lRes.ok) {
+          const lData = await lRes.json().catch(() => ({}));
+          if (lData?.found && lData?.user?.passwordHash) {
+            const verifyJit = await PasswordHashUtil.verifyPassword(password, lData.user.passwordHash);
+            if (verifyJit.valid) {
+              isMatch = true;
+              user.password_hash = lData.user.passwordHash;
+              db.updateUserPassword(user.user_id, lData.user.passwordHash);
+              pgDb.query('UPDATE users SET password_hash = $1, is_verified = true WHERE id = $2 OR LOWER(user_id) = LOWER($3);', [lData.user.passwordHash, user.id, user.user_id]).catch(() => {});
+            }
+          }
+        }
+      } catch {}
+    }
+
+    if (!isMatch) {
       const lockResult = db.recordLoginFailure(user.user_id);
 
       if (lockResult.isLocked) {
@@ -793,6 +900,7 @@ export class AuthService {
     if (needsRehash) {
       const newHash = await PasswordHashUtil.hashPassword(password);
       db.updateUserPassword(user.user_id, newHash);
+      pgDb.query('UPDATE users SET password_hash = $1 WHERE id = $2 OR LOWER(user_id) = LOWER($3);', [newHash, user.id, user.user_id]).catch(() => {});
     }
 
     // 3. Check Account Statuses

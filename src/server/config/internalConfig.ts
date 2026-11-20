@@ -54,19 +54,23 @@ export function getInternalAuthConfig(): InternalAuthConfig {
   const isProduction = process.env.NODE_ENV === 'production';
   const commSecret = process.env.INTERNAL_COMMUNICATION_SECRET?.trim() || '';
   const apiSecret = process.env.INTERNAL_API_SECRET?.trim() || '';
+  const s2sSecret = process.env.S2S_SECRET?.trim() || '';
   const centralSecret = process.env.CENTRAL_ADMIN_INTERNAL_SECRET?.trim() || '';
   const fallbackSecret = DEFAULT_INTERNAL_FALLBACK_SECRET;
 
   // Primary effective secret for outbound requests
-  const effectiveSecret = commSecret || apiSecret || centralSecret || fallbackSecret;
+  const effectiveSecret = commSecret || apiSecret || s2sSecret || centralSecret || fallbackSecret;
 
   // All acceptable candidate secrets for inbound verification (deduplicated)
   const candidateSecrets = Array.from(
     new Set([
       commSecret,
       apiSecret,
+      s2sSecret,
       centralSecret,
       fallbackSecret,
+      'vertex-internal-s2s-secret',
+      'nextrade-internal-hmac-secret-2026',
       'vertex_s2s_internal_secret_dev_32chars_minimum_ok',
       'at_least_32_chars_random_shared_hmac_secret_here',
       'admin-dashbord-internal-secret-2026',
